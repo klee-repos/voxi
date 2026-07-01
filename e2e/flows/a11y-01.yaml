@@ -1,0 +1,80 @@
+# Maestro flow (iOS native) — a11y-01: reduce-motion swaps particle sequences for cross-fade; orb stilled.
+# Accessibility row (TEST-PLAN §12, surface W,I). On iOS the trigger is the OS "Reduce Motion" setting; the
+# app also mirrors it as an in-app toggle (settings.reduceMotion) so the behavior is testable deterministically
+# without scripting the Settings app. Under VOXI_TEST_MODE the processing orb exposes orb.state so we can
+# assert it is stilled (idle) rather than animating, and that particle motion is replaced by a cross-fade.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/a11y-01.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+a11y01@voxi.test"
+  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+---
+# Boot directly into an authed session that is mid-processing, so the animated orb/particle surface is on
+# screen and the reduce-motion swap is observable.
+- launchApp:
+    clearState: true
+    arguments:
+      voxiTestSeed: "a11y-01-processing"
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+# Enable reduce-motion via the in-app mirror of the OS setting.
+- tapOn:
+    id: "nav.settingsTab"
+- assertVisible:
+    id: "settings.screen"
+- assertVisible:
+    id: "settings.reduceMotion"
+- tapOn:
+    id: "settings.reduceMotion"
+# Kick off a capture so the processing screen (orb + particles) renders under reduce-motion.
+- tapOn:
+    id: "nav.threadsTab"
+- assertVisible:
+    id: "threads.screen"
+- tapOn:
+    id: "threads.captureCta"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- tapOn:
+    id: "camera.shutter"
+- assertVisible:
+    id: "processing.screen"
+    timeout: 10000
+# Reduce-motion contract: the orb is STILLED. The app surfaces the orb's animation state on the element's
+# accessibility VALUE (the same orb.state the Driver model reads as a structured attr: idle when stilled).
+# Maestro matches accessibility value via `text`, so a stilled orb reads "idle" and never the animated states.
+- assertVisible:
+    id: "processing.orb"
+- assertVisible:
+    id: "processing.orb"
+    text: "idle"
+# It must NOT be in any animated state under reduce-motion (no listening/thinking/speaking pulse).
+- assertNotVisible:
+    id: "processing.orb"
+    text: "thinking"
+- assertNotVisible:
+    id: "processing.orb"
+    text: "speaking"
+# The honest loading line still renders (the cross-fade path), so the screen stays alive without motion.
+- assertVisible:
+    id: "processing.loadingLine"
+# No brittle coordinate taps anywhere — every step locates by a registered testId.

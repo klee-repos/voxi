@@ -1,0 +1,13 @@
+{
+  "name": "@voxi/eve-g3-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "G3 boot spike: attempt eve off-Vercel boot. NOT a workspace member (isolated lockfile).",
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.4",
+    "@workflow/world-postgres": "^4.2.0",
+    "ai": "^7.0.9",
+    "eve": "^0.17.1"
+  }
+}

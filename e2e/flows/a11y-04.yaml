@@ -1,0 +1,86 @@
+# Maestro flow (iOS native) — a11y-04: Dynamic Type scales serif within clamps; 44pt min touch targets.
+# iOS/native-only row (TEST-PLAN §12, surface I). Dynamic Type is an iOS-only system axis (UIContentSizeCategory);
+# the web has no equivalent, so this is iOS-native. We launch at the LARGEST accessibility content-size and
+# assert that (a) the serif type scales but the layout still CLAMPS — no key control is pushed off-screen or
+# truncated to unusability — and (b) every primary control remains visible and tappable, i.e. honors the 44pt
+# minimum hit target. Under VOXI_TEST_MODE the app accepts uiContentSizeCategory as a launch argument so the
+# Dynamic Type axis is deterministic without scripting the iOS Settings app.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/a11y-04.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+a11y04@voxi.test"
+  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+---
+# Launch at the maximum accessibility Dynamic Type size — the worst case for clamping and touch targets.
+- launchApp:
+    clearState: true
+    arguments:
+      voxiTestSeed: "a11y-04"
+      uiContentSizeCategory: "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
+# Welcome screen at AXXXL: serif scales up, but the email field and primary CTA must remain on-screen and
+# tappable (clamp held — they did not overflow or get clipped away). Tapping them proves a real >=44pt target.
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- assertVisible:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.eulaAccept"
+- assertVisible:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.ageConfirm"
+- assertVisible:
+    id: "welcome.continueBtn"
+- tapOn:
+    id: "welcome.continueBtn"
+# OTP entry must also survive the largest type size.
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# Post-auth: the camera shutter (the most important touch target in the app) must remain visible and tappable
+# at AXXXL — a clamped, fixed-size hit area that Dynamic Type cannot shrink below 44pt.
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertVisible:
+    id: "camera.shutter"
+- tapOn:
+    id: "camera.shutter"
+# Reveal card: the serif title scales within its clamp and the single primary action stays reachable — assert
+# both the title and the primary CTA are present and the CTA is tappable at the largest type size.
+- assertVisible:
+    id: "reveal.card"
+    timeout: 15000
+- assertVisible:
+    id: "reveal.title"
+- assertVisible:
+    id: "reveal.primaryAction"
+- tapOn:
+    id: "reveal.primaryAction"
+# Settings list is the densest text surface; at AXXXL its rows must still expose tappable controls, proving the
+# 44pt minimum is honored even when each label has scaled up.
+- launchApp:
+    clearState: false
+    arguments:
+      voxiTestSeed: "a11y-04"
+      uiContentSizeCategory: "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
+- tapOn:
+    id: "nav.settingsTab"
+- assertVisible:
+    id: "settings.screen"
+- assertVisible:
+    id: "settings.signOut"
+- tapOn:
+    id: "settings.signOut"
+# Sign-out at AXXXL returns to a fully laid-out welcome screen (clamp survived a full round-trip).
+- assertVisible:
+    id: "welcome.emailInput"
+    timeout: 10000
+# No brittle coordinate taps anywhere — every step locates by a registered testId; every tap doubles as a
+# 44pt-hit-target assertion (Maestro fails the tap if the element's hit area is too small to resolve).

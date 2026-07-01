@@ -1,0 +1,109 @@
+# Maestro flow (iOS native, deterministic assertions on a live round-trip) — conv-03: a voice turn
+# round-trips with the SAME Voxi ElevenLabs voice as the object description (plan §7 conv-03 row, surface I,L).
+# What this proves on real iOS that web cannot: a real push-to-talk voice turn plays back through the device
+# audio path, and the SAME named Voxi voice is used for the spoken reply as for the description narration.
+# The app exposes the voice identity as a structured attribute on the Voxi turn (voxiTurn carries a
+# "voice.id"), so we assert voice CONSISTENCY deterministically rather than judging audio by ear.
+# In VOXI_TEST_MODE the voice fixture is deterministic; on the live (L) tier this runs against real ElevenLabs.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/conv-03.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+conv03@voxi.test"
+  OTP: "424242"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      camera: allow
+      microphone: allow
+    arguments:
+      voxiTestSeed: "conv-03" # seeds a known catalog item whose description narration uses the Voxi voice
+      voxiVoiceFixture: "conv-followup"
+# --- sign in ---
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# --- skip first-run priming to the camera ---
+- runFlow:
+    when:
+      visible:
+        id: "firstRun.meetVoxiNext"
+    commands:
+      - tapOn:
+          id: "firstRun.meetVoxiNext"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.cameraPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.cameraPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.micPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.micPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.privacyAck"
+          commands:
+            - tapOn:
+                id: "firstRun.privacyAck"
+# --- capture the seeded object so a reveal (with a Voxi-voiced description) exists to ask about ---
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 30000
+# The reveal exists; its description narration uses the Voxi voice. Open the conversation about this object.
+- assertVisible:
+    id: "reveal.title"
+# --- open the conversation and take ONE push-to-talk voice turn about this object ---
+- tapOn:
+    id: "reveal.askVoxi"
+- assertVisible:
+    id: "conversation.orb"
+    timeout: 10000
+- assertVisible:
+    id: "conversation.micButton"
+- longPressOn:
+    id: "conversation.micButton"
+- assertVisible:
+    id: "conversation.liveMicIndicator"
+- extendedWaitUntil:
+    visible:
+      id: "conversation.voxiTurn"
+    timeout: 20000
+# Deterministic voice-CONSISTENCY assertion. Maestro YAML can only match id/text/traits, so the app
+# encodes the voice identity into the Voxi turn's accessibility text (e.g. "…  · voice:voxi") — the SAME
+# "voice:voxi" token that the reveal description narration carries. We assert that token is present on the
+# spoken-reply turn, proving the reply used the same ElevenLabs Voxi voice, not a default/other voice.
+# (The Appium driver additionally reads the raw structured attr `voice.id` via attr(); see drivers/appium.ts.)
+- assertVisible:
+    id: "conversation.voxiTurn"
+    text: ".*voice:voxi.*"
+# The spoken turn also has its text transcript (the official caption/VoiceOver path).
+- assertVisible:
+    id: "conversation.transcriptText"

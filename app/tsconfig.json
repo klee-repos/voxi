@@ -1,0 +1,26 @@
+{
+  // Extends the repo-root base (../tsconfig.base.json) and layers the Expo/RN client config:
+  // expo-router typed routes, react-native-web JSX, and a path alias to packages/shared so the
+  // app imports the SAME contract types the BFF uses (NDJSON events, confidence, arbitration).
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "types": ["react", "expo-router"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@voxi/shared/*": ["../packages/shared/src/*"]
+    }
+  },
+  "include": [
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx"]
+}

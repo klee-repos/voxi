@@ -1,0 +1,17 @@
+{
+  "name": "@voxi/eve-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "bun agent/server.ts",
+    "server:front": "WORKFLOW_ROLE=front bun agent/server.ts",
+    "server:poller": "WORKFLOW_ROLE=poller bun agent/server.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.4",
+    "@workflow/world-postgres": "4.2.0",
+    "ai": "7.0.9",
+    "eve": "0.17.1"
+  }
+}

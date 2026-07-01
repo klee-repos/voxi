@@ -1,0 +1,21 @@
+{
+  // Shared compiler base for every workspace (app/, services/*, packages/*, e2e/).
+  // Workspaces extend this and add their own lib/jsx/paths. Kept minimal so it never
+  // surprises `tsc -b` (which drives `references`, not this file).
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": false,
+    "isolatedModules": true,
+    "noEmit": true
+  }
+}

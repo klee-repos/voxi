@@ -1,0 +1,83 @@
+{
+  "expo": {
+    "name": "Voxi",
+    "slug": "voxi",
+    "version": "0.0.0",
+    "scheme": "voxi",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "backgroundColor": "#0B0B14",
+    "splash": {
+      "backgroundColor": "#0B0B14",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.voxi.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Voxi uses the camera to photograph objects you want the Guide to identify. Point at objects, never people.",
+        "NSMicrophoneUsageDescription": "Voxi uses the microphone for voice conversations with the Guide. Sessions are recorded and transcribed; you can switch to keyboard at any time.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["audio"],
+        "NSAllowsLocalNetworking": true
+      }
+    },
+    "android": {
+      "package": "com.voxi.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B14"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B14",
+          "resizeMode": "contain"
+        }
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Voxi uses the camera to photograph objects for the Guide.",
+          "enableMicrophonePermission": true,
+          "microphonePermissionText": "Voxi uses the microphone for voice chat with the Guide."
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Voxi uses the camera for the Guide.",
+          "microphonePermission": "Voxi uses the microphone for voice chat with the Guide."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "clerkPublishableKey": "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}",
+      "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}",
+      "pipecatConnectUrl": "${EXPO_PUBLIC_PIPECAT_CONNECT_URL}"
+    }
+  }
+}

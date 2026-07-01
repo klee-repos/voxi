@@ -1,0 +1,18 @@
+{
+  "$comment": "Project-scoped MCP servers. 'grafana' lets an agent (Claude Code) query Loki logs + Tempo traces for RCA. Point GRAFANA_URL at your Grafana Cloud instance (https://<org>.grafana.net) or the local stack, and set a service-account token. See docs/observability.md.",
+  "mcpServers": {
+    "grafana": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "GRAFANA_URL",
+        "-e", "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        "mcp/grafana", "-t", "stdio"
+      ],
+      "env": {
+        "GRAFANA_URL": "${GRAFANA_URL:-http://host.docker.internal:3000}",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "${GRAFANA_SERVICE_ACCOUNT_TOKEN}"
+      }
+    }
+  }
+}

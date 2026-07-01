@@ -1,0 +1,68 @@
+# Voxi local observability stack — the OFFLINE analogue of Grafana Cloud.
+#
+# Prod ships OTLP straight to Grafana Cloud (no collector to run). This stack is only for local dev when you
+# want a queryable UI without touching the cloud: it stands up an OTel Collector + Loki (logs) + Tempo
+# (traces) + Grafana, all on disposable volumes. Apps target it by pointing at the collector:
+#
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 ./scripts/dev.sh
+#
+# Bring it up:   docker compose -f infra/observability/docker-compose.yml up -d
+# Grafana:       http://localhost:3000   (anonymous admin; no login)
+# Tear down:     docker compose -f infra/observability/docker-compose.yml down       (add -v to wipe data)
+name: voxi-observability
+
+services:
+  # Single OTLP ingress (matches Grafana Cloud's one-gateway shape). Fans logs → Loki, traces → Tempo.
+  # Grafana Alloy is Grafana's OpenTelemetry Collector distribution; we use it instead of
+  # otel-collector-contrib because that image is `FROM scratch` and fails to exec on some Docker Desktop /
+  # Rosetta setups, whereas Alloy's Debian-based image runs everywhere.
+  alloy:
+    image: grafana/alloy:v1.5.1
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      - ./config/alloy.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "4318:4318" # OTLP/HTTP — what @voxi/telemetry and the Python twin post to
+      - "4317:4317" # OTLP/gRPC
+      - "12345:12345" # Alloy UI (http://localhost:12345)
+    depends_on: [loki, tempo]
+
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./config/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_FEATURE_TOGGLES_ENABLE: "traceqlEditor"
+    volumes:
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on: [loki, tempo]
+
+volumes:
+  loki-data: {}
+  tempo-data: {}
+  grafana-data: {}

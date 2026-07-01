@@ -1,0 +1,69 @@
+# Maestro flow (iOS native) — sub-03: RevenueCat paywall renders; restore purchases.
+# iOS/native-only row (TEST-PLAN §11, surface I): StoreKit/RevenueCat IAP only exists on device. Web has no
+# App Store, so the paywall presentation + "Restore Purchases" round-trip can only be exercised here. Under
+# VOXI_TEST_MODE the app binds RevenueCat to the StoreKit sandbox / a deterministic test offering, so the
+# paywall and restore are reproducible without a live App Store account.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/sub-03.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+sub03@voxi.test"
+  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+---
+# Seed a FREE-tier user who has already exhausted their scan cap, so a paid action triggers the paywall.
+- launchApp:
+    clearState: true
+    arguments:
+      voxiTestSeed: "sub-03-free-capped"
+# Sign in (reuse the auth-01 deterministic pattern) to reach an authed session.
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+# A capped free user attempting a scan hits the entitlement gate → the RevenueCat paywall must present.
+- tapOn:
+    id: "camera.shutter"
+- assertVisible:
+    id: "paywall.screen"
+    timeout: 10000
+# The paywall renders its in-persona limit copy and BOTH the subscribe and restore controls (RevenueCat
+# requires a visible Restore affordance for App Store review compliance).
+- assertVisible:
+    id: "paywall.limitMessage"
+- assertVisible:
+    id: "paywall.subscribeBtn"
+- assertVisible:
+    id: "paywall.restoreBtn"
+# Restore-purchases round-trip: tapping Restore calls RevenueCat's restoreTransactions. Under VOXI_TEST_MODE
+# the sandbox returns a prior entitlement, so the paywall dismisses and we land back on a usable camera —
+# proving restore actually re-granted access (not just spun a sandbox sheet).
+- tapOn:
+    id: "paywall.restoreBtn"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 15000
+- assertNotVisible:
+    id: "paywall.screen"
+# Confirm the restored entitlement is reflected in settings (active subscription status), not just hidden UI.
+- tapOn:
+    id: "nav.settingsTab"
+- assertVisible:
+    id: "settings.screen"
+- assertVisible:
+    id: "settings.subscriptionStatus"
+# No brittle coordinate taps anywhere — every step locates by a registered testId.

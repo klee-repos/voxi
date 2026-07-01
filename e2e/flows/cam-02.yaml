@@ -1,0 +1,79 @@
+# Maestro flow (iOS native, deterministic) — cam-02: camera-permission-DENIED state → in-persona banner
+# with a recovery CTA that deep-links to iOS Settings (plan §10.2 screen 3 permission-denied state).
+# What this proves on real iOS that web cannot: a true OS-level camera denial drives our denied banner,
+# and our "Open Settings" CTA invokes the real UIApplication openSettingsURLString into the Settings app.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/cam-02.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+cam02@voxi.test"
+  OTP: "424242"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      camera: deny # the OS denies camera up front — the app must degrade to its recovery state, not crash
+      microphone: unset
+    arguments:
+      voxiTestSeed: "cam-02"
+# --- sign in ---
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# --- first-run priming: user accepts our camera primer, but the OS-level grant is DENIED ---
+- assertVisible:
+    id: "firstRun.meetVoxiNext"
+    timeout: 10000
+- tapOn:
+    id: "firstRun.meetVoxiNext"
+- assertVisible:
+    id: "firstRun.cameraPrimeAllow"
+- tapOn:
+    id: "firstRun.cameraPrimeAllow"
+# The denied permission was preset on launch, so the camera screen shows the recovery state, not a viewfinder.
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+# Permission-denied banner (in-persona) is shown and the live shutter is NOT available.
+- assertVisible:
+    id: "camera.permissionDeniedBanner"
+- assertNotVisible:
+    id: "camera.shutter"
+# Recovery CTA → opens iOS Settings (deep link to the app's settings pane via openSettingsURLString).
+- assertVisible:
+    id: "camera.openSettings"
+- tapOn:
+    id: "camera.openSettings"
+# Maestro hands off to the real Settings app; assert we left our app for Settings, then return.
+- assertVisible:
+    text: "Settings"
+    timeout: 10000
+# Re-launch the app WITHOUT clearing state, now granting camera (simulating the user toggling it on in
+# Settings). The recovery is complete: banner gone, live shutter restored.
+- launchApp:
+    clearState: false
+    permissions:
+      camera: allow
+    arguments:
+      voxiTestSeed: "cam-02"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertNotVisible:
+    id: "camera.permissionDeniedBanner"
+- assertVisible:
+    id: "camera.shutter"

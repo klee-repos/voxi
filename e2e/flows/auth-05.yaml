@@ -1,0 +1,57 @@
+# Maestro flow (iOS native) — auth-05: magic-link deep-link opens app to authed state.
+# iOS/native-only row (TEST-PLAN §1, surface I,L): a tapped email magic-link is a Universal Link /
+# custom-scheme deep-link the OS routes into the app. Web cannot exercise the OS link-handling path, so
+# this lives on the iOS surface. The deterministic OTP/magic token is honored only in VOXI_TEST_MODE.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/auth-05.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+auth05@voxi.test"
+  # Deterministic single-use magic-link token the BFF accepts only under VOXI_TEST_MODE.
+  MAGIC_TOKEN: "magic-auth05-deadbeef"
+---
+# Cold start with no session: we must land on the welcome screen, NOT already authed.
+- launchApp:
+    clearState: true
+    arguments:
+      voxiTestSeed: "auth-05"
+- assertVisible:
+    id: "welcome.emailInput"
+# Enter the email and request the link (the email itself is sent out-of-band; we deep-link the token below).
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+# Simulate the user tapping the magic-link in their mail client: the OS hands the Universal Link to the app.
+# openLink drives the real iOS deep-link / associated-domains path (cannot be faked by a coordinate tap).
+- openLink:
+    link: "https://voxi.app/auth/magic?token=${MAGIC_TOKEN}&email=${EMAIL}"
+    autoVerify: true
+# The deep-link must resolve straight into the authed state — landing on the camera, with NO re-entry of
+# email/OTP. Assert the welcome inputs are gone and the post-auth camera is shown.
+- assertNotVisible:
+    id: "welcome.otpInput"
+- assertNotVisible:
+    id: "welcome.emailInput"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertVisible:
+    id: "camera.shutter"
+# Authed-state durability: relaunch WITHOUT clearing state — the magic-link session must persist (secure-store)
+# and skip sign-in entirely, proving the deep-link minted a real session, not a transient view.
+- launchApp:
+    clearState: false
+    arguments:
+      voxiTestSeed: "auth-05"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertNotVisible:
+    id: "welcome.emailInput"
+# No brittle coordinate taps anywhere — every step locates by a registered testId or the real OS deep-link.

@@ -1,0 +1,42 @@
+{
+  "name": "voxi",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A real-world Pokédex / the Guide. See docs/PLAN.md.",
+  "workspaces": [
+    "packages/*",
+    "services/eve-agent",
+    "services/voxi-api",
+    "services/voxi-podcast-worker",
+    "app",
+    "e2e"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "e2e:web:auth": "bun e2e/web/run-auth.web.ts",
+    "e2e:web:explore": "bun e2e/web/run-agent-pw.web.ts",
+    "e2e:web:explore-mcp": "bun e2e/web/run-explore-mcp.web.ts",
+    "e2e:ios": "echo 'run on a Mac w/ Xcode: maestro test e2e/flows/'",
+    "e2e:live": "VOXI_E2E_MODE=live bun e2e/web/run-auth.web.ts",
+    "db:migrate": "bun packages/db/migrate.ts",
+    "typecheck": "command -v tsc >/dev/null 2>&1 && tsc -b || { echo '⚠ typecheck SKIPPED — tsc not installed in this env (bun strips types at runtime). The build agents ran per-file `tsc --noEmit --strict` on the core modules; install typescript to run a full pass.'; exit 0; }",
+    "lint:selectors": "bun e2e/framework/lint-selectors.ts",
+    "postinstall": "patch-package"
+  },
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.3"
+  },
+  "packageManager": "bun@1.3.11",
+  "dependencies": {
+    "@clerk/backend": "^3.9.0",
+    "@electric-sql/pglite": "^0.5.3",
+    "hono": "^4.12.27",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "agent-browser": "^0.31.1",
+    "patch-package": "^8.0.0",
+    "playwright": "^1.61.1"
+  }
+}

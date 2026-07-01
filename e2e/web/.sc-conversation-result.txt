@@ -1,0 +1,15 @@
+web E2E — conversation (real BFF + framework PlaywrightDriver):
+  PASS conv-02: lands on the full-screen conversation orb
+  PASS conv-02: defaults to voice — mic visible, keyboard input hidden
+  PASS conv-02: voice turn — press shows live-mic, release writes voxiTurn + a11y transcript
+  PASS conv-02: in-flight turn survives the toggle to keyboard (not discarded)
+  PASS conv-02: keyboard mode — text input + send shown, mic hidden, no live-mic
+  PASS conv-02: typed turn appends to the same transcript (in-flight continuity)
+  PASS conv-02: toggle back to voice restores the mic surface
+  PASS conv-06: capture minted a durable thread id (real /api/v1/threads)
+  PASS conv-06: BFF persists the thread (durable continuation token, resumes:true)
+  PASS conv-06: reopen via UI — reveal card replays the durable thread (resumes marker)
+  PASS conv-06: BFF replays a byte-identical record on every reopen (no drift)
+  PASS conv-06: replay is owner-scoped — a foreign principal cannot reopen the conversation
+
+WEB SC-CONVERSATION E2E GREEN

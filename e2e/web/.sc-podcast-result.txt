@@ -1,0 +1,16 @@
+web E2E (podcast, real BFF + framework PlaywrightDriver):
+  PASS pod-01: player opens with an honest "composing" wait (no instant fake ready)
+  PASS pod-01: composing → ready transition renders the episode (worker status proxied, not faked)
+  PASS pod-01: audio actually PLAYS (currentTime advances), not just a play icon
+  PASS pod-02: two-host transcript renders multiple lines
+  PASS pod-02: speakers are DISTINCT — both ARLO and MAVE present (data-speaker contract)
+  PASS pod-02: distinct speakers render with distinct styling (visual separation, not just a label)
+  PASS pod-04: report-episode control is present
+  PASS pod-04: reporting the episode pulls it pending review (real reports route)
+  PASS pod-01: the first generation minted a real token and was NOT an idempotent replay
+  PASS pod-03: same item is in the Collection and revisits to the SAME thread
+  PASS pod-03: re-generating the SAME item does NOT mint a second generation token (cached replay)
+  PASS pod-03: cached replay did NOT decrement the paid entitlement a second time
+  PASS pod-03: the replayed view still renders a playable episode (cached audio, no re-render)
+
+WEB PODCAST E2E GREEN

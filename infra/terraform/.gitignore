@@ -1,0 +1,10 @@
+# Terraform working artifacts — never commit.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.auto.tfvars
+crash.log
+override.tf
+override.tf.json

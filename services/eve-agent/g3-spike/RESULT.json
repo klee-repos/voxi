@@ -1,0 +1,30 @@
+{
+  "c0": "pass",
+  "stages": [
+    {
+      "stage": "1.IMPORT eve",
+      "ok": true,
+      "detail": "defineAgent=true defineTool=true (no @vercel/* runtime needed)"
+    },
+    {
+      "stage": "2.WORLD start",
+      "ok": true,
+      "detail": "createWorld().start() up: graphile-worker poller + LISTEN/NOTIFY, plain Postgres"
+    },
+    {
+      "stage": "3.SESSION+ACL",
+      "ok": true,
+      "detail": "runId=g3_mr196g80_wywdpd owner-streams=true intruder-denied=true"
+    },
+    {
+      "stage": "4.TOOLS",
+      "ok": true,
+      "detail": "safety=allow id=\"2008 Cannondale SuperSix EVO\" band=CONFIDENT route=reveal unsupported=[]"
+    },
+    {
+      "stage": "5.STREAMED-TURN",
+      "ok": true,
+      "detail": "durable round-trip: wrote 4 events, read 4 valid NDJSON lines (token/band/done=true/true/true); stream.done=true tailIndex=3; reconnect bytes full=316 from-idx-2=107"
+    }
+  ]
+}

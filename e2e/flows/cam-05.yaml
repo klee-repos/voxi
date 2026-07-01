@@ -1,0 +1,89 @@
+# Maestro flow (iOS native, deterministic) — cam-05: face-dominant frame → "objects, not people" refusal,
+# NO upload (plan §2 cam-05 row + §8 safety; surface I,L).
+# What this proves on real iOS that web cannot: the native on-device face-dominance gate fires at capture
+# time and short-circuits BEFORE any signed-URL upload or AI spend. In VOXI_TEST_MODE the camera is fed a
+# deterministic face-dominant seed image so the refusal path is reproducible.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/cam-05.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+cam05@voxi.test"
+  OTP: "424242"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      camera: allow
+      microphone: allow
+    arguments:
+      voxiTestSeed: "cam-05-face-dominant" # seeds a face-dominant capture fixture in test mode
+# --- sign in ---
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# --- skip first-run priming to the live camera ---
+- runFlow:
+    when:
+      visible:
+        id: "firstRun.meetVoxiNext"
+    commands:
+      - tapOn:
+          id: "firstRun.meetVoxiNext"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.cameraPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.cameraPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.micPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.micPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.privacyAck"
+          commands:
+            - tapOn:
+                id: "firstRun.privacyAck"
+# --- shutter on a face-dominant frame ---
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertVisible:
+    id: "camera.shutter"
+- tapOn:
+    id: "camera.shutter"
+# Refusal: the global safety refusal ("objects, not people") is shown. This is the safety surface, NOT a
+# confidence chip — it must render distinctly (see global.safetyRefusal in the registry).
+- assertVisible:
+    id: "global.safetyRefusal"
+    timeout: 10000
+# No upload, no spend: we never reach the processing screen or a reveal card on a refused capture.
+- assertNotVisible:
+    id: "processing.screen"
+- assertNotVisible:
+    id: "reveal.card"
+# We remain on the camera so the user can immediately reframe on an object (a retake hint guides them).
+- assertVisible:
+    id: "camera.screen"
+- assertVisible:
+    id: "camera.retakeHint"

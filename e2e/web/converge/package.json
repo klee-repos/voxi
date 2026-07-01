@@ -1,0 +1,15 @@
+{
+  "name": "voxi-converge-scope",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Isolated converge scope: stands up ONE real Expo screen (app/app/reveal.tsx) under react-native-web in Playwright, behind the SAME testIDs, talking to the real BFF. Deliberately NOT a workspace member (it would inherit app/'s unresolvable Expo-pinned ranges); it owns its own node_modules so `bun add react-native-web react-dom react` works in scope per the task brief.",
+  "dependencies": {
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native-web": "~0.21.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

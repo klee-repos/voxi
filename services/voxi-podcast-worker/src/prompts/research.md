@@ -1,0 +1,1 @@
+Research the object "{{subject}}". Using web search, give 5–6 SPECIFIC, verifiable facts about it — its make/model/generation, year, key specifications, provenance, and notability. Each fact must be the kind you could cite. Return ONLY a JSON array: [{"claim": "<one factual sentence>"}]. No prose.

@@ -1,0 +1,77 @@
+# Maestro flow (iOS native, deterministic) — cam-01: first-run "Meet Voxi" + camera/mic permission
+# priming shown BEFORE the OS prompt (plan §10.2 screen 2 / D2/F1).
+# What this proves on real iOS that web cannot: our in-app priming UI renders first, and only when the
+# user accepts our primer do we trigger the real iOS permission prompt (which Maestro grants natively).
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/cam-01.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+cam01@voxi.test"
+  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true # force the first-run experience (no persisted session, no prior grants)
+    permissions:
+      camera: unset # OS has not been asked yet — our primer must appear before any system dialog
+      microphone: unset
+    arguments:
+      voxiTestSeed: "cam-01"
+# --- sign in (same managed auth path as auth-01) ---
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# --- first-run "Meet Voxi" persona intro precedes any permission UI ---
+- assertVisible:
+    id: "firstRun.meetVoxiNext"
+    timeout: 10000
+- tapOn:
+    id: "firstRun.meetVoxiNext"
+# --- OUR camera primer is visible BEFORE the OS prompt; assert it, then accept it ---
+- assertVisible:
+    id: "firstRun.cameraPrimeAllow"
+- tapOn:
+    id: "firstRun.cameraPrimeAllow"
+# Only NOW does the real iOS camera dialog fire — Maestro answers the system prompt natively.
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn: "Allow"
+# --- OUR mic primer (mic = voice chat) precedes the OS mic dialog too ---
+- assertVisible:
+    id: "firstRun.micPrimeAllow"
+- tapOn:
+    id: "firstRun.micPrimeAllow"
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn: "Allow"
+# "objects, not people" + opt-in photo-sharing disclosure are acknowledged before landing on the camera.
+- assertVisible:
+    id: "firstRun.privacyAck"
+- tapOn:
+    id: "firstRun.privacyAck"
+# Lands on the live camera with a working shutter (priming flow complete, permissions granted).
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertVisible:
+    id: "camera.shutter"
+# No brittle coordinate taps anywhere — every in-app step locates by a registered testId.

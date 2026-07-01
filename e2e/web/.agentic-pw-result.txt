@@ -1,0 +1,3 @@
+agentic exploration over PlaywrightDriver (real app):
+  PASS agent navigated sign-in → camera (by perception, asserted deterministically)
+AGENTIC (Playwright) E2E GREEN

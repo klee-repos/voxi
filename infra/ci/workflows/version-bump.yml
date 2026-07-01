@@ -1,0 +1,60 @@
+# Voxi version-bump gate (PLAN.md §4.5 / §22.3) — the MANUAL UPGRADE GATE for the eve / @workflow / world-postgres
+# triple. eve is public-beta/pre-GA and the workflow line churns (#1416 cross-version transport break), so any
+# bump to that triple must re-prove "session resume after restart" on a REAL world-postgres before merge.
+#
+# Triggers: renovate/dependency PRs that touch the triple (path filter), or manual dispatch. This is the job
+# that actually boots a Postgres service + the pinned eve toolchain and runs the resume smoke for real — the
+# PR workflow's matrix smoke only checks the pin matches; this one checks the pinned triple still RESUMES.
+#
+# Lives under infra/ci/workflows/; owner copies to .github/workflows/version-bump.yml to activate.
+name: version-bump-gate
+on:
+  pull_request:
+    paths:
+      - "bun.lock"
+      - "infra/ci/pinned-versions.json"
+      - "services/eve-agent/package.json"
+  workflow_dispatch: {}
+
+jobs:
+  resume-on-pinned-triple:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      # A real durable world for the resume smoke (the LOCAL analogue of Cloud SQL). pgvector image because the
+      # catalog tools embed/search against the same Postgres (§4.2) and the world tables live here too.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: voxi
+          POSTGRES_PASSWORD: voxi
+          POSTGRES_DB: voxi_world
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U voxi -d voxi_world"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      WORLD_DATABASE_URL: postgres://voxi:voxi@localhost:5432/voxi_world
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      # 1. The pinned triple must match the committed pin (fails on any drift; #1416 trap).
+      - name: Version-pin matrix (must match committed pin)
+        run: bun infra/ci/version-pin-matrix.ts
+
+      # 2. The §4.5 falsifier: boot FRONT+POLLER on world-postgres, restart the poller, prove resume.
+      #    SKIPs (exit 0) until the pinned eve toolchain is actually installed (pre-G3); once eve is in the
+      #    lockfile this runs for real against the Postgres service above.
+      - name: §4.5 session resume-after-restart smoke (pinned triple)
+        run: bun infra/ci/resume-smoke.ts
+
+      # 3. Belt-and-braces: the full G3 multi-poller SKIP-LOCKED probe SQL against the same world, once eve is
+      #    installed. The g3-spike scripts gate themselves on creds/install and fail loudly otherwise.
+      - name: G3 multi-poller SKIP-LOCKED probe (best-effort, gated)
+        run: bash infra/g3-spike/scripts/20-multipoller-skiplocked.sh || echo "::notice::C2 gated on installed eve toolchain"

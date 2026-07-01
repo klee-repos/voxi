@@ -1,0 +1,79 @@
+# Voxi PR CI — runs on every pull request (PLAN.md §14 test strategy; mirrors IMPLEMENTATION-STATUS "verified
+# runs" so the green-here surface stays green in CI). This file lives under infra/ci/workflows/ (infra is the
+# only tree this workflow owns); to activate it, the repo owner copies/symlinks it to .github/workflows/pr.yml.
+#
+# What runs here WITHOUT creds (the web/backend tier, IMPLEMENTATION-STATUS §"Verification boundary"):
+#   - bun test                (50+ unit/contract tests: honesty gate, arbitration, metering, ACL, intake, ...)
+#   - the web E2E runners      (real Chromium -> real DOM testIDs -> real BFF in VOXI_TEST_MODE + replayed tapes)
+#   - bun run lint:selectors   (no coordinate taps / unstable selectors in committed scenarios)
+# The cred-gated live tier (real Gemini/Vision/ElevenLabs/Clerk, G1/G3 durability) runs in a separate gated job.
+name: pr
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VOXI_TEST_MODE: "1"          # the BFF only honors x-voxi-test-seed when this is set (deterministic ids/clock)
+      VOXI_E2E_MODE: replay        # vendor tapes replayed byte-for-byte; never live in PR CI
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun (pinned)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"    # matches root package.json packageManager (reproducible installs)
+
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit + contract tests (bun test)
+        run: bun test
+
+      - name: Selector lint (no brittle/coordinate selectors)
+        run: bun run lint:selectors
+
+      # Web E2E runners — each boots the real BFF in-process + drives a real Chromium. These are the exact
+      # commands proven green in this repo (IMPLEMENTATION-STATUS "Verified runs"). Add a runner here when a
+      # new e2e/web/run-*.web.ts lands green.
+      - name: Web E2E — auth / id / subscription golden flows
+        run: bun e2e/web/run-auth.web.ts
+
+      - name: Web E2E — agentic exploration (Playwright planner)
+        run: bun e2e/web/run-agent-pw.web.ts
+
+      - name: Web E2E — coverage completeness critic
+        run: bun e2e/web/run-coverage.web.ts
+
+  # Version-pin matrix smoke (§4.5) — fast, runs on every PR. It is a no-op-by-design until G3 records the
+  # pinned (eve, @workflow/*, world-postgres) triple, then it hard-fails any drift (#1416). Kept a separate job
+  # so a future pin bump shows up as its own red check, not buried in the test matrix.
+  version-pin-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+      - name: Version-pin matrix smoke (eve + @workflow/* + world-postgres)
+        run: bun infra/ci/version-pin-matrix.ts
+      - name: §4.5 resume-after-restart smoke (skips pre-pin / without a world)
+        run: bun infra/ci/resume-smoke.ts

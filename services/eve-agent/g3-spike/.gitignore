@@ -1,0 +1,12 @@
+# The G3 boot spike installs the REAL eve toolchain in an isolated scope (its own package.json + lockfile,
+# NOT a root workspace member). node_modules is large and host-specific — never committed. The install is
+# reproducible from package.json via `bun add` / `bun install` (see RUNBOOK.md).
+node_modules/
+
+# bun's isolated lockfile for the spike — regenerated on install; not the root lockfile.
+bun.lock
+
+# Per-run boot artifacts are recorded into the committed RESULT.json by hand (RUNBOOK §reproduce); the raw
+# stdout capture is transient.
+*.out
+out/

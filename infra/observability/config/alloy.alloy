@@ -1,0 +1,31 @@
+// Grafana Alloy — one OTLP ingress, fanned out to Loki (logs) and Tempo (traces).
+// This is the local analogue of the Grafana Cloud OTLP gateway. Apps post OTLP/HTTP to :4318.
+
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    logs   = [otelcol.exporter.otlphttp.loki.input]
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+// Loki 3.x ingests OTLP natively at /otlp.
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://loki:3100/otlp"
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

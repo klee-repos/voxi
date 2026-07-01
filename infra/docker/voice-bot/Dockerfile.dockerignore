@@ -1,0 +1,18 @@
+# Per-Dockerfile ignore (BuildKit: <dockerfile-path>.dockerignore). Build context is the repo root, so trim it
+# hard — only services/voice-bot (the Python package) is COPY'd in. Kept under infra/ (no repo-root file).
+**/node_modules
+**/.git
+**/dist
+**/build
+**/*.tsbuildinfo
+**/.expo
+**/coverage
+**/__pycache__
+**/.venv
+**/.pytest_cache
+app/
+e2e/
+packages/
+services/eve-agent/
+services/voxi-api/
+services/voxi-podcast-worker/

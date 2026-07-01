@@ -1,0 +1,27 @@
+# terraform.tfvars.example — copy to terraform.tfvars and fill in.
+# NEVER put secret VALUES here. Secret containers are created empty; add their
+# versions with `gcloud secrets versions add` out-of-band (see README).
+
+project_id = "my-voxi-project"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# Images: CI builds + pushes these to Artifact Registry. PROJECT is substituted
+# with project_id automatically if you keep the default token.
+image_voxi_api       = "us-central1-docker.pkg.dev/PROJECT/voxi/voxi-api:v0.1.0"
+image_eve_front      = "us-central1-docker.pkg.dev/PROJECT/voxi/eve-agent:v0.1.0"
+image_eve_poller     = "us-central1-docker.pkg.dev/PROJECT/voxi/eve-agent:v0.1.0"
+image_podcast_worker = "us-central1-docker.pkg.dev/PROJECT/voxi/voxi-podcast-worker:v0.1.0"
+
+# eng-F1 split — the eve poller is NON-serverless.
+# "worker_pool" (Cloud Run Worker Pool, preferred) or "gce" (size-pinned MIG).
+eve_poller_runtime        = "worker_pool"
+# Keep at 1 until G3 confirms SELECT ... FOR UPDATE SKIP LOCKED lease semantics.
+eve_poller_instance_count = 1
+
+# DB sizing (low end of the §11 cost envelope).
+db_tier         = "db-custom-1-3840"
+db_disk_size_gb = 20
+
+# AlloyDB stays OFF until the eng-F4 measured trigger fires.
+enable_alloydb = false

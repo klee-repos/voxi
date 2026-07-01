@@ -1,0 +1,98 @@
+# Maestro flow (iOS native, deterministic) — conv-05: voice-minutes-exhausted → HARD cutoff with an
+# in-persona message + the RevenueCat paywall (plan §10.2 voice-minutes-exhausted state / §13 conv-05 row,
+# surface I,L).
+# What this proves on real iOS that web cannot: the metering hard-cutoff fires mid-voice on device and
+# surfaces the native RevenueCat paywall. In VOXI_TEST_MODE the user is seeded at zero remaining voice
+# minutes so the cutoff is deterministic and immediate (no waiting out real minutes, no live charge).
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/conv-05.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+conv05@voxi.test"
+  OTP: "424242"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      camera: allow
+      microphone: allow
+    arguments:
+      voxiTestSeed: "conv-05-minutes-exhausted" # seeds a free-tier user with 0 voice minutes remaining
+      voxiVoiceFixture: "conv-greeting"
+# --- sign in ---
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# --- skip first-run priming to the camera ---
+- runFlow:
+    when:
+      visible:
+        id: "firstRun.meetVoxiNext"
+    commands:
+      - tapOn:
+          id: "firstRun.meetVoxiNext"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.cameraPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.cameraPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.micPrimeAllow"
+          commands:
+            - tapOn:
+                id: "firstRun.micPrimeAllow"
+      - runFlow:
+          when:
+            visible:
+              id: "firstRun.privacyAck"
+          commands:
+            - tapOn:
+                id: "firstRun.privacyAck"
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+# --- open the conversation and attempt a push-to-talk turn with 0 minutes remaining ---
+- tapOn:
+    id: "nav.openConversation"
+- assertVisible:
+    id: "conversation.orb"
+    timeout: 10000
+- assertVisible:
+    id: "conversation.micButton"
+- longPressOn:
+    id: "conversation.micButton"
+# HARD cutoff: instead of a Voxi voice turn, the in-persona minutes-exhausted message is shown — and no
+# Voxi voice turn is produced (the turn is refused at the meter, refusals don't burn minutes).
+- assertVisible:
+    id: "conversation.minutesExhausted"
+    timeout: 10000
+- assertNotVisible:
+    id: "conversation.voxiTurn"
+# The exhausted state routes the user to the RevenueCat paywall with its limit message + subscribe/restore.
+- assertVisible:
+    id: "paywall.screen"
+    timeout: 10000
+- assertVisible:
+    id: "paywall.limitMessage"
+- assertVisible:
+    id: "paywall.subscribeBtn"
+- assertVisible:
+    id: "paywall.restoreBtn"

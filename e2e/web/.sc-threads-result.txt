@@ -1,0 +1,21 @@
+web E2E — threads/collection (real BFF + framework PlaywrightDriver):
+  PASS thread-01: lands on the collection screen
+  PASS thread-01: empty-collection state is shown
+  PASS thread-01: empty copy reads "0 of ∞"
+  PASS thread-01: a capture CTA is present and visible
+  PASS thread-01: the grid holds no items yet
+  PASS thread-01: BFF /v1/threads returns an empty collection
+  PASS thread-01: capture CTA opens the camera
+  PASS thread-02: populated grid is shown (empty state gone)
+  PASS thread-02: grid renders one item per capture
+  PASS thread-02: every item is auto-titled (non-empty, the "Capture ·" title)
+  PASS thread-02: every item carries a durable thread id (data-thread.id)
+  PASS thread-02: BFF returns threads newest-first with a createdAt per thread
+  PASS thread-02: grid order matches the BFF newest-first order
+  PASS thread-03: revisiting an item opens its reveal card
+  PASS thread-03: the revisited card is marked as resuming a durable session
+  PASS thread-03: BFF GET /v1/threads/:id resumes the SAME durable session
+  PASS thread-03: the durable session belongs ONLY to its owner (cross-user revisit denied)
+  PASS thread-03: history survives a fresh app load (durable, not in-page state)
+
+WEB SC-THREADS E2E GREEN

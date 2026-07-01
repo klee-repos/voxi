@@ -1,0 +1,3 @@
+# G3 run artifacts — recorded per-run, never committed (out/result.json, out/C*.json, out/pinned-versions.json).
+# The pinned triple, once real, is copied to infra/ci/pinned-versions.json (committed) — see RUNBOOK §4 / infra/ci.
+out/

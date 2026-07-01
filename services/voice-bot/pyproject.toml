@@ -1,0 +1,37 @@
+[project]
+name = "voxi-voice"
+version = "0.1.0"
+description = "Voxi realtime voice pipeline (Pipecat SmallWebRTC cascade) — PLAN §6.3"
+requires-python = ">=3.10"
+# Pipecat + vendor SDKs are OPTIONAL (credential/media-stack-gated). The core pipeline + the test suite run
+# with NO third-party deps beyond pytest; install the live extras only on a real deploy.
+dependencies = []
+
+[project.optional-dependencies]
+# The credentialed live tier. Not installed in the no-cred sandbox; the transport seam stays import-safe.
+# Verified installing cleanly on macOS/Python 3.12: pipecat-ai 1.4.0 (with the deepgram/elevenlabs/google/
+# silero/webrtc extras) pulls aiortc, aiohttp, onnxruntime, google-cloud-speech/texttospeech, etc. The
+# underlying vendor SDKs are also listed directly so the transport-agnostic providers (DeepgramSTT/GeminiLLM/
+# ElevenLabsTTS in providers.py) work even without a full Pipecat install.
+live = [
+    "pipecat-ai[deepgram,elevenlabs,google,silero,webrtc]",  # ==1.4.0 verified
+    "deepgram-sdk",   # ==7.4.0 — batch + streaming STT
+    "elevenlabs",     # ==2.56.0 — Flash v2.5 TTS
+    "google-genai",   # ==1.75.0 (pinned by pipecat) — Vertex Gemini
+    "aiortc",         # ==1.14.0 — SmallWebRTC media
+    "fastapi",        # ==0.138.2 — /offer signalling server
+    "uvicorn[standard]",  # ==0.49.0 — ASGI server
+    "httpx",          # ==0.28.1 — BFF bridge transport
+]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["voxi_voice*"]

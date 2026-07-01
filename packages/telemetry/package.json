@@ -1,0 +1,9 @@
+{
+  "name": "@voxi/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "Structured logging + OTLP trace/log export (stdout-first, Grafana-Cloud-ready). Zero runtime deps.",
+  "dependencies": {}
+}

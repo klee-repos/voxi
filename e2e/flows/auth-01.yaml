@@ -1,0 +1,37 @@
+# Maestro flow (iOS native, deterministic) — auth-01: first launch → email → OTP → camera.
+# Maestro is the "Playwright for mobile": resilient id-based selectors, low-flake, fast to author/scale.
+# This is the iOS-native equivalent of the web Playwright auth scenario; both use the same testIds.
+# Run on a Mac w/ Xcode:  maestro test e2e/flows/auth-01.yaml
+appId: com.voxi.app
+env:
+  VOXI_TEST_MODE: "1"
+  EMAIL: "qa+auth01@voxi.test"
+  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+---
+- launchApp:
+    clearState: true
+    arguments:
+      voxiTestSeed: "auth-01"
+- assertVisible:
+    id: "welcome.emailInput"
+- tapOn:
+    id: "welcome.emailInput"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "welcome.eulaAccept"
+- tapOn:
+    id: "welcome.ageConfirm"
+- tapOn:
+    id: "welcome.continueBtn"
+- assertVisible:
+    id: "welcome.otpInput"
+- tapOn:
+    id: "welcome.otpInput"
+- inputText: ${OTP}
+# Lands on the camera (the one screen that matters after login).
+- assertVisible:
+    id: "camera.screen"
+    timeout: 10000
+- assertVisible:
+    id: "camera.shutter"
+# No brittle coordinate taps anywhere — every step locates by a registered testId.

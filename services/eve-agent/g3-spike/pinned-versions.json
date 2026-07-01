@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-06-30T22:58:57Z",
+  "platform": "Darwin arm64",
+  "runtime": "bun 1.3.11  (node v20.10.0 present but eve CLI needs node>=24)",
+  "triple": {
+    "eve": "0.17.1",
+    "@ai-sdk/anthropic": "4.0.4",
+    "ai": "7.0.9",
+    "@workflow/world-postgres": "4.2.0",
+    "@workflow/world-local": "4.2.0",
+    "@workflow/world": "4.2.0"
+  },
+  "note": "Installed via 'bun add eve @ai-sdk/anthropic @workflow/world-postgres ai' in this isolated g3-spike scope on 2026-06-30. npm 'latest' resolved world-postgres@4.2.0; eve docs example pins @workflow/world-postgres@5.0.0-beta.x — a cross-version pin to reconcile before prod (vercel/workflow #1416 risk)."
+}

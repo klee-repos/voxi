@@ -1,0 +1,48 @@
+# Local stand-in for the world-postgres durable world used by the G3 spike (C0-C2). This is the LOCAL analogue
+# of Cloud SQL — it lets the boot proof / resume / multi-poller scripts run on a laptop or CI before any GCP
+# project exists. The FRONT and POLLER are run as separate processes against this one database, mirroring the
+# split topology (§4.4): on GCP, FRONT -> Cloud Run, POLLER -> Worker Pool / GCE, world -> Cloud SQL.
+#
+# NOTE: bringing this up requires Docker (operator action). It is intentionally minimal — pgvector is included
+# because the eve catalog tools embed/search against the same Postgres (§4.2), and world tables live here too.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: voxi-g3-world
+    environment:
+      POSTGRES_USER: voxi
+      POSTGRES_PASSWORD: voxi
+      POSTGRES_DB: voxi_world
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voxi -d voxi_world"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - g3-world-data:/var/lib/postgresql/data
+
+  # The eve FRONT (stateless HTTP channel + NDJSON streaming). On GCP this is Cloud Run.
+  # Image/build are operator-supplied once services/eve-agent is authored post-G3. Shown here as the wiring.
+  # eve-front:
+  #   build: ../../services/eve-agent
+  #   environment:
+  #     WORKFLOW_ROLE: front
+  #     WORLD_DATABASE_URL: postgres://voxi:voxi@postgres:5432/voxi_world
+  #   command: ["eve", "start"]
+  #   depends_on: { postgres: { condition: service_healthy } }
+  #   ports: ["8080:8080"]   # forwards /eve/* AND /.well-known/workflow/* (§4.4)
+
+  # The eve POLLER (non-serverless: graphile-worker + LISTEN/NOTIFY). On GCP this is a Worker Pool / GCE VM.
+  # Run >=2 replicas for the C2 SKIP-LOCKED test:  docker compose up --scale eve-poller=2
+  # eve-poller:
+  #   build: ../../services/eve-agent
+  #   environment:
+  #     WORKFLOW_ROLE: poller
+  #     WORLD_DATABASE_URL: postgres://voxi:voxi@postgres:5432/voxi_world
+  #   command: ["eve", "worker"]
+  #   depends_on: { postgres: { condition: service_healthy } }
+
+volumes:
+  g3-world-data:

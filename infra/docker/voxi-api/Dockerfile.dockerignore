@@ -1,0 +1,20 @@
+# Per-Dockerfile ignore (BuildKit: <dockerfile-path>.dockerignore). Build context is the repo root, so trim it
+# hard — only the manifests + the source COPY'd in the Dockerfile matter. Kept under infra/ (no repo-root file).
+**/node_modules
+**/.git
+**/dist
+**/build
+**/*.tsbuildinfo
+**/.expo
+**/coverage
+app/ios
+app/android
+e2e/artifacts
+e2e/fixtures/tapes/*.live.json
+**/.env
+**/.env.*
+!**/.env.example
+**/.DS_Store
+.gcloud
+service-account*.json
+infra/terraform
