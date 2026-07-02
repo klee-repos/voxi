@@ -14,7 +14,7 @@ Voxi is iOS-first and also runs on the web.
 - **Voice and text conversation** — a natural, low-latency voice chat about what you just scanned; keyboard optional.
 - **A persistent collection** — every photo becomes a saved thread, and every identification adds to a crowd-sourced catalog of specific objects.
 
-The full product spec is in [`docs/PLAN.md`](docs/PLAN.md).
+See [CLAUDE.md](CLAUDE.md) for the product overview and architecture.
 
 ## Architecture
 
