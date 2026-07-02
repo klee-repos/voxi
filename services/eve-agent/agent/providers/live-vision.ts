@@ -18,6 +18,26 @@ import type { Catalog } from '../../../../packages/db/catalog'
 
 const norm = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 
+/** Filler / non-answer words a clean human title must never carry (the VLM sometimes prefixes a hedge). */
+const TITLE_FILLER =
+  /\b(unspecified|unidentified|unknown|generic|assorted|various|miscellaneous|misc|n\/?a|possibly|probably|likely|maybe|unbranded|no[- ]?name|unnamed|undetermined)\b/gi
+
+/**
+ * Sanitize the VLM's `display_title` into a clean, confident human name: strip filler/non-answer qualifiers
+ * ("Unspecified Parliament Blue" → "Parliament Blue"), collapse whitespace, and trim stray separators. Returns
+ * undefined when nothing usable survives (the caller then falls back to the arbitrated label). This is the
+ * deterministic backstop to the prompt rule — a hedge word never reaches the reveal title.
+ */
+export function cleanDisplayTitle(s?: string): string | undefined {
+  if (!s) return undefined
+  const cleaned = s
+    .replace(TITLE_FILLER, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s,–—-]+|[\s,–—-]+$/g, '')
+    .trim()
+  return cleaned.length >= 2 ? cleaned : undefined
+}
+
 /**
  * Catalog-match acceptance threshold (cosine DISTANCE, 0 = identical). A hit nearer than this is trustworthy
  * enough to inject as a Stage-3 candidate. 0.15 is intentionally tight: multimodalembedding@001 puts the SAME
@@ -108,7 +128,7 @@ export class LiveVisionProvider implements VisionProvider {
       source: 'vlm',
       confidence: vlm.fine_confidence ?? 0.5,
       category: vlm.category || undefined, // coarse class label — feeds PROBABLE class-level reveal enrichment
-      displayTitle: vlm.display_title || undefined, // human-friendly title for the CONFIDENT reveal (display only)
+      displayTitle: cleanDisplayTitle(vlm.display_title), // clean human title (filler stripped) — display only
     }
 
     const stages: VisionStages = { vlm: vlmCandidate }

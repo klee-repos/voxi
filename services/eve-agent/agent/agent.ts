@@ -62,8 +62,9 @@ export const AGENT = {
     'tools/identify_object.ts',
     'tools/catalog_search.ts',
     'tools/safety_gate.ts',
+    'tools/web_research.ts',
   ],
-  subagents: ['subagents/storyteller', 'subagents/interviewer'],
+  subagents: ['subagents/storyteller', 'subagents/interviewer', 'subagents/researcher'],
   skills: [
     'skills/voice.md',
     'skills/interview-unknown-item/SKILL.md',

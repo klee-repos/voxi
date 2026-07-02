@@ -121,6 +121,10 @@ export async function identify_object(
   const evidence = stages.evidence ?? []
   // Coarse class from the VLM — used ONLY to key class-level enrichment on a hedged (PROBABLE) reveal.
   const category = stages.vlm?.category
+  // The clean, single human name of the PRIMARY object (VLM-provided). The reveal shows THIS in every band that
+  // renders a card — CONFIDENT and PROBABLE — so a hedged reveal still shows ONE tidy title, with the uncertainty
+  // carried by the confidence chip + the candidate list, never by cramming "X or Y" into the title.
+  const vlmDisplayTitle = stages.vlm?.displayTitle
 
   // The single source of truth for band/route/candidates is the SHARED arbiter.
   const a = arbitrate({ catalog: stages.catalog, web: stages.web, vlm: stages.vlm }, thresholds)
@@ -151,6 +155,8 @@ export async function identify_object(
     const unsupported = ['make', 'model', 'year']
     return {
       label: `${a.candidates[0]!.name} or ${a.candidates[1]!.name}`,
+      // The reveal card shows this single clean name; the "X or Y" disagreement lives in the candidate list.
+      displayTitle: vlmDisplayTitle,
       granularity_level: granularity,
       confidence_band: 'PROBABLE',
       evidence,
@@ -166,9 +172,9 @@ export async function identify_object(
   const chosen = a.chosen ?? a.candidates[0]
   return {
     label: chosen?.name ?? 'an object',
-    // The clean human title rides on the chosen candidate (set only when the VLM is chosen); the cascade prefers
-    // it over `label` for a CONFIDENT reveal, and falls back to `label` when absent (e.g. a web-verified reveal).
-    displayTitle: chosen?.displayTitle,
+    // The clean human title: prefer the chosen candidate's, else the VLM's clean name of the primary object; the
+    // cascade shows it over `label` on any reveal card, falling back to `label` only when neither is present.
+    displayTitle: chosen?.displayTitle ?? vlmDisplayTitle,
     granularity_level: granularityOf(chosen),
     confidence_band: a.band,
     evidence,

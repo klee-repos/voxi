@@ -65,10 +65,32 @@ export type DossierResult =
   | { ok: false; reason: string; dropped: { fact: ProposedFact; reason: string }[] }
 
 // ── deterministic normalization + anchors ────────────────────────────────────────────────────────────────────
-/** Minimal normalization for the verbatim quote check: case + whitespace ONLY (never strip words/punctuation). */
-const normQuote = (s: string): string => (s ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
-/** Alphanumeric token set for subject/source matching. Splits on non-alphanumerics AND on letter↔digit boundaries
- *  so "AE-1", "AE1" and "ae 1" all tokenize to ["ae","1"] (robust matching of model names across URL/title forms). */
+/**
+ * Reduce the markdown NOISE a "verbatim" web quote strips but the raw source keeps. Firecrawl returns rich Wikipedia
+ * markdown; a model copying a visible span keeps the anchor TEXT of an inline link but drops the "(url)", and omits
+ * footnote markers — so the raw markdown is never a substring of the clean quote. Neutralising these on BOTH sides
+ * is a no-op on plain prose (the negative-control sources), so it never loosens the off-subject / unsupported gates.
+ */
+const stripMarkdown = (s: string): string =>
+  s
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') //        images:  ![alt](url) → ∅
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') //     links:   [text](url) → text  (the killer for infobox facts)
+    .replace(/\[[0-9a-z][0-9a-z ]{0,5}\]/gi, '') // footnote/citation markers: [1], [nb 3] → ∅
+    .replace(/[*_`#>|]/g, '') //                    emphasis / heading / blockquote / table-cell (|) marks
+/**
+ * The verbatim-match key: lowercase → strip markdown noise → remove ALL whitespace. Real web markdown (infobox
+ * tables, wrapped cells, inline links) reformats a copied "verbatim" span — "Units sold" arrives as "Unitssold",
+ * "[Game Boy Color](url)" as "Game Boy Color" — so a byte-exact check rejects TRUE quotes (this is why deep research
+ * produced 0 facts for infobox-heavy subjects). This normalization keeps the check HONEST — every character and
+ * digit of the claim must still be present, in order; numbers and punctuation are preserved, so a hallucinated spec
+ * can never pass — while tolerating the reformatting. It is the primary deterministic anchor; deliberately not fuzzy.
+ */
+const verbatimKey = (s: string): string => stripMarkdown((s ?? '').toLowerCase()).replace(/\s+/g, '')
+/** Alphanumeric-only fold (drops spaces AND punctuation) so "LaCroix"≡"La Croix" and "AE-1"≡"AE1" match as
+ *  substrings — authoritative pages spell brands/models inconsistently across title, URL, and body. */
+const fold = (s: string): string => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+/** Alphanumeric token set for the class-scope model-name guard. Splits on non-alphanumerics AND on letter↔digit
+ *  boundaries so "AE-1", "AE1" and "ae 1" all tokenize to ["ae","1"] (robust model-name matching). */
 const tokens = (s: string): string[] =>
   (s ?? '')
     .toLowerCase()
@@ -77,19 +99,29 @@ const tokens = (s: string): string[] =>
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length > 0)
 
-/** (1) The verbatim quote is a minimally-normalized substring of the fetched source text. */
+/** (1) The verbatim quote is present in the fetched source text (whitespace/citation-insensitive — see verbatimKey). */
 export function verifyQuote(quote: string, sourceText: string): boolean {
-  const q = normQuote(quote)
-  return q.length > 0 && normQuote(sourceText).includes(q)
+  const q = verbatimKey(quote)
+  return q.length > 0 && verbatimKey(sourceText).includes(q)
 }
 
-/** (2) The fetched page (its title + URL tokens) is ABOUT the subject: every subject token appears in the page. */
+/**
+ * (2) The fetched page is ABOUT the subject. Robust to how authoritative pages title themselves: the MOST-SPECIFIC
+ * term (the model — the last subjectTerm) must appear in the page title/URL — a page titled "Game Boy" or
+ * "La Croix Sparkling Water" IS about it even though its title omits the brand ("Nintendo") — and then EVERY subject
+ * term (brand + model) must appear somewhere on the page (title/URL/body). A quote lifted from a DIFFERENT model's
+ * page still fails: that page's title/URL won't contain THIS model, so the off-subject negative control holds.
+ */
 export function sourceMatchesSubject(source: FetchedSource, subjectTerms: string[]): boolean {
-  const need = new Set(subjectTerms.flatMap(tokens))
-  if (need.size === 0) return true
-  const hay = new Set(tokens(`${source.title} ${source.url}`))
-  for (const t of need) if (!hay.has(t)) return false
-  return true
+  const terms = subjectTerms.filter((t) => fold(t).length > 0)
+  if (terms.length === 0) return true
+  const titleUrl = fold(`${source.title} ${source.url}`)
+  const whole = fold(`${source.title} ${source.url} ${source.text}`)
+  // the model (most specific → the last term) anchors page identity: it must be in the title/URL, not just the body.
+  const model = fold(terms[terms.length - 1]!)
+  if (!titleUrl.includes(model)) return false
+  // every term (brand + model) must then appear somewhere on the page.
+  return terms.every((t) => whole.includes(fold(t)))
 }
 
 /** (4) At class scope: does this text/quote NAME a disallowed specific make/model token? */

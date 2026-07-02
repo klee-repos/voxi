@@ -62,9 +62,12 @@ const EXTRACT_SCHEMA = {
   required: ['facts'],
 }
 
-/** DEEP path: Firecrawl markdown → Gemini extracts facts with verbatim quotes copied from that markdown. */
+/** DEEP path: Firecrawl markdown → Gemini extracts facts with verbatim quotes copied from that markdown. A WIDE
+ *  net across the whole web (manufacturer, reviews, references — NOT Wikipedia-dependent): one Firecrawl search+scrape
+ *  call returns `maxDocs` diverse sources, and a generous `docChars` gives the extractor real body PROSE (which
+ *  quotes cleanly) instead of only a page's reformatting-prone spec table. More sources ⇒ more chances at ≥3 facts. */
 export class FirecrawlGeminiDraft implements DossierDraftSource {
-  constructor(private web: WebResearchProvider, private docChars = 4000, private maxDocs = 3) {}
+  constructor(private web: WebResearchProvider, private docChars = 9000, private maxDocs = 6) {}
 
   async draft(input: DossierInput): Promise<ProposedDossier> {
     const docs = await this.web.search(input.subject, { limit: this.maxDocs })

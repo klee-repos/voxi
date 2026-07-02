@@ -48,6 +48,14 @@ export interface CascadeDeps {
    * `hard_failure` (retryable) — NOT a safety refusal — so a dead URL never reads as "unsafe content".
    */
   preload?: (uri: string) => Promise<{ b64: string; mime: string }>
+  /**
+   * OPTIONAL synchronous hook fired with the gate-approved FIRST-PASS narration clauses the instant the narrator
+   * produces them — BEFORE they stream as `token` events and before the async deep-research phase. The BFF uses it
+   * to PIN the server-owned narration immediately, so POST /v1/threads/:id/speech has it the moment the reveal
+   * renders (capturing off the event stream instead would wait for the ~minute-long deep-research drain). No-op when
+   * absent; never fired on UNKNOWN (no narration) or when the gate drops every clause.
+   */
+  onNarration?: (clauses: string[]) => void
 }
 
 /** Human-facing refusal copy per suppressing action (kept dry + in-persona; NEVER identifies the object). */
@@ -171,10 +179,11 @@ export async function* runIdentificationCascade(
   yield at({ type: 'tool_result', tool: 'identify_object', ok: true })
 
   // The arbitrated band IS the reveal: CONFIDENT→reveal card, PROBABLE→partial (both candidates), UNKNOWN→interview.
-  // A CONFIDENT reveal shows the clean human `displayTitle` (VLM-provided) when present; a hedged PROBABLE/UNKNOWN
-  // keeps the arbitrated `label` verbatim (never over-commit a tidy title to an identity we did not confirm).
+  // Any reveal CARD (CONFIDENT or PROBABLE) shows the single clean human `displayTitle`; the uncertainty is carried
+  // by the confidence chip + the candidate list, NOT by a hedged "X or Y" title. UNKNOWN routes to the interview,
+  // not a card, so it keeps the arbitrated label (never asserting a tidy identity we could not place at all).
   const revealTitle =
-    result.confidence_band === 'CONFIDENT' ? result.displayTitle ?? result.label : result.label
+    result.confidence_band === 'UNKNOWN' ? result.label : result.displayTitle ?? result.label
   yield at({
     type: 'confidence_band',
     band: result.confidence_band,
@@ -205,6 +214,10 @@ export async function* runIdentificationCascade(
       unsupportedFields: result.unsupported_fields,
       candidates: result.candidates.map((c) => c.name),
     })
+    // PIN the narration synchronously, the instant it's produced — before streaming tokens and before the async
+    // deep-research phase below — so the BFF can voice it (POST /speech) the moment the reveal renders (not ~a
+    // minute later at end-of-stream). Only when there's something to say (dropped-to-empty never pins).
+    if (narration.clauses.length) deps.onNarration?.(narration.clauses)
     for (const clause of narration.clauses) yield at({ type: 'token', text: clause })
   }
 

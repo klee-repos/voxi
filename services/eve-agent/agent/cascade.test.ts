@@ -102,6 +102,18 @@ describe('cascade — PROBABLE surfaces BOTH candidates (never asserts one)', ()
     expect(band(evs)!.candidates).toContain('2008 Cannondale SuperSix EVO')
     expect(band(evs)!.candidates).toContain('2010 Cannondale CAAD10')
   })
+
+  test('a PROBABLE reveal shows the single CLEAN displayTitle, NOT a hedged "X or Y" (the disagreement lives in the candidates)', async () => {
+    const catalog: Candidate = { name: '2008 Cannondale SuperSix EVO', make: 'Cannondale', model: 'SuperSix EVO', year: 2008, source: 'catalog', confidence: 0.9, cosine: 0.7 }
+    const web: Candidate = { name: '2010 Cannondale CAAD10', make: 'Cannondale', model: 'CAAD10', source: 'web', confidence: 0.8 }
+    const vlm: Candidate = { name: 'Cannondale SuperSix EVO', make: 'Cannondale', model: 'SuperSix EVO', source: 'vlm', confidence: 0.6, displayTitle: 'Cannondale SuperSix EVO' }
+    const evs = await drain({ vision: new FakeVision({ catalog, web, vlm }), safety: SAFE })
+    const b = band(evs)!
+    expect(b.band).toBe('PROBABLE')
+    expect(b.title).toBe('Cannondale SuperSix EVO') // the single clean name…
+    expect(b.title).not.toContain(' or ') //                …never the hedged "X or Y"
+    expect(b.candidates).toHaveLength(2) // the disagreement is still surfaced, in the candidate list
+  })
 })
 
 describe('cascade — UNKNOWN → interview handoff', () => {

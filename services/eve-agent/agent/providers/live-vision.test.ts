@@ -4,8 +4,27 @@
  * RANGE, and web verified_confidence reflects bestGuess↔entity AGREEMENT, not a raw unbounded relevance score.
  */
 import { test, expect, describe } from 'bun:test'
-import { parseYear, webConfidence } from './live-vision'
+import { parseYear, webConfidence, cleanDisplayTitle } from './live-vision'
 import type { WebDetect } from '../lib/gcp-vision'
+
+describe('cleanDisplayTitle — strips filler / non-answer words from the reveal title', () => {
+  test('a hedge prefix is removed, the real object survives', () => {
+    expect(cleanDisplayTitle('Unspecified Parliament Blue')).toBe('Parliament Blue')
+    expect(cleanDisplayTitle('Generic Office Chair')).toBe('Office Chair')
+    expect(cleanDisplayTitle('Assorted Ceramic Mug')).toBe('Ceramic Mug')
+    expect(cleanDisplayTitle('Unbranded Plywood Board')).toBe('Plywood Board')
+  })
+  test('a clean title passes through unchanged', () => {
+    expect(cleanDisplayTitle('Canon AE-1')).toBe('Canon AE-1')
+    expect(cleanDisplayTitle('La Croix Sparkling Water')).toBe('La Croix Sparkling Water')
+  })
+  test('an all-filler / empty value → undefined (caller falls back to the arbitrated label)', () => {
+    expect(cleanDisplayTitle('Unspecified')).toBeUndefined()
+    expect(cleanDisplayTitle('Unknown / N/A')).toBeUndefined()
+    expect(cleanDisplayTitle('')).toBeUndefined()
+    expect(cleanDisplayTitle(undefined)).toBeUndefined()
+  })
+})
 
 describe('parseYear — a concrete year ONLY from a single unambiguous token', () => {
   test('a single year is asserted', () => {

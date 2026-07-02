@@ -18,6 +18,8 @@
     "e2e:web:explore-mcp": "bun e2e/web/run-explore-mcp.web.ts",
     "e2e:ios": "echo 'run on a Mac w/ Xcode: maestro test e2e/flows/'",
     "e2e:live": "VOXI_E2E_MODE=live bun e2e/web/run-auth.web.ts",
+    "judge:reveal": "bun e2e/judge/run-reveal-judge.web.ts",
+    "judge:reveal:live": "bun e2e/judge/run-reveal-judge.web.ts --live",
     "db:migrate": "bun packages/db/migrate.ts",
     "typecheck": "command -v tsc >/dev/null 2>&1 && tsc -b || { echo '⚠ typecheck SKIPPED — tsc not installed in this env (bun strips types at runtime). The build agents ran per-file `tsc --noEmit --strict` on the core modules; install typescript to run a full pass.'; exit 0; }",
     "lint:selectors": "bun e2e/framework/lint-selectors.ts",

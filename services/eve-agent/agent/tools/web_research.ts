@@ -27,7 +27,11 @@ const FIRECRAWL_BASE = process.env.FIRECRAWL_BASE_URL ?? 'https://api.firecrawl.
 export class LiveFirecrawl implements WebResearchProvider {
   constructor(
     private apiKey: string,
-    private timeoutMs = 8000,
+    // Search+scrape of several full, large pages (a Wikipedia article can be 100k+ chars) routinely takes 30–60s;
+    // deep research runs ASYNC off the reveal path (the reveal is already shown), so a generous budget just means
+    // MORE facts, never a slower reveal. Too tight and the deep path times out and silently degrades to the thin
+    // grounding fallback (the 2-facts-instead-of-7 failure we saw on Game Boy's 129k-char page).
+    private timeoutMs = 60000,
   ) {}
 
   private async post<T>(path: string, body: unknown): Promise<T> {
@@ -43,12 +47,16 @@ export class LiveFirecrawl implements WebResearchProvider {
   }
 
   async search(query: string, opts: { limit?: number } = {}): Promise<WebDoc[]> {
-    // v2 /search with scrapeOptions returns each result already scraped to markdown (main content only).
-    const j = await this.post<{ data?: { url?: string; title?: string; markdown?: string; metadata?: { title?: string } }[] }>(
+    // v2 /search with scrapeOptions returns each result already scraped to markdown (main content only). In v2,
+    // `data` is an OBJECT keyed by source ({web, news, images}); older shapes returned `data` as a flat array — so
+    // accept both.
+    type Row = { url?: string; title?: string; markdown?: string; metadata?: { title?: string } }
+    const j = await this.post<{ data?: Row[] | { web?: Row[] } }>(
       '/v2/search',
       { query, limit: opts.limit ?? 4, scrapeOptions: { formats: ['markdown'], onlyMainContent: true } },
     )
-    return (j.data ?? [])
+    const rows: Row[] = Array.isArray(j.data) ? j.data : (j.data?.web ?? [])
+    return rows
       .filter((d) => d.url && d.markdown)
       .map((d) => ({ url: d.url!, title: d.title || d.metadata?.title || '', markdown: d.markdown! }))
   }

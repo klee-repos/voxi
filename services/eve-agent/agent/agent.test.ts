@@ -63,7 +63,8 @@ describe('agent.ts — config registry, model, world', () => {
 
   test('the registry mounts the real authored layout (tools/subagents/skills/schedules/channel)', () => {
     expect(AGENT.tools).toContain('tools/identify_object.ts')
-    expect(AGENT.subagents).toEqual(['subagents/storyteller', 'subagents/interviewer'])
+    expect(AGENT.tools).toContain('tools/web_research.ts')
+    expect(AGENT.subagents).toEqual(['subagents/storyteller', 'subagents/interviewer', 'subagents/researcher'])
     expect(AGENT.skills).toContain('skills/interview-unknown-item/SKILL.md')
     expect(AGENT.schedules).toEqual(['schedules/dedup.ts', 'schedules/promote.ts'])
     expect(AGENT.channel).toBe('channels/eve.ts')

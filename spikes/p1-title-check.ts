@@ -24,7 +24,9 @@ for (const page of PAGES) {
     const url = await imageFor(page)
     if (!url) { console.log(`  ? ${page} — no image`); continue }
     const res = await identify_object({ uri: url }, provider)
-    const revealTitle = res.confidence_band === 'CONFIDENT' ? res.displayTitle ?? res.label : res.label
+    // Mirror the cascade: any reveal CARD (CONFIDENT or PROBABLE) shows the single clean displayTitle; only UNKNOWN
+    // (→ interview) keeps the arbitrated label.
+    const revealTitle = res.confidence_band === 'UNKNOWN' ? res.label : res.displayTitle ?? res.label
     console.log(`\n  ${page}`)
     console.log(`    band          : ${res.confidence_band}`)
     console.log(`    label (old)   : "${res.label}"`)

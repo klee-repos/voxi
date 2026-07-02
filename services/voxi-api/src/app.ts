@@ -270,6 +270,26 @@ async function* replayReveal(events: readonly StreamEvent[], startIndex: number)
 }
 
 /**
+ * Build the SERVER-OWNED grounded chat context for "tell me more" (PROMPT-QUALITY §3.E). Reconstructed from the
+ * DURABLE reveal — the identified title, the narration, and the cited `fact` events (each with its source) — so the
+ * conversation is grounded in exactly the same evidence the reveal was, with each fact's provenance attached. It is
+ * NEVER supplied by the client (the BFF never trusts the client for grounding), and the honesty rules carry into
+ * voice unchanged: a falsifiable follow-up must cite this evidence or a fresh web lookup, else hedge in persona.
+ */
+export function buildItemContext(reveal: RevealRecord): string {
+  const facts = reveal.events.filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+  return [
+    `OBJECT: ${reveal.title} (confidence: ${reveal.band}).`,
+    reveal.narration ? `WHAT IT IS: ${reveal.narration}` : '',
+    facts.length ? 'GROUNDED FACTS you may cite (fact — source):' : '',
+    ...facts.map((f) => `  • ${f.text} — ${f.sourceUrl}`),
+    'GROUNDING: only assert a falsifiable claim (spec/date/provenance/superlative) if it is grounded above, or you verify it with a fresh web_search/web_crawl and cite the source. If you cannot ground it, say so in persona. The confidence band still rules — do not promote a hedged identity to certain.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
  * Decode ONLY a real `data:` URI into bytes (adversarial A3). A scheme/plain photoUrl ('capture://local',
  * 'obj:confident', a signed https URL) has no inline bytes → returns null and the caller skips photo persistence
  * (never a fabricated placeholder — the repo's "seams, not stubs-that-fake-success" rule).
@@ -531,6 +551,24 @@ export function createApp(deps: Deps): Hono {
       await deps.speech.cache?.put(key, bytes).catch(() => {}) // caching is best-effort; never fail the response
     }
     return c.body(bytes, 200, { 'content-type': 'audio/mpeg' })
+  })
+
+  // The grounded conversation context for "tell me more" (PROMPT-QUALITY §3.E). Owner-scoped: built ONLY from the
+  // caller's own DURABLE reveal (title + narration + the cited facts), so the voice/text agent is seeded with the
+  // same evidence the reveal carried — never client-supplied. Absent a persisted reveal → 404 (nothing to ground).
+  app.get('/v1/threads/:id/context', async (c) => {
+    const userId = uid(c)
+    const id = c.req.param('id')
+    if (deps.sessionOwner.get(id) && deps.sessionOwner.get(id) !== userId) return c.json({ error: 'forbidden' }, 403)
+    const reveal = deps.reveals ? await deps.reveals.get(id) : null
+    if (!reveal || reveal.ownerUserId !== userId) return c.json({ error: 'no_context' }, 404)
+    const facts = reveal.events.filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+    return c.json({
+      subject: reveal.title,
+      band: reveal.band,
+      itemContext: buildItemContext(reveal),
+      facts: facts.map((f) => ({ text: f.text, sourceUrl: f.sourceUrl, sourceTitle: f.sourceTitle, quote: f.quote })),
+    })
   })
 
   // Gate paid podcast generation — atomic decrement + idempotent token (retries/double-taps collapse).

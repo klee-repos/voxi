@@ -100,16 +100,27 @@ function RevealBody(): React.ReactElement {
   const [narrationFailed, setNarrationFailed] = useState(false)
   const [playing, setPlaying] = useState(false)
   const autoStarted = useRef(false)
+  const speechAttempts = useRef(0)
   // Fetch the server-synthesized narration. Extracted so the "unavailable" state can retry — and so a failure is
   // HONEST: we never fall back to a silent placeholder that only LOOKS like it played (the exact trap when the
   // BFF is stale / missing the new /speech route). speakNarration also console.warns the status for diagnosis.
+  // The server pins the narration the instant the reveal's clauses stream — which can land a beat AFTER this screen
+  // first requests it — so a first miss (404 no_narration) usually self-heals within a second. Poll briefly before
+  // surfacing "unavailable" (+ manual retry), so the common timing gap doesn't read as a dead affordance while a
+  // genuinely-absent narration still fails honestly.
   const loadNarration = useCallback(() => {
     if (!threadId) return
     setNarrationFailed(false)
     void api.speakNarration(threadId).then((url) => {
-      if (url) setAudioUrl(url)
-      else setNarrationFailed(true)
+      if (url) { speechAttempts.current = 0; setAudioUrl(url); return }
+      if (speechAttempts.current < 6) {
+        speechAttempts.current += 1
+        setTimeout(loadNarration, 700)
+      } else {
+        setNarrationFailed(true)
+      }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, threadId])
   useEffect(() => {
     if (hasNarration && threadId && !audioUrl) loadNarration()
@@ -257,7 +268,7 @@ function RevealBody(): React.ReactElement {
                 onPress={() => {
                   haptics.tick()
                   if (audioUrl) setPlaying((p) => !p) // ready → play/stop
-                  else if (narrationFailed) loadNarration() // failed → retry the fetch (no silent fake)
+                  else if (narrationFailed) { speechAttempts.current = 0; loadNarration() } // failed → retry the poll fresh (no silent fake)
                   // still loading → no-op (the label says so); autoplay/render will catch up when it lands
                 }}
                 style={({ pressed }) => [styles.hearBtn, { borderColor: narrationFailed ? surface.textTertiary : surface.accent, opacity: pressed ? 0.7 : 1 }]}

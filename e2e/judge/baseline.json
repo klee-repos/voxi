@@ -1,0 +1,20 @@
+{
+  "canon-ae1": {
+    "id": "canon-ae1",
+    "title": 0.95,
+    "description": 0.95,
+    "facts": 0.62
+  },
+  "gameboy": {
+    "id": "gameboy",
+    "title": 1,
+    "description": 0.85,
+    "facts": 0.85
+  },
+  "lacroix": {
+    "id": "lacroix",
+    "title": 1,
+    "description": 0.9,
+    "facts": 0.85
+  }
+}

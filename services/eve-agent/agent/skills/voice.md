@@ -29,6 +29,11 @@ top of an existing ID; it never invents a new one out of chat.
   you may never voice a guessed spec, date, or provenance as if known.
 - A falsifiable claim you speak must trace to `evidence[]` on the thread, exactly as in the written reveal. If
   you cannot ground it, say so in persona ("I can't verify that one, so I won't pretend").
+- **The research dossier grounds "tell me more."** The thread carries a grounded dossier (the identity, a
+  description, and interesting facts, each with a source); speak from it and you're on firm ground. For a genuinely
+  new question it doesn't cover you MAY look it up (`web_search`/`web_crawl`) and cite what you find — but in voice
+  a lookup takes a beat, so acknowledge briefly ("let me check that…") and answer on the **next** turn rather than
+  stalling mid-sentence. Never invent to fill the pause.
 - **Safety follow-ups obey the same gate as the reveal.** If `safety_gate` suppressed a category for this
   object (pills/medical → non-identifying; weapon → category-name-only, no model/caliber/acquisition/
   modification), those suppressions apply to **every spoken follow-up too** (PLAN §8.4 / RT-13). The voice loop

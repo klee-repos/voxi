@@ -10,11 +10,12 @@
  * catalog injected — or an empty one — the stream is byte-identical to the vlm+web-only path.
  */
 import type { EveClient } from './app'
-import { runIdentificationCascade } from '../../eve-agent/agent/cascade'
+import { runIdentificationCascade, type CascadeDeps } from '../../eve-agent/agent/cascade'
 import { LiveVisionProvider, type CatalogDeps } from '../../eve-agent/agent/providers/live-vision'
 import { LiveSafetyClassifier } from '../../eve-agent/agent/providers/live-safety'
 import { LiveNarrator } from '../../eve-agent/agent/providers/live-narrator'
 import { LiveResearcher } from '../../eve-agent/agent/providers/live-research'
+import { dossierProviderFromEnv, type DossierProvider } from '../../eve-agent/agent/providers/live-dossier'
 import { NarrationStore } from './narration-store'
 import { loadImageBytes } from '../../eve-agent/agent/lib/gcp-vision'
 import { parseEventLine } from '../../../packages/shared/src/events'
@@ -28,11 +29,24 @@ export class CascadeEveClient implements EveClient {
   private safety = new LiveSafetyClassifier()
   private narrator = new LiveNarrator()
   private researcher = new LiveResearcher()
+  /** The async deep-research provider (Firecrawl+Gemini deep path when keyed, else the Gemini-grounding path). It
+   *  produces the durable, fully-cited dossier that streams the progressive `fact` chips AND the grounded
+   *  `description_upgrade` that replaces the thin first-pass narration — the whole point of PROMPT-QUALITY §3.B/§3.C.
+   *  Without this wired the deep-research code never runs and the reveal reads generic ("what a watch is"). */
+  private dossier: DossierProvider = dossierProviderFromEnv()
   private n = 0
 
-  /** @param catalogDeps OPTIONAL — inject a Catalog + EmbeddingProvider to enable the Stage-3 moat. Omit → the
-   *  exact vlm+web-only production path (unchanged). */
-  constructor(private catalogDeps?: CatalogDeps) {
+  /**
+   * @param catalogDeps OPTIONAL — inject a Catalog + EmbeddingProvider to enable the Stage-3 moat. Omit → the
+   *  exact vlm+web-only production path (unchanged).
+   * @param overrides OPTIONAL test seam (creds-free) — replace any live provider fed to the cascade with a fake so
+   *  the assembled stream (including the deep-research `fact`/`description_upgrade` wiring) can be exercised without
+   *  GCP/Firecrawl. Production never passes this; the live providers above are the default.
+   */
+  constructor(
+    private catalogDeps?: CatalogDeps,
+    private overrides?: Partial<Pick<CascadeDeps, 'vision' | 'safety' | 'narrator' | 'researcher' | 'dossier'>>,
+  ) {
     this.vision = new LiveVisionProvider(catalogDeps)
   }
 
@@ -79,10 +93,20 @@ export class CascadeEveClient implements EveClient {
       : { uri: photoUrl, userId }
 
     const events = runIdentificationCascade(sessionId, image, {
-      vision: this.vision,
-      safety: this.safety,
-      narrator: this.narrator,
-      researcher: this.researcher,
+      vision: this.overrides?.vision ?? this.vision,
+      safety: this.overrides?.safety ?? this.safety,
+      narrator: this.overrides?.narrator ?? this.narrator,
+      researcher: this.overrides?.researcher ?? this.researcher,
+      // PIN the server-owned narration the INSTANT the narrator produces its clauses — synchronously, before the
+      // first `token` is even streamed and long before the async deep-research phase (which holds the stream open
+      // for ~a minute). The app requests POST /v1/threads/:id/speech the moment the reveal renders; capturing only
+      // at end-of-stream (the safety net above) left it 404ing `no_narration` for that whole window. Pin-once, so a
+      // reconnect's re-run can't clobber the exact clauses the app rendered + spoke on the first drain.
+      onNarration: (clauses) => this.narrations.capture(sessionId, clauses),
+      // The deep-research pass: after the instant reveal it streams verified `fact` chips + a grounded
+      // `description_upgrade` that replaces the thin first-pass narration on the same open stream (§3.B4). Best-effort
+      // in the cascade — any research failure/timeout leaves the instant reveal exactly as it was.
+      dossier: this.overrides?.dossier ?? this.dossier,
       // Only wire preload when we did NOT already load bytes — preserves the "dead uri → hard_failure" behaviour.
       ...(bytes ? {} : { preload: loadImageBytes }),
     })
@@ -96,8 +120,10 @@ export class CascadeEveClient implements EveClient {
       // Re-validate against the shared contract so the app never receives an off-contract line.
       yield JSON.stringify(parseEventLine(JSON.stringify(ev)))
     }
-    // Pin the narration on the FIRST run only — a reconnect re-runs the (temp 0.7) narrator, so NarrationStore
-    // refuses to overwrite, keeping /speech byte-consistent with the whatItIs the app rendered on the first drain.
+    // Safety net: pin the narration at end-of-stream too. The PRIMARY capture is the synchronous `onNarration`
+    // callback below, which fires the instant the narrator produces its clauses — BEFORE the ~minute-long async
+    // deep-research phase and before the app can request POST /speech. capture() is pin-once, so this is a no-op
+    // once onNarration has fired; it still covers a reconnect (startIndex>0) that re-runs with no onNarration hit.
     this.narrations.capture(sessionId, captured)
 
     // AFTER the reveal: grow the moat. Upsert the accepted id as a PRIVATE catalog item (guarded end-to-end in
