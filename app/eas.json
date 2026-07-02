@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "simulator": true }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": { "resourceClass": "m-medium" },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "ios": { "resourceClass": "m-medium" },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascApiKeyPath": "/Users/kvnlee/.appstoreconnect/private_keys/belafonte.p8",
+        "ascApiKeyId": "2859C9JN2L",
+        "ascApiKeyIssuerId": "013800b6-5560-415c-93d6-7e2656255eec",
+        "ascAppId": "6786847681",
+        "appleTeamId": "DRJEJC9KRM"
+      }
+    }
+  }
+}

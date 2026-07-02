@@ -122,72 +122,119 @@ await check('a regulated capture renders the real reveal REFUSAL surface, in per
   const t = (await d.state(ids.global.safetyRefusal)).text ?? ''
   if (!/describe|identify|will not|won'?t|category/i.test(t)) throw new Error('refusal copy not in-persona: ' + t)
 })
-await check('the agent perceives + taps the refusal recovery action (real click → back-to-camera intent)', async () => {
+await check('the agent perceives + taps the refusal recovery action → returns to the VIEWFINDER in place (no route hop)', async () => {
   const openRecovery: Planner = async (_g, obs, history) => {
     if (did(history, 'tap', ids.reveal.primaryAction)) return { kind: 'done', rationale: 'recovery tapped' }
     if (obs.visibleIds.includes(ids.reveal.primaryAction)) return { kind: 'tap', id: ids.reveal.primaryAction, rationale: 'try another photo' }
     return { kind: 'done', rationale: 'no recovery action' }
   }
+  const navBefore = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
   await new Agent(d, openRecovery).achieve('recover from the refusal', { maxSteps: 3 })
-  const deadline = Date.now() + 3000
+  // The camera and reveal are ONE surface (the merge): "Try another photo" discards the refused capture and slides
+  // straight back to the live viewfinder — no navigation, nothing to remount.
+  const deadline = Date.now() + 5000
   while (Date.now() < deadline) {
-    const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
-    if (nav && /camera/.test(nav)) return
+    if ((await d.state(ids.camera.screen)).visible) {
+      const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
+      if (nav !== navBefore) throw new Error('recovery fired a navigation — it must return to the viewfinder in place: ' + nav)
+      return
+    }
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error('refusal recovery did not fire the camera nav intent')
+  throw new Error('refusal recovery did not return to the viewfinder (camera.screen)')
 })
 
-// ── Goal 5: an EMPTY reveal (deep-linked with nothing captured) is a calm INVITE — the agent perceives it and
-//    opens the camera. Proves the empty-state redesign (no error-style "Nothing to show yet"). ──
+// ── Goal 5: an EMPTY home (deep-linked with nothing captured) IS the live viewfinder. The camera and reveal are
+//    ONE surface (the merge), so "nothing to show" isn't a separate invite screen — it's the camera, ready to
+//    shoot. The shutter is right there; there is nothing to navigate to. ──
 await page.goto(`${base}/?scan=empty`)
-await check('the EMPTY reveal renders the calm INVITE, not the old "Nothing to show yet" error copy', async () => {
-  await d.waitFor(ids.reveal.primaryAction, { timeoutMs: 8000 })
-  const cta = (await d.state(ids.reveal.primaryAction)).text ?? ''
-  if (!/open the camera/i.test(cta)) throw new Error('empty CTA should invite to the camera; got ' + JSON.stringify(cta))
+await check('the EMPTY home renders the live VIEWFINDER (camera home + shutter), not a separate "nothing to show" invite', async () => {
+  await d.waitFor(ids.camera.screen, { timeoutMs: 8000 })
+  await d.waitFor(ids.camera.shutter, { timeoutMs: 4000 })
+  if ((await d.state(ids.reveal.primaryAction)).visible) throw new Error('a separate invite CTA rendered — the empty home should just be the viewfinder')
   const body = await page.evaluate(() => document.body.innerText)
   if (/nothing to show yet/i.test(body)) throw new Error('the old error-style empty copy is still present')
 })
-await check('the agent perceives the invite and taps "Open the camera" (real click → /camera nav intent)', async () => {
-  const openCamera: Planner = async (_g, obs, history) => {
-    if (did(history, 'tap', ids.reveal.primaryAction)) return { kind: 'done', rationale: 'opened camera' }
-    if (obs.visibleIds.includes(ids.reveal.primaryAction)) return { kind: 'tap', id: ids.reveal.primaryAction, rationale: 'open the camera' }
-    return { kind: 'done', rationale: 'no invite action' }
-  }
-  await new Agent(d, openCamera).achieve('open the camera from the empty invite', { maxSteps: 3 })
-  const deadline = Date.now() + 3000
-  while (Date.now() < deadline) {
-    const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
-    if (nav && /camera/.test(nav)) return
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  throw new Error('the invite CTA did not fire the /camera nav intent')
-})
 
-// ── Goal 6: FLASH GUARD. On a READY reveal, tapping back must NOT repaint the empty branch. The converge mounts
-//    ONLY reveal (nav is recorded, not swapped) so reveal never unmounts — a buggy pre-nav reset() would therefore
-//    PERSISTENTLY show the empty copy here (not a sub-frame flash). The fix defers+gates the reset, so the READY
-//    view stays put while the /camera nav intent still fires. This deterministically catches the flash regression. ──
+// ── Goal 6: FLASH GUARD. On a READY item, tapping back slides to the viewfinder IN PLACE — the Home is ONE
+//    persistent surface that never unmounts, so a buggy pre-nav reset() can no longer repaint an empty branch
+//    (there is none, and there is no navigation). The item is PRESERVED one swipe away: swiping back restores the
+//    SAME title + dock with no re-fetch. This deterministically catches the old flash regression. ──
 await page.goto(`${base}/?scan=confident`)
-await check('READY → tap back → the empty branch does NOT repaint (title persists; /camera nav fires)', async () => {
+await check('READY → tap back → the viewfinder shows IN PLACE; the item is preserved one swipe away (no nav, no empty repaint)', async () => {
   await d.waitFor(ids.reveal.title, { timeoutMs: 8000 })
   const bd = Date.now() + 8000
   while (Date.now() < bd) { if ((await d.state(ids.reveal.howSure)).attrs.band) break; await new Promise((r) => setTimeout(r, 100)) }
   const titleBefore = (await d.state(ids.reveal.title)).text ?? ''
+  await page.evaluate(() => document.body.removeAttribute('data-last-nav'))
   await d.tap(ids.nav.back)
-  await page.waitForTimeout(400) // give a (buggy) synchronous reset time to repaint the empty branch
+  await d.waitFor(ids.camera.screen, { timeoutMs: 5000 }) // the viewfinder surfaced in place
+  await page.waitForTimeout(400) // give a (buggy) synchronous reset time to repaint an empty branch
   const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
-  if (!nav || !/camera/.test(nav)) throw new Error('back did not fire the /camera nav intent; data-last-nav=' + nav)
+  if (nav && /camera|reveal|processing/.test(nav)) throw new Error('back fired a navigation — it must slide to the viewfinder in place: ' + nav)
+  if (!(await d.state(ids.reveal.card)).visible) throw new Error('reveal.card unmounted on back — the Home must be one persistent surface')
   const body = await page.evaluate(() => document.body.innerText)
-  if (/nothing to show yet|ready when you are/i.test(body)) throw new Error('tapping back repainted the EMPTY branch — the flash regression')
-  const titleAfter = (await d.state(ids.reveal.title)).text ?? ''
-  if (!titleAfter || titleAfter !== titleBefore) throw new Error(`the READY title must persist after back; "${titleBefore}" → "${titleAfter}"`)
+  if (/nothing to show yet|ready when you are/i.test(body)) throw new Error('tapping back repainted an EMPTY branch — the flash regression')
+  // Swipe back onto the item (pager page 1) — the preserved store restores the SAME title + dock with no re-fetch.
+  await page.evaluate((pid) => { const el = document.querySelector(`[data-testid="${pid}"]`) as HTMLElement | null; if (el) { el.scrollLeft = el.clientWidth; el.dispatchEvent(new Event('scroll', { bubbles: true })) } }, ids.reveal.pager)
+  const rd = Date.now() + 6000
+  while (Date.now() < rd) {
+    if (((await d.state(ids.reveal.title)).text ?? '') === titleBefore && (await d.state(ids.reveal.buckets)).visible) return
+    await new Promise((r) => setTimeout(r, 120))
+  }
+  throw new Error(`swiping back to the item did not restore the preserved title/dock; title now "${(await d.state(ids.reveal.title)).text}"`)
+})
+
+// ── Goal 7 (Round 4 — REVEAL-WHAT-MAKER): a logo-brand PROBABLE reveal must SURFACE the fixed buckets under real
+//    taps — the WHAT names the CATEGORY (never a bare hedge), the MAKER names the BRAND (deriveMaker corroborated-
+//    brand lane), the PURPOSE anchors the object. The agent opens each bucket by perception and the CONTENT is pinned
+//    deterministically. This closes the Maker/Purpose bucket taps that did not exist in this proof before. ──
+await page.goto(`${base}/?scan=logobrand`)
+await d.waitFor(ids.reveal.buckets, { timeoutMs: 8000 })
+const pollActive = async (id: string, ms = 8000): Promise<void> => {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) { if ((await d.state(id)).attrs.state === 'active') return; await new Promise((r) => setTimeout(r, 120)) }
+  throw new Error(`${id} never became active`)
+}
+const CARD_ATTR: Record<string, string> = { [ids.reveal.bucketWhat]: 'what', [ids.reveal.bucketPurpose]: 'purpose', [ids.reveal.bucketWho]: 'maker' }
+// A planner that opens the target bucket's morph card by perception (closing a wrong-bucket card first).
+const openBucketCard = (bucketId: string): Planner => async (_g, obs) => {
+  const v = (id: string) => obs.visibleIds.includes(id)
+  if (v(ids.reveal.bucketCard)) {
+    const cur = (await d.state(ids.reveal.bucketCard)).attrs.bucket
+    if (cur === CARD_ATTR[bucketId]) return { kind: 'done', rationale: 'target card is open' }
+    return { kind: 'tap', id: ids.nav.close, rationale: 'close the wrong card first' }
+  }
+  if (v(bucketId)) return { kind: 'tap', id: bucketId, rationale: `open ${bucketId}` }
+  return { kind: 'done', rationale: 'bucket not reachable' }
+}
+const cardTextFor = async (bucketId: string, label: string): Promise<string> => {
+  await pollActive(bucketId)
+  await new Agent(d, openBucketCard(bucketId)).achieve(`open the ${label} bucket`, { maxSteps: 6 })
+  await d.waitFor(ids.reveal.bucketCard, { timeoutMs: 3000 })
+  const st = await d.state(ids.reveal.bucketCard)
+  if (st.attrs.bucket !== CARD_ATTR[bucketId]) throw new Error(`opened the ${st.attrs.bucket} card, not ${label}`)
+  return st.text ?? ''
+}
+
+await check('logo-brand: the MAKER bucket, opened by a real perceived tap, NAMES the brand (Microsoft) — the "empty maker" complaint fixed', async () => {
+  const t = await cardTextFor(ids.reveal.bucketWho, 'maker')
+  if (!/microsoft/i.test(t)) throw new Error('maker card does not name Microsoft: ' + JSON.stringify(t))
+})
+await check('logo-brand: the PURPOSE bucket, opened by a real perceived tap, ANCHORS the object (a controller for an Xbox), not a bare category truism', async () => {
+  const t = await cardTextFor(ids.reveal.bucketPurpose, 'purpose')
+  if (!/controller/i.test(t) || !/xbox|game/i.test(t)) throw new Error('purpose card does not anchor the object: ' + JSON.stringify(t))
+})
+await check('logo-brand: the WHAT bucket, opened by a real perceived tap, NAMES the category (a game controller), never a bare hedge — the "what never says what it is" complaint fixed', async () => {
+  const t = await cardTextFor(ids.reveal.bucketWhat, 'what')
+  if (!/game controller|controller/i.test(t)) throw new Error('what card does not name the category: ' + JSON.stringify(t))
+  if (/^\s*(i'?d wager|i would wager)/i.test(t)) throw new Error('what is a bare hedge with no identification: ' + JSON.stringify(t))
 })
 
 await rig.stop()
 console.log(
   fails() === 0
-    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real reveal dock by perception (open What → hear it, open Facts → chips, Ask Voxi → nav, open camera from the empty invite), every outcome pinned deterministically'
+    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real reveal dock by perception (open What → hear it, open Facts → chips, Ask Voxi → nav; recovered from a refusal back to the viewfinder in place; saw the empty home IS the live viewfinder; slid back in place with the item preserved; and on a logo-brand reveal opened What/Purpose/Maker and pinned the fixed content — category named, object anchored, brand named), every outcome pinned deterministically'
     : `\nAGENTIC FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

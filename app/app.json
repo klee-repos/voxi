@@ -2,7 +2,7 @@
   "expo": {
     "name": "Voxi",
     "slug": "voxi",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "scheme": "voxi",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -17,28 +17,41 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.voxi.app",
+      "bundleIdentifier": "com.kvnlee.voxi",
+      "appleTeamId": "DRJEJC9KRM",
       "config": {
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "NSCameraUsageDescription": "Voxi uses the camera to photograph objects you want the Guide to identify. Point at objects, never people.",
-        "NSMicrophoneUsageDescription": "Voxi uses the microphone for voice conversations with the Guide. Sessions are recorded and transcribed; you can switch to keyboard at any time.",
+        "NSCameraUsageDescription": "Voxi uses the camera to photograph objects for the Guide.",
+        "NSMicrophoneUsageDescription": "Voxi uses the microphone for voice chat with the Guide.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
         ],
         "NSAllowsLocalNetworking": true
-      }
+      },
+      "bitcode": false,
+      "buildNumber": "4"
     },
     "android": {
-      "package": "com.voxi.app",
+      "package": "com.kvnlee.voxi",
       "adaptiveIcon": {
         "backgroundColor": "#0B0B14"
       },
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -80,7 +93,12 @@
     "extra": {
       "clerkPublishableKey": "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}",
       "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}",
-      "pipecatConnectUrl": "${EXPO_PUBLIC_PIPECAT_CONNECT_URL}"
-    }
+      "pipecatConnectUrl": "${EXPO_PUBLIC_PIPECAT_CONNECT_URL}",
+      "router": {},
+      "eas": {
+        "projectId": "12b59473-2cb0-4703-9003-7b1e294f17f3"
+      }
+    },
+    "owner": "klee248"
   }
 }

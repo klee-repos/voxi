@@ -201,6 +201,26 @@ await check('the Curious-facts card: ≥3 fact rows, each with its OWN source li
   if (srcTexts.some((t) => /https?:\/\//.test(t))) throw new Error('a raw URL leaked into a source link (D3 regression): ' + JSON.stringify(srcTexts))
 })
 
+// ── NO-REMOUNT identity (LOADING-EXPERIENCE-PLAN §5, D1): the full-bleed photo is ONE element hoisted above the
+//    band branch, so the loading overlay dissolving into the dock must NOT remount it (a silent flash regression).
+//    The 'slow' fixture stalls the stream, so we read the photo element's identity DURING loading, then again
+//    after settle, and assert it is the SAME element (stable data-mounted = same pager cell key). ──
+console.log('\nconverge: NO-REMOUNT — the photo survives the loading→dock dissolve (D1, no flash):')
+await page.goto(`${base}/?scan=slow`)
+await check('the loading overlay (migrated processing.loadingLine) shows OVER the photo before the band settles', async () => {
+  await d.waitFor(ids.reveal.card, { timeoutMs: 8000 })
+  await d.waitFor(ids.reveal.photoThumb, { timeoutMs: 8000 })
+  await d.waitFor(ids.processing.loadingLine, { timeoutMs: 8000 }) // the loader lives on the reveal surface now, not a /processing route
+})
+const mountedDuringLoad = (await d.state(ids.reveal.photoThumb)).attrs.mounted ?? ''
+await check('the SAME photo element survives the settle dissolve — no remount, no flash (data-mounted stable)', async () => {
+  if (!mountedDuringLoad) throw new Error('photoThumb had no data-mounted identity during loading')
+  await d.waitFor(ids.reveal.title, { timeoutMs: 15000 }) // the dock name appears once the band settles
+  const mountedAfter = (await d.state(ids.reveal.photoThumb)).attrs.mounted ?? ''
+  if (!mountedAfter) throw new Error('photoThumb missing after settle (it remounted away)')
+  if (mountedAfter !== mountedDuringLoad) throw new Error(`photo REMOUNTED across settle: was "${mountedDuringLoad}", now "${mountedAfter}"`)
+})
+
 await rig.stop()
 
 // ── Rig 2: speech UNCONFIGURED — the per-bucket negative control (the route fails LOUD, the card says so). ──

@@ -52,9 +52,12 @@ function AppShell(): React.ReactElement {
         <Stack.Screen name="index" />
         <Stack.Screen name="welcome" />
         <Stack.Screen name="first-run" />
-        <Stack.Screen name="(tabs)" />
+        {/* camera ⇄ reveal is a SWIPE between the same cached photo — NO screen cross-fade (that read as a "weird
+            fade in / fade out" / a phantom loading state). Instant nav; the photo is identical, so the dock simply
+            appears over it. `reveal` covers camera→reveal (+ the rare processing→reveal); `(tabs)` covers reveal→camera. */}
+        <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
         <Stack.Screen name="processing" options={{ animation: 'fade' }} />
-        <Stack.Screen name="reveal" />
+        <Stack.Screen name="reveal" options={{ animation: 'none' }} />
         <Stack.Screen name="podcast" options={{ presentation: 'modal' }} />
         <Stack.Screen name="conversation" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="interview" />

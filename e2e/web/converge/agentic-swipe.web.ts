@@ -130,31 +130,37 @@ await check('swiping back returns to the newest item', async () => {
   throw new Error(`did not page back to index ${idxBefore} (now ${await posAttr('index')})`)
 })
 
-// The reveal behaviour: on the newest item, swiping toward a newer item (which doesn't exist) opens the camera.
-await check('swiping PAST the newest (pager index 0, the camera page) opens the capture screen', async () => {
+// THE MERGE (camera-as-a-page): page 0 is the LIVE VIEWFINDER on the SAME pager — swiping to it is pure scrolling,
+// NO navigation (no screen swap → no fade). It exposes the `camera.screen` home marker.
+await check('swiping to the viewfinder (page 0) shows the camera home IN PLACE — no navigation fires', async () => {
+  const navBefore = await lastNav()
   await swipeToPage(0)
   const deadline = Date.now() + 6000
   while (Date.now() < deadline) {
-    const nav = await lastNav()
-    if (nav && /camera/.test(nav)) return
+    if ((await d.state(ids.camera.screen)).visible) {
+      if ((await lastNav()) !== navBefore) throw new Error(`a navigation fired swiping to the viewfinder (merge violated): ${await lastNav()}`)
+      return
+    }
     await sleep(150)
   }
-  throw new Error(`swiping past the newest did not open the camera (last-nav=${await lastNav()})`)
+  throw new Error(`swiping to page 0 did not surface the viewfinder home (last-nav=${await lastNav()})`)
 })
 
-// The MIRROR behaviour on the camera: swipe left off the viewfinder → a brief "opening" beat → the most recent
-// catalogued item's reveal.
-await check('swiping left on the camera shows an opening beat, then the most recent item', async () => {
-  await d.waitFor(ids.camera.screen, { timeoutMs: 8000 })
-  await d.waitFor(ids.camera.pager, { timeoutMs: 6000 }) // the pager is present once a catalogued item exists
-  await page.evaluate((pid) => {
-    const el = document.querySelector(`[data-testid="${pid}"]`) as HTMLElement | null
-    if (!el) throw new Error('camera.pager not found')
-    el.scrollLeft = el.clientWidth // scroll to page 1 (the newest item)
-    el.dispatchEvent(new Event('scroll', { bubbles: true }))
-  }, ids.camera.pager)
-  await d.waitFor(ids.camera.opening, { timeoutMs: 3000 }) // the loading beat for the transition
-  await d.waitFor(ids.reveal.card, { timeoutMs: 8000 }) // then the newest item's reveal
+// And back: viewfinder → newest item is the SAME pager scroll — reveal dock appears IN PLACE, NO navigation, no
+// "opening" beat. This is the whole point: camera⇄item is one surface, nothing to fade or remount.
+await check('swiping viewfinder → newest item is CONTINUOUS + IN PLACE — no navigation, no "opening" beat', async () => {
+  const navBefore = await lastNav()
+  await swipeToPage(1) // page 1 = the newest item
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    if ((await d.state(ids.reveal.card)).visible && (await posAttr('index')) === idxBefore) {
+      if ((await lastNav()) !== navBefore) throw new Error(`a navigation fired on the viewfinder→item swipe (merge violated): ${await lastNav()}`)
+      if ((await d.state(ids.camera.opening)).visible) throw new Error('the retired camera.opening beat is still rendering')
+      return
+    }
+    await sleep(150)
+  }
+  throw new Error('swiping viewfinder→item did not settle on the newest item in place')
 })
 
 await check('no uncaught errors across the real capture → paging journey', async () => {

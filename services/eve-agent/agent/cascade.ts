@@ -16,7 +16,8 @@ import { safety_gate, type SafetyClassifier, type SafetyThresholds, DEFAULT_SAFE
 import type { Thresholds } from '../../../packages/shared/src/arbitration'
 import { DEFAULT_THRESHOLDS } from '../../../packages/shared/src/arbitration'
 import type { Evidence } from '../../../packages/shared/src/confidence'
-import type { Narrator, NarrationClause, NarrativeBucket } from './providers/live-narrator'
+import type { Narrator, NarrationClause, NarrativeBucket, NarrationInput } from './providers/live-narrator'
+import { gateNarration } from './providers/live-narrator'
 import type { Researcher, ResearchInput } from './providers/live-research'
 import type { DossierProvider } from './providers/live-dossier'
 import type { DossierInput } from './subagents/researcher'
@@ -108,6 +109,49 @@ export function isDistinctiveBrand(brand: string | undefined): boolean {
   return single.length >= 3 && !COMMON_WORD_BRANDS.has(single)
 }
 
+/** Substance / material words that are NEVER a maker, even though `isDistinctiveBrand` accepts them (it only
+ *  screens common-word BRAND homonyms, not materials). Kept SEPARATE from COMMON_WORD_BRANDS so the shipped
+ *  observedBrand lane is untouched — a material read off an object already fails observedBrandFrom corroboration.
+ *  This closes the "Ceramic Mug → a 'Ceramic' maker" fabrication path (adversarial: isDistinctiveBrand('Ceramic')
+ *  is true). */
+const MATERIAL_WORDS: ReadonlySet<string> = new Set([
+  'ceramic', 'porcelain', 'stoneware', 'earthenware', 'clay', 'plastic', 'acrylic', 'resin', 'wood', 'wooden',
+  'timber', 'oak', 'pine', 'metal', 'metallic', 'steel', 'stainless', 'iron', 'aluminium', 'aluminum', 'tin',
+  'brass', 'copper', 'bronze', 'chrome', 'glass', 'crystal', 'leather', 'suede', 'rubber', 'silicone', 'concrete',
+  'cement', 'stone', 'marble', 'granite', 'cardboard', 'paper', 'fabric', 'cotton', 'wool', 'silk', 'linen',
+  'canvas', 'nylon', 'polyester', 'bamboo', 'wicker', 'rattan',
+])
+
+const foldTok = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+const categoryTokensOf = (result: IdentifyResult): Set<string> =>
+  new Set((result.category ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))
+
+/** The first "brand-like" token of a CLEAN display title — the leading token that names the object BEYOND its
+ *  category ("Xbox" from "Xbox Wireless Controller", "Canon" from "Canon AE-1"). Returns undefined when that token
+ *  is generic: a material ("Ceramic Mug"), or a word that is part of the object's OWN category ("Office Chair").
+ *  This is the CORROBORATED brand — a token the VLM put in the confident display NAME, not a bare inferred make. */
+function leadingBrandToken(displayTitle: string | undefined, categoryToks: Set<string>): string | undefined {
+  const first = (displayTitle ?? '').trim().split(/\s+/).filter(Boolean)[0]
+  if (!first) return undefined
+  const fold = foldTok(first)
+  if (!isDistinctiveBrand(first) || MATERIAL_WORDS.has(fold) || categoryToks.has(fold)) return undefined
+  return first
+}
+
+/**
+ * The maker/brand ENTITY to research — CORROBORATED in what the VLM read or named, never a bare inferred `make`
+ * field (adversarial review + user decision "corroborated brand-in-name"). Prefers the observed on-object brand
+ * (the shipped OCR path, unchanged); else the leading brand token of the confident display title, and ONLY on a
+ * single-candidate reveal — a 2-candidate disagreement stays class-lane so a hedged "X or Y" never asserts a maker.
+ * ONE source of truth: both buildDossierInput's brand routing AND the sync-researcher-skip gate call this, so a
+ * logo-brand object (Xbox) is treated identically in both places (no drift).
+ */
+export function deriveMaker(result: IdentifyResult): string | undefined {
+  if (result.observedBrand && isDistinctiveBrand(result.observedBrand)) return result.observedBrand
+  if (result.candidates.length >= 2) return undefined
+  return leadingBrandToken(result.displayTitle, categoryTokensOf(result))
+}
+
 /**
  * The honesty-safe DOSSIER keying for the async deep-research step (PROMPT-QUALITY §3.B4, §13.2/§13.3).
  *  - CONFIDENT → 'item' scope on the corroborated make + BASE model (`subject` prefers the clean `displayTitle`).
@@ -122,7 +166,6 @@ export function buildDossierInput(result: IdentifyResult): DossierInput | null {
   const chosen = result.candidates[0]
   const make = chosen?.make
   const model = chosen?.model?.replace(/\(.*?\)/g, '').trim() || undefined
-  const brand = result.observedBrand
   const category = result.category || result.label
 
   // A CONFIDENT identity with a real MAKE (e.g. "Canon AE-1", "La Croix") → research THAT specific item.
@@ -132,15 +175,18 @@ export function buildDossierInput(result: IdentifyResult): DossierInput | null {
     return { subject, scope: 'item', subjectTerms: terms.length ? terms : [result.label] }
   }
 
-  // Otherwise — a hedged reveal, OR a CONFIDENT-but-GENERIC web label ("coffee cup") with no make — if the object
-  // BEARS a distinctive brand we read off it, research the brand ENTITY, keyed on the brand REGARDLESS of the arbiter's
-  // band, so a generic web winner never buries the brand printed on the object (the East-Street-mug bug). Honest: we
-  // research the brand, never asserting the specimen's edition (the brand-lane extract prompt forbids that).
-  if (brand && isDistinctiveBrand(brand)) {
-    return { subject: brand, scope: 'item', subjectTerms: [brand], brandLane: true, objectType: category }
+  // Otherwise — a hedged reveal, OR a CONFIDENT-but-GENERIC web label ("coffee cup") — if the object bears a
+  // CORROBORATED brand (observed on the object OR the brand token in its confident display name, e.g. "Xbox"),
+  // research the brand ENTITY, keyed on the brand REGARDLESS of band. This is what fills the maker for a logo-brand
+  // product whose brand is not readable TEXT (the Xbox controller). deriveMaker is the single corroboration+gate;
+  // it never takes a bare inferred make, so a plain "Ceramic Mug" derives no brand → honest-empty maker. The
+  // brand-lane extract/grounding prompts keep facts about the ENTITY, never asserting the specimen's edition.
+  const maker = deriveMaker(result)
+  if (maker) {
+    return { subject: maker, scope: 'item', subjectTerms: [maker], brandLane: true, objectType: category }
   }
 
-  // No brand read → class scope on the category, with the (unconfirmed) VLM make/model disallowed.
+  // No corroborated brand → class scope on the category, with the (unconfirmed) VLM make/model disallowed.
   const disallowed = [make, model].filter(Boolean) as string[]
   return { subject: category, scope: 'class', subjectTerms: [category], disallowedSpecificTerms: disallowed }
 }
@@ -177,6 +223,29 @@ function sectionFor(
     }
   }
   return { text: group.map((c) => c.text).join(' '), sourceUrl, sourceTitle: '', quote }
+}
+
+/**
+ * F1 backstop — the deterministic guarantee that the What card ALWAYS names WHAT KIND of thing it is (the user's
+ * "the what must always call out what it is"). Returns the narrator's `what_is_it` clauses, but ensures a plain
+ * category statement is present:
+ *   - ZERO what clauses → synthesize one ("This appears to be a video game controller.").
+ *   - a hedged (PROBABLE) reveal whose what NEVER names the category HEAD noun ("controller") → PREPEND that
+ *     category clause, so a vague "it exhibits the ergonomic shape of that generation" still leads with the noun.
+ *   - a CONFIDENT reveal, or a what that already names the category → leave the LLM's what as-is.
+ * The synthesized clause is LOWERCASED (a common noun never trips `smugglesFalsifiable`'s proper-noun-run check
+ * that the raw Title-Case `category` would) and run through the REAL honesty gate, so "everything the user sees is
+ * gate-approved" holds. No category → no backstop (never fabricated).
+ */
+function whatWithBackstop(clauses: NarrationClause[], input: NarrationInput, category?: string): NarrationClause[] {
+  const whats = clauses.filter((c) => c.bucket === 'what_is_it')
+  const cat = category?.trim()
+  if (!cat) return whats
+  const head = cat.toLowerCase().split(/\s+/).filter((w) => w.length >= 3).pop()
+  const namesCategory = !!head && whats.some((c) => c.text.toLowerCase().includes(head))
+  if (whats.length && (namesCategory || input.band === 'CONFIDENT')) return whats
+  const backstop = { text: `This appears to be a ${cat.toLowerCase()}.`, claimType: 'flavor' as const, bucket: 'what_is_it' as const }
+  return [...gateNarration(input, [backstop]).clauses, ...whats]
 }
 
 /**
@@ -271,7 +340,9 @@ export async function* runIdentificationCascade(
     // Skip the sync CLASS researcher for a brand-primary object — its generic category facts ("a ceramic mug retains
     // heat") only produce a GENERIC first-pass purpose that muddies a branded reveal. The dossier BRAND lane supplies
     // the real, specific purpose/maker; until it lands the bucket honestly loads rather than showing category filler.
-    const researchInput = result.observedBrand && isDistinctiveBrand(result.observedBrand) ? null : buildResearchInput(result)
+    // Gate on deriveMaker (NOT observedBrand alone) so a logo-brand product (Xbox: brand in the display name, no OCR)
+    // skips the generic researcher exactly as an OCR-branded object does — the two gates share ONE source of truth.
+    const researchInput = deriveMaker(result) ? null : buildResearchInput(result)
     if (deps.researcher && researchInput) {
       try {
         const facts = await deps.researcher.research(researchInput)
@@ -280,7 +351,7 @@ export async function* runIdentificationCascade(
         /* enrichment is best-effort — never block or fail the reveal on a research error */
       }
     }
-    const narration = await deps.narrator.narrate({
+    const firstPassInput: NarrationInput = {
       label: result.label,
       // Narrate about the SPECIFIC identity (the clean displayTitle), not the raw make+model concat (§4.B / D-2).
       subject: result.displayTitle ?? result.label,
@@ -288,12 +359,15 @@ export async function* runIdentificationCascade(
       evidence, // includes the observed-brand `obs` row (narrator MAY cite it as an `observation`, §13.1)
       unsupportedFields: result.unsupported_fields,
       candidates: result.candidates.map((c) => c.name),
-    })
+    }
+    const narration = await deps.narrator.narrate(firstPassInput)
     // Stream ONLY the `what_is_it` clauses as `token`s (→ `whatItIs`) and PIN the what-only audio synchronously —
     // so `/speech/what` voices exactly the What card's text, never the full what+purpose+maker composite
     // (adversarial A). The `purpose`/`maker` clauses become their own progressive `section` events (from the FAST
-    // first pass, so their icons light early — later superseded by the richer dossier upgrade below).
-    const whatClauses = narration.clauses.filter((c) => c.bucket === 'what_is_it')
+    // first pass, so their icons light early — later superseded by the richer dossier upgrade below). F1 backstop:
+    // if the narrator grounded no what clause, fall back to a gate-approved category clause so the What card always
+    // names the KIND of thing (never a blank/hedge-only What).
+    const whatClauses = whatWithBackstop(narration.clauses, firstPassInput, result.category)
     if (whatClauses.length) deps.onNarration?.(whatClauses.map((c) => c.text))
     for (const c of whatClauses) yield at({ type: 'token', text: c.text })
     for (const bucket of SECTION_BUCKETS) {
@@ -318,7 +392,7 @@ export async function* runIdentificationCascade(
           if (ev.type === 'fact') {
             yield at({ type: 'fact', text: ev.fact.text, sourceUrl: ev.fact.sourceUrl, sourceTitle: ev.fact.sourceTitle, quote: ev.fact.quote })
           } else if (ev.type === 'done' && ev.dossier && ev.dossier.evidence.length) {
-            const upgraded = await deps.narrator.narrate({
+            const upgradeInput: NarrationInput = {
               label: result.label,
               subject: result.displayTitle ?? result.label,
               band: result.confidence_band,
@@ -327,12 +401,19 @@ export async function* runIdentificationCascade(
               evidence: [...result.evidence.filter((e) => e.sourceUrl.startsWith('voxi:observed')), ...ev.dossier.evidence],
               unsupportedFields: result.unsupported_fields,
               candidates: result.candidates.map((c) => c.name),
-            })
+            }
+            const upgraded = await deps.narrator.narrate(upgradeInput)
             // The upgrade refines each bucket from the richer dossier evidence: `what_is_it` → the what-only
             // `description_upgrade` (never the full composite — adversarial A/G), `purpose`/`maker` → `section`
             // events that SUPERSEDE the first-pass ones (the client's appendSection is last-write-wins per bucket).
-            const whatUp = upgraded.clauses.filter((c) => c.bucket === 'what_is_it')
-            if (whatUp.length) yield at({ type: 'description_upgrade', text: whatUp.map((c) => c.text).join(' ') })
+            // Upgrade the What ONLY when the upgrade produced REAL what clauses — else the F1 backstop would DOWNGRADE
+            // a richer first-pass what to a bare category floor (a measured regression when the dossier yields no what
+            // clause). whatWithBackstop still runs so a vague-but-real upgrade gets the category prepended.
+            const rawWhatUp = upgraded.clauses.filter((c) => c.bucket === 'what_is_it')
+            if (rawWhatUp.length) {
+              const whatUp = whatWithBackstop(upgraded.clauses, upgradeInput, result.category)
+              yield at({ type: 'description_upgrade', text: whatUp.map((c) => c.text).join(' ') })
+            }
             for (const bucket of SECTION_BUCKETS) {
               const sec = sectionFor(bucket, upgraded.clauses, ev.dossier.evidence)
               if (sec) {

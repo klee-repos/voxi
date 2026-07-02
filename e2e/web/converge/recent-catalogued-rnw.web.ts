@@ -4,10 +4,10 @@
  * capture WITH a real photo, and drives the floating `RecentCard` with real clicks:
  *
  *   toggle → card OPENS (data-open flips false→true) → the recent tile shows a persisted thumbnail the browser
- *   ACTUALLY DECODES (naturalWidth>0, DRY parity with the Collection grid) → tapping the tile REVISITS: real nav
- *   to /processing, the store `photoUri` is SEEDED (the lost-photo regression guard), and the card CLOSES on tap
- *   (the shared revisit hook is state-agnostic, so RecentCard clears its own open state — otherwise its scrim
- *   would block the shutter on return to the camera tab).
+ *   ACTUALLY DECODES (naturalWidth>0, DRY parity with the Collection grid) → tapping the tile REVISITS the item
+ *   IN PLACE (the camera-as-a-page merge: the ONE home pager scrolls onto the item — no /reveal route hop), the
+ *   store `photoUri` is SEEDED (the lost-photo regression guard), and the whole viewfinder overlay (RecentCard
+ *   included) tears down as we leave the viewfinder, so its scrim can never block the shutter.
  *
  * This is the "no cheating" proof: real observable state (a decoded <img>, a real navigation intent, the real
  * store) through stable testIDs — the LLM never decides pass/fail. Run: `bun e2e/web/converge/recent-catalogued-rnw.web.ts`.
@@ -69,39 +69,55 @@ await check('the tile carries the identified label from the durable reveal (neve
 await page.screenshot({ path: SHOT }).catch(() => {})
 console.log(`   ↳ screenshot: ${SHOT}`)
 
-await check('tapping a recent tile REVISITS: nav /processing + store.photoUri seeded + card CLOSES', async () => {
+await check('tapping a recent tile OPENS the item IN PLACE: no route hop + store.photoUri seeded + overlay tears down', async () => {
+  const navBefore = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
   await d.tap(ids.camera.recentItem)
-  // (a) real navigation intent
+  // (a) NO navigation — the recent tile loads the item into the ONE home pager IN PLACE (the merge), scrolling off
+  //     the viewfinder onto the item. The over-photo back chevron surfacing proves we left the viewfinder.
   const deadline = Date.now() + 6000
-  let nav = ''
   while (Date.now() < deadline) {
-    nav = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
-    if (/processing/.test(nav)) break
+    if ((await d.state(ids.nav.back)).visible) break
     await sleep(100)
   }
-  if (!/processing/.test(nav)) throw new Error('data-last-nav=' + JSON.stringify(nav))
+  if (!(await d.state(ids.nav.back)).visible) throw new Error('recent tile did not open the item in place (no over-photo back chevron appeared)')
+  const nav = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
+  if (nav !== navBefore && /reveal|processing/.test(nav)) throw new Error('a navigation fired opening a recent tile — it must open in place: ' + JSON.stringify(nav))
   // (b) the lost-photo regression: revisit SEEDS the durable photo into the store (was reset() WITHOUT startCapture,
   //     so photoUri stayed null → a blank reveal). photoUrl is a signed /media URL, so the guard is simply non-null.
   const photoUri = await page.evaluate(
     () => (window as unknown as { __captureStore?: { getState: () => { photoUri: string | null } } }).__captureStore?.getState().photoUri ?? null,
   )
   if (!photoUri) throw new Error('revisit did not seed photoUri (was null) — the lost-photo bug')
-  // (c) the card closed on the tile tap (RecentCard clears its own open state; the shared hook can't)
-  const s = await d.state(ids.camera.recent)
-  if (s.attrs?.open === 'true') throw new Error('RecentCard stayed OPEN after a tile tap — its scrim would block the shutter on return')
+  // (c) leaving the viewfinder tears down the RecentCard overlay entirely, so its scrim can never block the shutter.
+  if ((await d.state(ids.camera.recent)).visible) throw new Error('the RecentCard overlay is still mounted after opening an item — its scrim would block the shutter')
 })
 
 // ---- UPDATE LOGIC: a brand-new capture must APPEAR in Recently catalogued (the reported bug) ----
-// The camera is a persistent tab (never remounts), so a bare staleTime never refetches it; onShutter must
+// The Home is a persistent surface (never remounts), so a bare staleTime never refetches it; onShutter must
 // invalidateQueries(['threads']) after createThread or the newest capture never shows. Prove the list grows.
+// We are on the item page from the previous check — slide back to the viewfinder to reach the shutter + tray.
 await check('a NEW capture APPEARS in Recently catalogued — the collection query refetches after createThread', async () => {
   const count = () => page.locator(`[data-testid="${ids.camera.recentItem}"]`).count()
-  const before = await count()
-  await d.tap(ids.camera.shutter) // web shutter → real BFF createThread (a new durable thread)
-  const deadline = Date.now() + 10000
+  // back to the viewfinder, open the tray, count the baseline
+  await d.tap(ids.nav.back)
+  await d.waitFor(ids.camera.screen, { timeoutMs: 6000 })
+  await d.tap(ids.camera.recentToggle)
+  await d.waitFor(ids.camera.recentItem, { timeoutMs: 5000 })
+  let before = 0
+  { const dl = Date.now() + 3000; while (Date.now() < dl) { before = await count(); if (before > 0) break; await sleep(120) } }
+  // close the tray (its scrim would swallow the shutter tap), then photograph a NEW object
+  await d.tap(ids.camera.recentClose)
+  await sleep(300)
+  await d.tap(ids.camera.shutter) // web shutter → real BFF createThread (a new durable thread), opens the item in place
+  // the capture opens the item in place; slide back to the viewfinder and re-open the tray to see the grown list
+  await d.waitFor(ids.nav.back, { timeoutMs: 10000 })
+  await d.tap(ids.nav.back)
+  await d.waitFor(ids.camera.screen, { timeoutMs: 6000 })
+  await d.tap(ids.camera.recentToggle)
+  const deadline = Date.now() + 12000
   while (Date.now() < deadline) {
     if ((await count()) > before) return
-    await sleep(150)
+    await sleep(200)
   }
   throw new Error(`recent list did not grow after a new capture (stayed ${before}) — invalidateQueries(['threads']) missing`)
 })

@@ -1,9 +1,9 @@
 /**
  * flow-rnw.web.ts — CONVERGENCE PROOF for the whole USER JOURNEY, not one screen. Mounts the real screens under
  * a real router (NavHost) + DrawerHost (flow-entry) and clicks through EXACTLY what a user does — camera → open
- * tray → open drawer → shutter → processing → reveal — asserting the cross-screen contract at each hop against
- * the real BFF. This is the gate that catches the bugs a per-screen proof can't: navigation dead-ends, the
- * captured image NOT persisting camera → processing → reveal, the tray/drawer failing to open.
+ * tray → open drawer → shutter → item (IN PLACE, the camera-as-a-page merge) — asserting the cross-screen
+ * contract at each hop against the real BFF. This is the gate that catches the bugs a per-screen proof can't:
+ * navigation dead-ends, the captured image NOT persisting into the item, the tray/drawer failing to open.
  *
  * Run: `bun e2e/web/converge/flow-rnw.web.ts`  (exit 0 = GREEN).
  */
@@ -21,7 +21,7 @@ const { check, fails } = makeChecker()
 const d = rig.driver
 const p = rig.page
 
-console.log('\nconverge FLOW: real camera → tray → drawer → shutter → processing → reveal:')
+console.log('\nconverge FLOW: real camera → tray → drawer → shutter → reveal (loading overlay in place):')
 await p.goto(rig.base + '/')
 
 await check('camera home renders (full-bleed)', () => d.waitFor(ids.camera.screen, { timeoutMs: 8000 }))
@@ -43,15 +43,19 @@ await check('the drawer opens from camera and exposes Collection / Settings / Ho
   await p.waitForTimeout(300)
 })
 
-await check('shutter captures (real BFF createThread) and navigates to /processing', async () => {
+await check('shutter captures (real BFF createThread) and opens the fresh item IN PLACE (no route hop, loading overlay over the SAME surface)', async () => {
+  // The camera-as-a-page merge: the viewfinder and the item reveal are ONE pager on ONE surface, so a fresh
+  // capture scrolls onto the new item with NO navigation — nothing to remount or fade. The over-photo back
+  // chevron (nav.back) surfacing proves the pager advanced off the viewfinder onto the item.
   await d.tap(ids.camera.shutter)
   const deadline = Date.now() + 8000
   while (Date.now() < deadline) {
     const n = await p.evaluate(() => document.body.getAttribute('data-last-nav'))
-    if (n && /processing/.test(n)) return
+    if (n && /reveal/.test(n)) throw new Error('a /reveal navigation fired — the merged capture must open in place, not route')
+    if ((await d.state(ids.nav.back)).visible) return
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error('shutter did not navigate to /processing')
+  throw new Error('shutter did not open the item in place (no over-photo back chevron appeared)')
 })
 
 await check('the captured image persists into the reveal, shown as taken', async () => {
@@ -84,8 +88,10 @@ type StoreHandle = { getState: () => { threadId: string | null }; setState: (x: 
 const readThreadId = (pg: typeof p): Promise<string | null> =>
   pg.evaluate(() => (window as unknown as { __captureStore?: StoreHandle }).__captureStore?.getState().threadId ?? null)
 
-// ── Exit rig A: a CAMERA exit clears the store — but only on UNMOUNT, so it can't flash the empty branch. ──
-console.log('\nconverge FLOW: reveal → back → camera clears the capture store (reset fires on unmount):')
+// ── Exit rig A: the merged home. Tapping back on an item slides to the viewfinder IN PLACE — the Home never
+//    unmounts and the item is DELIBERATELY PRESERVED (it stays one swipe away, the whole point of the merge), so
+//    there is no store reset and structurally no empty-branch flash. NO navigation fires. ──
+console.log('\nconverge FLOW: reveal → back → viewfinder IN PLACE, item preserved (no unmount, no nav):')
 const rigA = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, podcast: 1, voiceMin: 10 } } })
 {
   const da = rigA.driver
@@ -94,18 +100,20 @@ const rigA = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, pod
   await da.waitFor(ids.camera.screen, { timeoutMs: 8000 })
   await da.tap(ids.camera.shutter)
   await da.waitFor(ids.reveal.card, { timeoutMs: 12000 })
-  await check('the READY reveal has a threadId before exiting', async () => {
-    if (!(await readThreadId(pa))) throw new Error('expected a threadId on the READY reveal')
+  await da.waitFor(ids.nav.back, { timeoutMs: 8000 }) // the fresh item's over-photo back chevron
+  let threadId0: string | null = null
+  await check('the READY item has a threadId before sliding back', async () => {
+    threadId0 = await readThreadId(pa)
+    if (!threadId0) throw new Error('expected a threadId on the READY item')
   })
-  await check('tapping back swaps to the REAL camera screen AND clears the store (threadId → null on unmount)', async () => {
+  await check('tapping back slides to the viewfinder IN PLACE, PRESERVING the item (no unmount, no navigation)', async () => {
+    await pa.evaluate(() => document.body.removeAttribute('data-last-nav'))
     await da.tap(ids.nav.back)
-    await da.waitFor(ids.camera.screen, { timeoutMs: 5000 })
-    const deadline = Date.now() + 3000
-    while (Date.now() < deadline) {
-      if ((await readThreadId(pa)) === null) return
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    throw new Error('threadId was not cleared after a camera exit — the unmount reset did not fire')
+    await da.waitFor(ids.camera.screen, { timeoutMs: 5000 }) // the viewfinder surfaced
+    if (!(await da.state(ids.reveal.card)).visible) throw new Error('reveal.card unmounted on back — the Home must be one persistent surface')
+    const nav = await pa.evaluate(() => document.body.getAttribute('data-last-nav'))
+    if (nav && /camera|reveal|processing/.test(nav)) throw new Error('a navigation fired sliding back to the viewfinder (merge violated): ' + nav)
+    if ((await readThreadId(pa)) !== threadId0) throw new Error('the item was cleared on back — the merge must keep it one swipe away')
   })
 }
 await rigA.stop()
@@ -153,7 +161,7 @@ await rigB.stop()
 
 console.log(
   fails() === 0
-    ? '\nCONVERGE FLOW GREEN — the real camera → processing → reveal journey works end-to-end (image persists), a camera exit clears the store on unmount, and a reveal→/processing retry preserves it'
+    ? '\nCONVERGE FLOW GREEN — the merged camera→item journey works end-to-end in place (image persists, no route hop), sliding back to the viewfinder preserves the item, and a reveal→/processing retry preserves the store'
     : `\nCONVERGE FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

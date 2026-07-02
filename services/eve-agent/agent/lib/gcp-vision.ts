@@ -12,13 +12,44 @@ const LOCATION = process.env.GCP_LOCATION ?? 'us-central1'
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 
 let _tok: { value: string; exp: number } | null = null
-export function gcloudToken(): string {
-  if (_tok && Date.now() < _tok.exp) return _tok.value
+
+// On Cloud Run / GCE the metadata server mints the service-account token — there is NO gcloud CLI in the
+// container. Locally we fall back to `gcloud auth print-access-token`. Cloud Run always sets K_SERVICE.
+const ON_METADATA = !!(process.env.K_SERVICE || process.env.GCP_USE_METADATA)
+
+function spawnGcloudToken(): { value: string; exp: number } {
   const p = Bun.spawnSync(['gcloud', 'auth', 'print-access-token'], { stdout: 'pipe', stderr: 'pipe' })
   const value = new TextDecoder().decode(p.stdout).trim()
   if (!value) throw new Error('gcloud auth print-access-token failed: ' + new TextDecoder().decode(p.stderr))
-  _tok = { value, exp: Date.now() + 50 * 60_000 }
-  return value
+  return { value, exp: Date.now() + 50 * 60_000 }
+}
+
+async function metadataToken(): Promise<{ value: string; exp: number }> {
+  const res = await fetch(
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+    { headers: { 'Metadata-Flavor': 'Google' } },
+  )
+  if (!res.ok) throw new Error(`GCP metadata token ${res.status}: ${await res.text()}`)
+  const j = (await res.json()) as { access_token: string; expires_in: number }
+  // Refresh a few minutes before expiry so the sync accessor never serves a stale token.
+  return { value: j.access_token, exp: Date.now() + Math.max(60, j.expires_in - 300) * 1000 }
+}
+
+/**
+ * Warm/refresh the cached GCP access token from the best source: the metadata server on Cloud Run/GCE, else
+ * the gcloud CLI locally. Call ONCE at server boot (and on a timer) inside a container — there is no gcloud
+ * CLI there, so the synchronous `gcloudToken()` accessor relies on this cache being kept warm.
+ */
+export async function warmGcpToken(): Promise<void> {
+  _tok = ON_METADATA ? await metadataToken() : spawnGcloudToken()
+}
+
+/** Synchronous cached accessor used inline in request headers. Kept warm by warmGcpToken() on Cloud Run. */
+export function gcloudToken(): string {
+  if (_tok && Date.now() < _tok.exp) return _tok.value
+  if (ON_METADATA) throw new Error('GCP token cache is cold on Cloud Run — warmGcpToken() must run at boot')
+  _tok = spawnGcloudToken()
+  return _tok.value
 }
 
 export async function loadImageBytes(pathOrUrl: string): Promise<{ b64: string; mime: string }> {

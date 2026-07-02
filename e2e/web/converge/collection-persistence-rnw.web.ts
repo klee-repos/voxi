@@ -76,13 +76,15 @@ await check('the identified label STILL shows after the reload', async () => {
 })
 
 // ---- revisit: tapping a tile fires the real revisit navigation (which hydrates the durable photo + replays) ----
-await check('tapping the tile fires the real revisit navigation to /processing', async () => {
+// A known-band tile revisits straight to /reveal (READY from the cached band, no /processing detour); the reveal
+// surface owns the replay stream (LOADING-EXPERIENCE-PLAN §3).
+await check('tapping the tile fires the real revisit navigation to /reveal', async () => {
   await d.tap(ids.threads.item)
   const deadline = Date.now() + 6000
   let nav = ''
   while (Date.now() < deadline) {
     nav = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
-    if (/processing/.test(nav)) return
+    if (/reveal/.test(nav)) return
     await sleep(100)
   }
   throw new Error('data-last-nav=' + JSON.stringify(nav))

@@ -54,6 +54,35 @@ export function cleanField(s?: string): string | undefined {
   return stripped.length > 0 ? s.trim() : undefined // anything real survives → keep original; wholly-filler → absent
 }
 
+/**
+ * Clean a raw VLM make/model FIELD of the junk shape the VLM smuggles in: a trailing " or <alternative>"
+ * ("Xbox Wireless Controller or wood" → "Xbox Wireless Controller"). Trailing-alternation ONLY, whole-word "or",
+ * applied to the make/model FIELDS (never the display title, never mid-string), so a real name that legitimately
+ * contains " or " earlier, or parentheses (an edition), survives. Runs AFTER cleanField (wholly-filler). Conservative
+ * because arbitration + `deriveMaker` key on these fields — never blank a field (fall back to the original).
+ */
+export function cleanIdentityField(s?: string): string | undefined {
+  if (!s) return undefined
+  const cleaned = s.replace(/\s+\bor\b\s+.*$/i, '').replace(/\s{2,}/g, ' ').trim()
+  return cleaned.length >= 2 ? cleaned : s.trim()
+}
+
+/**
+ * Photo GENRE / medium / technique labels a reverse-image search returns INSTEAD of the object ("still life
+ * photography" for an Xbox controller on a table). Matched WHOLE-LABEL (case-insensitive), never as a substring —
+ * so a legit object called a "portrait lens" or a "Polaroid" is untouched. Such a label must never become a
+ * surfaced candidate nor a `contradicts` source (it dragged a good VLM identity to a bogus PROBABLE).
+ */
+const WEB_GENRE_LABELS: ReadonlySet<string> = new Set([
+  'still life', 'still-life', 'still life photography', 'photograph', 'photography', 'photo', 'photo shoot',
+  'product photography', 'stock photography', 'stock photo', 'close-up', 'closeup', 'macro photography', 'macro',
+  'portrait', 'portrait photography', 'illustration', 'drawing', 'image', 'images', 'picture', 'art',
+])
+export function isGenreLabel(label: string | undefined): boolean {
+  const t = (label ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  return t.length > 0 && WEB_GENRE_LABELS.has(t)
+}
+
 /** Sensitive / non-brand strings that must NEVER become citable observed evidence (PII/junk — §13.3, adversarial
  *  #8): emails, digit runs (phone/card/ID/DOB/serial), and punctuation/mark-only spans (©/®/™). */
 function looksSensitiveOrJunk(s: string): boolean {
@@ -162,20 +191,23 @@ export class LiveVisionProvider implements VisionProvider {
     const [vlm, web] = await Promise.all([geminiIdentify(b64, mime), visionWebDetect(b64)])
 
     // Strip non-answer filler from the identity fields (D-6) so "unbranded"/"unspecified"/"N/A" never pollute the
-    // name/label/subject/catalog-id — but only when the field is WHOLLY filler (cleanField keeps real names).
-    const make = cleanField(vlm.make)
-    const model = cleanField(vlm.model)
-    const year = cleanField(vlm.year_or_range)
+    // name/label/subject/catalog-id — but only when the field is WHOLLY filler (cleanField keeps real names) — then
+    // strip a trailing " or <alt>" the VLM smuggled into a field ("Xbox Wireless Controller or wood").
+    const make = cleanIdentityField(cleanField(vlm.make))
+    const model = cleanIdentityField(cleanField(vlm.model))
+    // A CONCRETE year only for the candidate name (parseYear → undefined for a range), never the verbose
+    // "2020-present (Shock Blue color released 2021)" string that garbled the surfaced candidate.
+    const yearNum = parseYear(vlm.year_or_range)
     // The brand READ off the object (distilled from the clean make, corroborated by the on-object text) — a grounded
     // observation that unblocks the brand-primary class without asserting an unconfirmed make/model (§13.1/§13.3).
     const readOff = [...(vlm.ocr_text ?? []), ...(vlm.distinguishing_features ?? []), vlm.display_title].filter(Boolean).join(' ')
     const observedBrand = observedBrandFrom(vlm.make, readOff)
 
     const vlmCandidate: Candidate = {
-      name: [year, make, model].filter(Boolean).join(' ').trim(),
+      name: [yearNum, make, model].filter(Boolean).join(' ').trim(),
       make,
       model,
-      year: parseYear(vlm.year_or_range),
+      year: yearNum,
       source: 'vlm',
       confidence: vlm.fine_confidence ?? 0.5,
       category: vlm.category || undefined, // coarse class label — feeds PROBABLE class-level reveal enrichment
@@ -197,20 +229,31 @@ export class LiveVisionProvider implements VisionProvider {
       this.vlmCache.set(b64, { make: vlmCandidate.make, model: vlmCandidate.model })
     }
 
-    if (web.bestGuess) {
+    // Neutralise a photo GENRE/medium bestGuess ("still life photography") — it must never become a surfaced
+    // candidate nor a `contradicts` source (it dragged a good VLM identity to a bogus PROBABLE — the Xbox bug). But
+    // KEEP the real reverse-image ENTITIES (they carry the true make/model), so `corroborates(web, vlm)` — which
+    // ignores web.confidence — still promotes a genuine CONFIDENT reveal (adversarial #9). Drop the web stage only
+    // when NOTHING usable survives (bestGuess junk/absent AND no non-genre entity).
+    const bestGuessJunk = isGenreLabel(web.bestGuess)
+    const usableEntities = web.entities.filter((e) => !isGenreLabel(e.description))
+    if (web.bestGuess && (!bestGuessJunk || usableEntities.length > 0)) {
       stages.web = {
-        name: web.bestGuess,
+        // Blank the name for a junk bestGuess so a genre string never surfaces or contradicts; keep it otherwise.
+        name: bestGuessJunk ? '' : web.bestGuess,
         source: 'web',
-        // verified_confidence = bestGuess↔entity AGREEMENT, not a raw entity relevance score (see webConfidence).
-        confidence: webConfidence(web),
-        // The ranked reverse-image entities — the real grounding the arbiter corroborates the VLM against
-        // (the headline bestGuess is often a generic/foreign label; the entities carry the true make/model).
-        aka: web.entities.map((e) => e.description),
+        // A junk bestGuess carries zero verified_confidence (never clears webVerified); real corroboration then
+        // comes ONLY from the surviving entities via `corroborates`. Otherwise the usual bestGuess↔entity agreement.
+        confidence: bestGuessJunk ? 0 : webConfidence(web),
+        // The ranked reverse-image entities (genre labels stripped) — the real grounding the arbiter corroborates
+        // the VLM against; the headline bestGuess is often a generic/foreign/genre label.
+        aka: usableEntities.map((e) => e.description),
       }
-      // Grounded evidence = the matching pages Vision found (the closed array the honesty gate later checks).
-      web.pages.forEach((p, i) =>
-        evidence.push({ ref: `web${i + 1}`, sourceUrl: p.url, claim: p.title || web.bestGuess! }),
-      )
+      // Grounded evidence = the matching pages Vision found (the closed array the honesty gate later checks). Skip a
+      // titleless page when the bestGuess is junk (never seed a genre string as a citable claim).
+      web.pages.forEach((p, i) => {
+        const claim = p.title || (bestGuessJunk ? '' : web.bestGuess!)
+        if (claim) evidence.push({ ref: `web${i + 1}`, sourceUrl: p.url, claim })
+      })
     }
     if (evidence.length) stages.evidence = evidence
 

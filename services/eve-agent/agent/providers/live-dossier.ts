@@ -74,9 +74,7 @@ export class FirecrawlGeminiDraft implements DossierDraftSource {
     // the label's STORY — who they are, when founded, notable works — not a merch-store listing) and names the object
     // type only as trailing context for purpose. Leading with "merchandise"/the object type pulled the storefront and
     // starved the maker bucket (§13.2/§13.5 — a measured before/after regression). Retriever ranking follows order.
-    const query = input.brandLane
-      ? `${input.subject} — brand or record label: history, founding, notable works and artists, and its ${input.objectType ?? 'merchandise'}`
-      : input.subject
+    const query = brandLaneQuery(input)
     const docs = await this.web.search(query, { limit: this.maxDocs })
     if (!docs.length) return { facts: [], sources: [] }
     const context = docs
@@ -90,6 +88,29 @@ export class FirecrawlGeminiDraft implements DossierDraftSource {
   }
 }
 
+/**
+ * The DEEP-path (Firecrawl) search query for a brand/maker lane — LEADS with the entity's identity + history (who
+ * they are, when founded, what they are known for), trailing the object type only as context. Leading with the
+ * object type / "merchandise" pulled the storefront and STARVED the maker (§13.2/§13.5 — a measured regression).
+ * The noun is generalized from "brand or record label" → "company, brand, maker or label" so it fits a hardware
+ * MAKER (Xbox/Microsoft) as well as a record label (Sub Pop). Non-brand-lane → the plain subject. Pure + exported
+ * so a unit test pins the history-first lead (the only artifact that catches a wording regression at `bun test`).
+ */
+export function brandLaneQuery(input: DossierInput): string {
+  return input.brandLane
+    ? `${input.subject} — company, brand, maker or label: history, founding, what they are best known for, and its ${input.objectType ?? 'merchandise'}`
+    : input.subject
+}
+
+/** The grounding-path (Gemini Search) subject phrasing — same entity-first framing, same generalized noun. */
+export function groundingSubject(input: DossierInput): string {
+  return input.brandLane
+    ? `the maker "${input.subject}" — the company, brand, maker or label behind this ${input.objectType ?? 'object'} (who they are, their history, what they are best known for, and why they make things like this)`
+    : input.scope === 'item'
+      ? `the ${input.subject}`
+      : `the category of object: ${input.subject}`
+}
+
 const guessType = (claim: string): ProposedFact['claimType'] =>
   /\b(1[89]\d\d|20\d\d)\b/.test(claim) ? 'date' : 'spec'
 
@@ -98,12 +119,12 @@ export class GeminiGroundingDraft implements DossierDraftSource {
   constructor(private timeoutMs = 8000) {}
 
   async draft(input: DossierInput): Promise<ProposedDossier> {
-    const subject = input.brandLane
-      ? `the brand "${input.subject}" — the company or label behind this ${input.objectType ?? 'object'} (who they are, what they are known for, and why they make merchandise like this)`
-      : input.scope === 'item'
-        ? `the ${input.subject}`
-        : `the category of object: ${input.subject}`
-    const system = renderPrompt('research.system.md', { item: input.scope === 'item' })
+    const subject = groundingSubject(input)
+    // Pass brandLane so research.system.md adds the entity-facts / never-assert-this-edition guard on the
+    // creds-free grounding path (the Firecrawl extract prompt already has it; the grounding path lacked it — the
+    // only edition guard on the prod path where there is no judge). The sync class researcher never sets brandLane,
+    // so its rendered prompt is byte-unchanged (the golden holds).
+    const system = renderPrompt('research.system.md', { item: input.scope === 'item', brandLane: !!input.brandLane })
     const user = renderPrompt('research.user.md', { subject })
     const { grounding } = await geminiGrounded(system, user, { timeoutMs: this.timeoutMs, temperature: 0.2 })
     const grounded = factsFromGrounding(grounding)

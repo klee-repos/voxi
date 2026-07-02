@@ -24,10 +24,11 @@ export function useRevisitThread(): (item: ThreadSummary) => void {
   const startCapture = useCaptureStore((s) => s.startCapture)
   const setThread = useCaptureStore((s) => s.setThread)
   const markRevisit = useCaptureStore((s) => s.markRevisit)
+  const hydrate = useCaptureStore((s) => s.hydrate)
   const setBand = useCaptureStore((s) => s.setBand)
 
   return useCallback(
-    (item: ThreadSummary) => revisitThread(item, { startCapture, setThread, markRevisit, setBand, push: (href) => router.push(href) }),
-    [router, startCapture, setThread, markRevisit, setBand],
+    (item: ThreadSummary) => revisitThread(item, { startCapture, setThread, markRevisit, hydrate, setBand, push: (href) => router.push(href) }),
+    [router, startCapture, setThread, markRevisit, hydrate, setBand],
   )
 }

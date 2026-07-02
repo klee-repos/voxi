@@ -31,7 +31,7 @@
     "db:migrate": "bun packages/db/migrate.ts",
     "typecheck": "command -v tsc >/dev/null 2>&1 && tsc -b || { echo '⚠ typecheck SKIPPED — tsc not installed in this env (bun strips types at runtime). The build agents ran per-file `tsc --noEmit --strict` on the core modules; install typescript to run a full pass.'; exit 0; }",
     "lint:selectors": "bun e2e/framework/lint-selectors.ts",
-    "postinstall": "patch-package"
+    "postinstall": "cd app && patch-package --patch-dir ../patches"
   },
   "engines": {
     "node": ">=20",
@@ -42,9 +42,11 @@
     "@clerk/backend": "^3.9.0",
     "@electric-sql/pglite": "^0.5.3",
     "hono": "^4.12.27",
+    "pg": "^8.13.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/pg": "^8.11.10",
     "agent-browser": "^0.31.1",
     "patch-package": "^8.0.0",
     "playwright": "^1.61.1"

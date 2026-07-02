@@ -4,8 +4,42 @@
  * RANGE, and web verified_confidence reflects bestGuess↔entity AGREEMENT, not a raw unbounded relevance score.
  */
 import { test, expect, describe } from 'bun:test'
-import { parseYear, webConfidence, cleanDisplayTitle, cleanField, observedBrandFrom } from './live-vision'
+import { parseYear, webConfidence, cleanDisplayTitle, cleanField, observedBrandFrom, cleanIdentityField, isGenreLabel } from './live-vision'
 import type { WebDetect } from '../lib/gcp-vision'
+
+describe('cleanIdentityField — strips a trailing " or <alt>" the VLM smuggles into a make/model FIELD (F4)', () => {
+  test('a trailing alternation is dropped (the Xbox bug: "Xbox Wireless Controller or wood")', () => {
+    expect(cleanIdentityField('Xbox Wireless Controller or wood')).toBe('Xbox Wireless Controller')
+    expect(cleanIdentityField('Microsoft or Sony')).toBe('Microsoft')
+  })
+  test('a real name that legitimately contains " or " earlier, or parentheses, is UNCHANGED (conservative)', () => {
+    expect(cleanIdentityField('Guns N Roses')).toBe('Guns N Roses')
+    expect(cleanIdentityField('AE-1 (Montréal Olympic Ed.)')).toBe('AE-1 (Montréal Olympic Ed.)') // parens preserved (an edition)
+    expect(cleanIdentityField('Canon')).toBe('Canon')
+    expect(cleanIdentityField(undefined)).toBeUndefined()
+  })
+  test('never blanks a field — if stripping nukes it, keep the original', () => {
+    expect(cleanIdentityField('X or Y')).toBe('X or Y') // "X" is <2 chars after strip → keep original
+  })
+})
+
+describe('isGenreLabel — a photo GENRE/medium label matched WHOLE-LABEL (never a substring) (F4)', () => {
+  test('photo-technique labels are junk (they dragged the Xbox to a bogus PROBABLE)', () => {
+    expect(isGenreLabel('still life photography')).toBe(true)
+    expect(isGenreLabel('Still Life')).toBe(true)
+    expect(isGenreLabel('photograph')).toBe(true)
+    expect(isGenreLabel('product photography')).toBe(true)
+    expect(isGenreLabel('close-up')).toBe(true)
+  })
+  test('a legit object whose name CONTAINS a genre word is NOT junk (whole-label match, not substring)', () => {
+    expect(isGenreLabel('portrait lens')).toBe(false) // contains "portrait" but is a real object
+    expect(isGenreLabel('Polaroid')).toBe(false)
+    expect(isGenreLabel('Xbox Wireless Controller')).toBe(false)
+    expect(isGenreLabel('macro lens')).toBe(false)
+    expect(isGenreLabel(undefined)).toBe(false)
+    expect(isGenreLabel('')).toBe(false)
+  })
+})
 
 describe('cleanField — nulls a WHOLLY-filler identity field, never mangles a real name (D-6 / §13.3)', () => {
   test('a value that IS the non-answer becomes undefined (so it never pollutes label/subject/catalog-id)', () => {

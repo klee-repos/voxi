@@ -44,19 +44,21 @@ await check('no uncaught errors while mounting the real camera tree', async () =
 })
 
 // Deterministic behavior: tapping the REAL shutter calls api.signUpload + api.createThread on the REAL BFF
-// (charges a scan from the seeded entitlement, real metering), then router.push('/processing'). We observe the
-// real navigation intent via the expo-router shim's data-last-nav (the same seam reveal-rnw asserts on).
-await check('shutter drives a real BFF createThread → navigation to /processing (expo-router seam)', async () => {
-  // Poll until the async createThread → router.push('/processing') round-trip settles.
+// (charges a scan from the seeded entitlement, real metering), then the capture opens IN PLACE — the camera and
+// the reveal are ONE surface (the camera-as-a-page merge), so the pager scrolls onto the fresh item with NO
+// navigation, no route hop, nothing to remount. We pin the fresh item via the reveal's paging anchor
+// (`reveal.position` count ≥ 1, opened via `analyze`) and assert no /reveal navigation ever fired.
+await check('shutter drives a real BFF createThread → the item opens IN PLACE (no /reveal route hop)', async () => {
   await d.tap(ids.camera.shutter)
   const deadline = Date.now() + 8000
-  let nav = ''
   while (Date.now() < deadline) {
-    nav = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
-    if (/processing/.test(nav)) return
+    const pos = (await d.state(ids.reveal.position)).attrs
+    const nav = (await page.evaluate(() => document.body.getAttribute('data-last-nav'))) ?? ''
+    if (/reveal/.test(nav)) throw new Error('a /reveal navigation fired — the merged capture must open in place, not route')
+    if (Number(pos.count ?? '0') >= 1 && pos.openedvia === 'analyze') return
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error('data-last-nav=' + JSON.stringify(nav))
+  throw new Error('fresh capture never opened in place (reveal.position count=' + (await d.state(ids.reveal.position)).attrs.count + ')')
 })
 
 await rig.stop()

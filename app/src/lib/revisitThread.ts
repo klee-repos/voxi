@@ -10,6 +10,8 @@
  * needs /processing to settle a band before we know where to land.
  */
 import type { ConfidenceBand } from '../../../packages/shared/src/confidence'
+import type { CachedReveal } from '../state/captureStore'
+import { getCachedReveal } from './revealCache'
 import type { ThreadSummary } from './apiClient'
 
 /** The injectable seams the revisit action drives (store setters + router push). `push` is narrowed to the two
@@ -19,6 +21,8 @@ export interface RevisitDeps {
   setThread: (threadId: string) => void
   /** flag this as a revisit so the loaders show the calm "opening your entry" copy, not fresh-analysis copy. */
   markRevisit: () => void
+  /** paint the FULLY-loaded content at once from the session cache (band + title + buckets) — no bucket re-fetch. */
+  hydrate: (cached: CachedReveal) => void
   /** seed the settled band+title so the reveal renders READY at once (no /processing wait) on a known-identity revisit. */
   setBand: (band: ConfidenceBand, title: string, candidates: string[]) => void
   push: (href: '/processing' | '/reveal') => void
@@ -28,7 +32,15 @@ export function revisitThread(item: ThreadSummary, deps: RevisitDeps): void {
   deps.startCapture(item.photoUrl ?? null) // resets the store (isRevisit → false, aborts any stream); mark AFTER
   deps.markRevisit()
   deps.setThread(item.threadId)
-  // Known identity → instant reveal from cache, stream the buckets in behind (reveal owns the stream, §swipe-parity).
+  // Fully loaded THIS session → hydrate the complete content (band + title + buckets) so the reveal paints
+  // instantly with NO bucket re-fetch/loading — the "no loading when you go back and forth" fix.
+  const cached = getCachedReveal(item.threadId)
+  if (cached) {
+    deps.hydrate(cached)
+    deps.push('/reveal')
+    return
+  }
+  // Known identity (from the collection summary) → instant reveal from cache, stream the buckets in behind.
   if (item.band === 'CONFIDENT' || item.band === 'PROBABLE') {
     deps.setBand(item.band, item.revealTitle ?? item.title, [])
     deps.push('/reveal')

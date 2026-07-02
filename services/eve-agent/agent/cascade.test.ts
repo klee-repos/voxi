@@ -8,7 +8,7 @@
  * half; the live half (real Gemini + Cloud Vision through the same generator) is proven by spikes/live-bff-scan.ts.
  */
 import { test, expect, describe } from 'bun:test'
-import { runIdentificationCascade, buildResearchInput, buildDossierInput, isDistinctiveBrand, type CascadeDeps } from './cascade'
+import { runIdentificationCascade, buildResearchInput, buildDossierInput, isDistinctiveBrand, deriveMaker, type CascadeDeps } from './cascade'
 import type { VisionProvider, VisionStages, ImageRef, IdentifyResult } from './tools/identify_object'
 import type { SafetyClassifier, SafetyClassification } from './tools/safety_gate'
 import type { Candidate } from '../../../packages/shared/src/arbitration'
@@ -247,6 +247,14 @@ describe('cascade — grounded enrichment merges facts into narration evidence (
     expect(researcher.called).toBe(false)
   })
 
+  test('a logo-brand PROBABLE object (brand in the display name, NO observedBrand) SKIPS the sync class researcher (deriveMaker gate, not observedBrand)', async () => {
+    const vlm: Candidate = { name: 'Xbox Wireless Controller', make: 'Microsoft', model: 'Xbox Wireless Controller', source: 'vlm', confidence: 0.6, category: 'video game controller', displayTitle: 'Xbox Wireless Controller' }
+    const researcher = new FakeResearcher(FACTS)
+    const evs = await drain({ vision: new FakeVision({ vlm }), safety: SAFE, narrator: new RecordingNarrator(), researcher })
+    expect(band(evs)!.band).toBe('PROBABLE')
+    expect(researcher.called).toBe(false) // deriveMaker('Xbox') truthy → the generic class researcher is skipped (the dossier brand lane supplies the specifics)
+  })
+
   test('a researcher THROW is non-fatal — the reveal + narration still stream', async () => {
     const researcher = new FakeResearcher(FACTS, true) // throws
     const narrator = new RecordingNarrator()
@@ -357,6 +365,30 @@ describe('cascade — normalized research buckets stream as `section` events (AN
     expect(secs.find((s) => s.bucket === 'maker')).toMatchObject({ text: '' })
   })
 
+  test('F1 backstop: narration with NO what_is_it clause → a gate-approved, lowercased CATEGORY token so the What card always names the KIND of thing', async () => {
+    const vlmWithCat: Candidate = { name: 'a controller', source: 'vlm', confidence: 0.5, category: 'Video Game Controller', displayTitle: 'Xbox Wireless Controller' }
+    const narrator = new FakeNarrator([clause('Built for gaming.', 'purpose')]) // ZERO what_is_it clauses
+    const evs = await drain({ vision: new FakeVision({ vlm: vlmWithCat }), safety: SAFE, narrator })
+    const tokenText = evs.filter((e): e is Extract<StreamEvent, { type: 'token' }> => e.type === 'token').map((e) => e.text).join(' ')
+    expect(tokenText).toBe('This appears to be a video game controller.') // synthesized + lowercased (passes smugglesFalsifiable) + gate-approved
+  })
+
+  test('F1 backstop does NOT fire when the what ALREADY names the category head noun (the LLM what wins)', async () => {
+    const vlmWithCat: Candidate = { name: 'a controller', source: 'vlm', confidence: 0.5, category: 'video game controller' }
+    const narrator = new FakeNarrator([clause('This looks like a recent wireless game controller.', 'what_is_it')])
+    const evs = await drain({ vision: new FakeVision({ vlm: vlmWithCat }), safety: SAFE, narrator })
+    const tokenText = evs.filter((e): e is Extract<StreamEvent, { type: 'token' }> => e.type === 'token').map((e) => e.text).join(' ')
+    expect(tokenText).toBe('This looks like a recent wireless game controller.') // names "controller" → no backstop
+  })
+
+  test('F1 backstop PREPENDS a category clause on a hedged reveal whose what NEVER names the category head noun (the "gaming peripherals" variance)', async () => {
+    const vlmWithCat: Candidate = { name: 'a controller', source: 'vlm', confidence: 0.5, category: 'video game controller' }
+    const narrator = new FakeNarrator([clause('It exhibits the ergonomic shape typical of that generation of gaming peripherals.', 'what_is_it')])
+    const evs = await drain({ vision: new FakeVision({ vlm: vlmWithCat }), safety: SAFE, narrator })
+    const tokenText = evs.filter((e): e is Extract<StreamEvent, { type: 'token' }> => e.type === 'token').map((e) => e.text).join(' ')
+    expect(tokenText).toBe('This appears to be a video game controller. It exhibits the ergonomic shape typical of that generation of gaming peripherals.')
+  })
+
   test('UNKNOWN → NO section events at all (the interview handles it, and legacy revisits stay distinguishable)', async () => {
     const narrator = new FakeNarrator([clause('x')])
     const evs = await drain({ vision: new FakeVision({ vlm: { name: 'a gadget', make: 'Acme', source: 'vlm', confidence: 0.3 } }), safety: SAFE, narrator })
@@ -405,6 +437,53 @@ describe('brand lane — a DISTINCTIVE observed brand routes item-rigor entity r
     expect(di?.scope).toBe('item')
     expect(di?.brandLane).toBeUndefined()
     expect(di?.subjectTerms).toEqual(['Canon', 'AE-1'])
+  })
+
+  // ── F2 (Round 4): a make+model product whose brand is a LOGO (no OCR text) → the maker lane keyed on the
+  //    CORROBORATED brand token in the confident display NAME (the Xbox failure class). ──
+  test('deriveMaker: a corroborated brand token in the display name ("Xbox …") → brand lane on that token (the Xbox/logo-brand fix)', () => {
+    const di = buildDossierInput(mk({
+      displayTitle: 'Xbox Wireless Controller', category: 'video game controller',
+      candidates: [{ name: 'Xbox Wireless Controller', make: 'Microsoft', model: 'Xbox Wireless Controller', source: 'vlm', confidence: 0.7 }],
+    }))
+    expect(di).toEqual({ subject: 'Xbox', scope: 'item', subjectTerms: ['Xbox'], brandLane: true, objectType: 'video game controller' })
+  })
+
+  test('deriveMaker: a MATERIAL leading token ("Ceramic Mug") is NEVER a maker → class lane, honest-empty (isDistinctiveBrand alone would accept it)', () => {
+    const di = buildDossierInput(mk({
+      displayTitle: 'Ceramic Mug', category: 'mug',
+      candidates: [{ name: 'Ceramic Mug', make: 'Ceramic', source: 'vlm', confidence: 0.5 }],
+    }))
+    expect(di?.scope).toBe('class')
+    expect(di?.brandLane).toBeUndefined()
+    expect(deriveMaker(mk({ displayTitle: 'Ceramic Mug', category: 'mug', candidates: [{ name: 'x', make: 'Ceramic', source: 'vlm', confidence: 0.5 }] }))).toBeUndefined()
+  })
+
+  test('deriveMaker: a leading token that IS part of the category ("Office Chair") is not a maker → class lane', () => {
+    const di = buildDossierInput(mk({
+      displayTitle: 'Office Chair', category: 'office chair',
+      candidates: [{ name: 'Office Chair', source: 'vlm', confidence: 0.5 }],
+    }))
+    expect(di?.scope).toBe('class')
+    expect(di?.brandLane).toBeUndefined()
+  })
+
+  test('deriveMaker: a 2-candidate disagreement stays CLASS lane — a hedged "X or Y" never asserts a maker (#7)', () => {
+    const di = buildDossierInput(mk({
+      displayTitle: 'Cannondale SuperSix EVO', category: 'bicycle',
+      candidates: [
+        { name: 'Cannondale SuperSix EVO', make: 'Cannondale', model: 'SuperSix EVO', source: 'vlm', confidence: 0.6 },
+        { name: '2010 Cannondale CAAD10', make: 'Cannondale', model: 'CAAD10', source: 'web', confidence: 0.8 },
+      ],
+    }))
+    expect(di?.scope).toBe('class')
+    expect(di?.brandLane).toBeUndefined()
+  })
+
+  test('deriveMaker: observedBrand still PREEMPTS (the shipped OCR brand lane is a strict subset — Sub Pop unchanged)', () => {
+    expect(deriveMaker(mk({ observedBrand: 'Sub Pop', displayTitle: 'Sub Pop Mug', category: 'mug', candidates: [] }))).toBe('Sub Pop')
+    // a non-distinctive observed brand + a distinctive display token still falls through to the corroborated token
+    expect(deriveMaker(mk({ observedBrand: 'Dove', displayTitle: 'Xbox Controller', category: 'controller', candidates: [{ name: 'x', source: 'vlm', confidence: 0.5 }] }))).toBe('Xbox')
   })
 })
 

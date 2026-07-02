@@ -5,8 +5,35 @@
  * without a live model/crawl (the closed provenance loop itself is tested in subagents/researcher/index.test.ts).
  */
 import { test, expect, describe } from 'bun:test'
-import { LiveDossierProvider, type DossierDraftSource, type ResearchEvent } from './live-dossier'
+import { LiveDossierProvider, brandLaneQuery, groundingSubject, type DossierDraftSource, type ResearchEvent } from './live-dossier'
 import type { ProposedDossier, FetchedSource, DossierInput } from '../subagents/researcher'
+
+// ── The brand/maker-lane query strings (F2) — the ONLY deterministic pin on the shipped wording. The load-bearing
+//    invariant (§13.2/§13.5): the query LEADS with the entity's identity + history, and NEVER leads with the object
+//    type / storefront (which measurably starved the maker). The noun is generalized to fit a hardware maker too. ──
+describe('brandLaneQuery / groundingSubject — history-first lead, maker-agnostic noun, object-type NEVER first (F2)', () => {
+  const label = (i: DossierInput): DossierInput => i
+  const subpop = label({ subject: 'Sub Pop', scope: 'item', subjectTerms: ['Sub Pop'], brandLane: true, objectType: 'mug' })
+  const xbox = label({ subject: 'Xbox', scope: 'item', subjectTerms: ['Xbox'], brandLane: true, objectType: 'video game controller' })
+  const plain = label({ subject: 'Canon AE-1', scope: 'item', subjectTerms: ['Canon', 'AE-1'] })
+
+  test('brandLaneQuery leads with the entity + history, then the object type as trailing context', () => {
+    expect(brandLaneQuery(subpop)).toBe('Sub Pop — company, brand, maker or label: history, founding, what they are best known for, and its mug')
+    expect(brandLaneQuery(xbox)).toBe('Xbox — company, brand, maker or label: history, founding, what they are best known for, and its video game controller')
+    // the object type is at the TAIL, never the head (the storefront-starvation regression)
+    expect(brandLaneQuery(subpop).startsWith('Sub Pop')).toBe(true)
+    expect(brandLaneQuery(subpop).indexOf('mug')).toBeGreaterThan(brandLaneQuery(subpop).indexOf('history'))
+  })
+  test('groundingSubject leads with the maker ENTITY (never the object type / storefront), generalized noun', () => {
+    expect(groundingSubject(xbox)).toBe('the maker "Xbox" — the company, brand, maker or label behind this video game controller (who they are, their history, what they are best known for, and why they make things like this)')
+    expect(groundingSubject(xbox).startsWith('the maker "Xbox"')).toBe(true) // the ENTITY leads, not the object type
+  })
+  test('a non-brand-lane input is the plain subject (unchanged)', () => {
+    expect(brandLaneQuery(plain)).toBe('Canon AE-1')
+    expect(groundingSubject(plain)).toBe('the Canon AE-1')
+    expect(groundingSubject({ subject: 'camera', scope: 'class', subjectTerms: ['camera'] })).toBe('the category of object: camera')
+  })
+})
 
 class FakeDraft implements DossierDraftSource {
   constructor(private proposed: ProposedDossier, private throws = false) {}

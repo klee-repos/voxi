@@ -16,6 +16,7 @@ WORKDIR /app
 # Only the manifests + lockfile, so `bun install` is cached unless deps actually change.
 COPY package.json bun.lock ./
 COPY packages/shared/package.json        packages/shared/package.json
+COPY packages/telemetry/package.json     packages/telemetry/package.json
 COPY packages/db/package.json            packages/db/package.json
 COPY services/voxi-api/package.json      services/voxi-api/package.json
 COPY services/eve-agent/package.json     services/eve-agent/package.json
@@ -24,7 +25,10 @@ COPY app/package.json                    app/package.json
 COPY e2e/package.json                    e2e/package.json
 # --frozen-lockfile: fail the build if the lockfile is stale rather than silently resolving new versions.
 # --production: this service needs no dev deps (playwright/agent-browser are e2e-only).
-RUN bun install --frozen-lockfile --production
+# --ignore-scripts: the root postinstall is `patch-package` (a devDep, excluded by --production) and its only
+# patch targets expo-iap — an iOS/app dependency the BFF image never imports. Skipping install scripts avoids a
+# `patch-package: command not found` (exit 127); the BFF's runtime deps (pg, pglite, hono, zod, clerk) are pure JS.
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # ---- runtime: copy source + the installed modules, run the infra entrypoint -----------------------
 FROM oven/bun:1.3.11-slim AS runtime
@@ -36,9 +40,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/bun.lock     ./bun.lock
 
-# Only the source this service actually needs (keeps the image small + the attack surface tight).
+# Only the source this service actually needs (keeps the image small + the attack surface tight). The BFF entry
+# assembles the live cascade (services/eve-agent/agent/*), structured telemetry, and the durable stores.
 COPY packages/shared        ./packages/shared
+COPY packages/telemetry     ./packages/telemetry
+COPY packages/db            ./packages/db
 COPY services/voxi-api      ./services/voxi-api
+COPY services/eve-agent     ./services/eve-agent
 COPY infra/docker/voxi-api  ./infra/docker/voxi-api
 COPY tsconfig.base.json     ./tsconfig.base.json
 

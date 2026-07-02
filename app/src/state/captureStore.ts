@@ -32,6 +32,17 @@ export interface RevealSection {
 /** The two narrative buckets that stream as their own `section` event. `what` rides `whatItIs`; `facts` ride `facts[]`. */
 export type SectionBucket = 'purpose' | 'maker'
 
+/** A thread's fully-loaded reveal content, cached in-session (revealCache) so a revisit paints instantly. */
+export interface CachedReveal {
+  band: ConfidenceBand
+  title: string
+  candidates: string[]
+  whatItIs: string
+  facts: RevealFact[]
+  sections: Partial<Record<SectionBucket, RevealSection>>
+  sawAnySection: boolean
+}
+
 /** The dock icon state for one research bucket, derived purely from store state (testable; UI reads this). */
 export type BucketStatus = 'loading' | 'active' | 'empty' | 'unavailable' | 'hidden'
 
@@ -69,6 +80,9 @@ export interface CaptureState {
   setThread(threadId: string): void
   /** mark the current capture as a revisit (called AFTER startCapture, which resets the flag to false). */
   markRevisit(): void
+  /** paint a revisit's FULLY-loaded content at once from the session cache — band+title+buckets, marked complete,
+   *  so the dock shows instantly with no bucket re-fetch/loading (called AFTER startCapture seeds the photo). */
+  hydrate(cached: CachedReveal): void
   setLoadingLine(line: string): void
   setBand(band: ConfidenceBand, title: string, candidates: string[]): void
   appendText(text: string): void
@@ -115,6 +129,21 @@ export const useCaptureStore = create<CaptureState>((set) => ({
   },
   setThread: (threadId) => set({ threadId }),
   markRevisit: () => set({ isRevisit: true }),
+  // Paint a cached revisit's full content at once; `researchComplete: true` so buckets resolve to active/empty
+  // immediately (no loading) and the reveal knows it needs no stream.
+  hydrate: (c) =>
+    set({
+      band: c.band,
+      title: c.title,
+      candidates: c.candidates,
+      whatItIs: c.whatItIs,
+      facts: c.facts,
+      sections: c.sections,
+      sawAnySection: c.sawAnySection,
+      researchComplete: true,
+      researchError: false,
+      outcome: c.band === 'UNKNOWN' ? 'interview' : c.band === 'PROBABLE' ? 'partial' : 'reveal',
+    }),
   setLoadingLine: (loadingLine) => set({ loadingLine }),
   setBand: (band, title, candidates) =>
     set({ band, title, candidates, outcome: band === 'UNKNOWN' ? 'interview' : band === 'PROBABLE' ? 'partial' : 'reveal' }),

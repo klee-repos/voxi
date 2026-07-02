@@ -1,124 +1,134 @@
 /**
- * Production HTTP entrypoint for the voxi-api BFF — the ONLY public surface. Lives under infra/ because
- * docker-deploy owns the container: services/voxi-api exports `createApp(deps)` but has no server of its own;
- * this entry supplies real deps and serves it on $PORT for Cloud Run (listen 0.0.0.0:$PORT, health probe,
- * clean SIGTERM). Vendor wiring is read from env / Secret Manager — see infra/deploy/README.md for the inventory.
+ * Production HTTP entrypoint for the voxi-api BFF — the ONLY public surface, deployed to Cloud Run.
  *
- * The collaborators below are *seams*, not stubs-to-force-green: Clerk verify + signed-URL HMAC are real when
- * their secrets are present; the eve client, Cloud SQL store, and deletion cascade are integration points the
- * eve-backend / db workflows own. Until those land, this boots /healthz + the auth gate and fails loudly on a
- * route that needs an unwired dep.
+ * This assembles createApp with PRODUCTION-shaped, PROVEN-LIVE collaborators:
+ *   - networkless Clerk JWT verification (@clerk/backend + CLERK_JWT_KEY),
+ *   - the live identification cascade (CascadeEveClient → safety_gate → Vertex Gemini + Cloud Vision → arbiter
+ *     → LiveNarrator → grounded deep-research), the exact path spikes/live-bff-scan.ts proves,
+ *   - DURABLE collection persistence in Cloud SQL (threads/photos/reveals/messages/refunds), so a user's
+ *     catalog survives restarts and multi-instance autoscaling (the container filesystem is ephemeral),
+ *   - the spoken reveal (ElevenLabs) when ELEVENLABS_API_KEY is present,
+ *   - GCP-native telemetry: structured NDJSON → Cloud Logging (automatic on Cloud Run) + one SERVER span per
+ *     request (OTLP → Cloud Trace when a collector endpoint is configured).
+ *
+ * Nothing is stubbed to force green: a missing signing key, Clerk key, or DATABASE_URL fails loudly at boot;
+ * an absent ELEVENLABS_API_KEY leaves the spoken-reveal route 503-ing (never a fake success).
  */
 import { serve } from 'bun'
-import { createApp, type Deps, type EveClient } from '../../../services/voxi-api/src/app'
-import { clerkVerifier, testVerifier, type Verifier } from '../../../services/voxi-api/src/auth'
-import { memoryStore } from '../../../services/voxi-api/src/metering'
+import { verifyToken } from '@clerk/backend'
+import { createApp, type NarrationAudioCache } from '../../../services/voxi-api/src/app'
+import { clerkVerifier } from '../../../services/voxi-api/src/auth'
 import { assertSigningKeyConfigured } from '../../../services/voxi-api/src/signing'
+import { CascadeEveClient } from '../../../services/voxi-api/src/cascade-eve-client'
+import { LiveNarrationTts } from '../../../services/voxi-api/src/live-tts'
+import { createCloudSqlStores } from '../../../services/voxi-api/src/cloudsql-stores'
+import { createPgStores } from '../../../services/voxi-api/src/pg-stores'
+import { warmGcpToken } from '../../../services/eve-agent/agent/lib/gcp-vision'
+import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
+
+// Structured logs → stdout (Cloud Run captures them into Cloud Logging) + OTLP span export → Cloud Trace when
+// OTEL_EXPORTER_OTLP_ENDPOINT points at a collector. Must run before anything logs.
+initTelemetry({ service: 'voxi-api', role: 'bff' })
 
 const PORT = Number(process.env.PORT ?? 8080)
+const ON_CLOUD_RUN = !!process.env.K_SERVICE
 
-// Fail fast in production if VOXI_URL_SIGNING_KEY is unset (adversarial A1): the signed /media photo capability
-// is only as strong as this key — a default would let anyone forge a URL to another user's private photo.
+// Fail fast in prod: the signed /media photo route is only as strong as this HMAC key — a default would let
+// anyone forge a URL to another user's private photo (adversarial A1).
 assertSigningKeyConfigured()
-
-// ---- Auth verifier (PLAN §12) -------------------------------------------------------------------
-// Production verifies the Clerk session JWT networkless. The actual @clerk/backend `verifyToken` is injected
-// here once the dependency + CLERK_JWT_KEY are present; in VOXI_TEST_MODE the test verifier is used.
-function buildVerifier(): Verifier {
-  if (process.env.VOXI_TEST_MODE === '1') return testVerifier
-  if (!process.env.CLERK_JWT_KEY) {
-    throw new Error('CLERK_JWT_KEY is required in production (set VOXI_TEST_MODE=1 only for non-prod boots)')
-  }
-  // The real call is `verifyToken` from @clerk/backend; kept as an injected seam so this file has no
-  // hard dependency the image cannot yet install. Replace the throw-on-call shim when @clerk/backend lands.
-  const verifyToken = async (token: string, opts: unknown): Promise<{ sub: string }> => {
-    const mod = await import('@clerk/backend').catch(() => null as unknown as { verifyToken?: unknown })
-    const fn = (mod as { verifyToken?: (t: string, o: unknown) => Promise<{ sub: string }> })?.verifyToken
-    if (!fn) throw new Error('@clerk/backend not installed')
-    return fn(token, opts)
-  }
-  return clerkVerifier(verifyToken)
+if (!process.env.CLERK_JWT_KEY) {
+  throw new Error('CLERK_JWT_KEY is required in production (networkless Clerk verify) — set it from Secret Manager')
 }
 
-// ---- eve client (PLAN §4.3) ---------------------------------------------------------------------
-// The BFF reaches the eve FRONT over HTTP at $EVE_FRONT_URL (never exposed publicly; same VPC). This is the
-// integration seam the eve-backend workflow owns; here it forwards session create/stream to that base URL.
-function buildEveClient(): EveClient {
-  const base = process.env.EVE_FRONT_URL
+// On Cloud Run the identification cascade authenticates to Vertex/Vision via the metadata server (there is no
+// gcloud CLI). Warm the token cache before serving and refresh it on a timer; fail loud if the runtime service
+// account can't mint one (that means missing roles — better to know at deploy than on the first photo).
+if (ON_CLOUD_RUN) {
+  await warmGcpToken()
+  setInterval(() => {
+    warmGcpToken().catch((e) => logger.warn('gcp_token_refresh_failed', { err: String(e) }))
+  }, 30 * 60_000)
+}
+
+// DURABLE stores. Cloud SQL in prod (DATABASE_URL); a local file-backed PGlite for `docker run` smoke tests.
+const databaseUrl = process.env.DATABASE_URL
+if (ON_CLOUD_RUN && !databaseUrl) {
+  throw new Error('DATABASE_URL is required on Cloud Run — the collection must persist in Cloud SQL, not on the ephemeral container disk')
+}
+const durable = databaseUrl
+  ? await createCloudSqlStores(databaseUrl)
+  : await createPgStores(process.env.VOXI_DATA_DIR ?? '.voxi-data/bff')
+logger.info('durable_store_ready', { backend: databaseUrl ? 'cloud-sql' : 'pglite' })
+
+// The live identification cascade (no catalog moat in v1 → the exact vlm+web+research path; the moat is additive).
+const eve = new CascadeEveClient()
+
+// Spoken reveal (ElevenLabs): voices the SERVER-OWNED narration. A bounded content-hash cache makes a stable
+// reveal synthesize exactly once. Absent key → `speech` undefined → POST /v1/threads/:id/speech 503s (loud).
+function boundedAudioCache(max = 256): NarrationAudioCache {
+  const m = new Map<string, Uint8Array<ArrayBuffer>>()
   return {
-    async createSession({ userId, photoUrl }) {
-      if (!base) throw new Error('EVE_FRONT_URL not configured')
-      const res = await fetch(`${base}/eve/v1/session`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ userId, photoUrl }),
-      })
-      if (!res.ok) throw new Error(`eve createSession failed: ${res.status}`)
-      return res.json() as Promise<{ sessionId: string; continuationToken: string }>
+    async get(key) {
+      return m.get(key) ?? null
     },
-    async *stream(sessionId, userId, startIndex) {
-      if (!base) throw new Error('EVE_FRONT_URL not configured')
-      const res = await fetch(`${base}/eve/v1/session/${sessionId}/stream?startIndex=${startIndex ?? 0}`, {
-        headers: { 'x-voxi-user': userId },
-      })
-      if (!res.ok || !res.body) throw new Error(`eve stream failed: ${res.status}`)
-      const reader = res.body.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        let i: number
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i)
-          buf = buf.slice(i + 1)
-          if (line) yield line
-        }
-      }
-      if (buf) yield buf
+    async put(key, bytes) {
+      if (m.size >= max) m.delete(m.keys().next().value as string)
+      m.set(key, bytes)
     },
   }
 }
+const elevenKey = process.env.ELEVENLABS_API_KEY
+const speech = elevenKey ? { tts: new LiveNarrationTts(elevenKey), cache: boundedAudioCache() } : undefined
+if (!speech) logger.warn('no_elevenlabs_key', { effect: 'spoken reveal disabled (POST /v1/threads/:id/speech → 503)' })
 
-const deps: Deps = {
-  verifier: buildVerifier(),
-  store: memoryStore({}), // Cloud SQL-backed Store is wired by the db workflow; memory store keeps boot green.
-  eve: buildEveClient(),
+const app = createApp({
+  verifier: clerkVerifier(verifyToken as never),
+  store: durable.store,
+  eve,
   deletion: {
-    // The cascading delete spans GCS photos/audio + embeddings + eve workflow.* — owned by the db workflow.
-    async cascade(userId) {
-      throw new Error(`deletion.cascade not wired for ${userId}; provided by the db/eve integration`)
+    // Account deletion cascades across the durable stores AND the cascade's per-session photo/narration caches.
+    async cascade(userId: string) {
+      const evePhotos = eve.purgeUser(userId)
+      const counts = await durable.purgeUser(userId)
+      return { deleted: [`eve-photos:${evePhotos}`, ...Object.entries(counts).map(([k, v]) => `${k}:${v}`)] }
     },
   },
   bucket: process.env.GCS_PHOTO_BUCKET ?? 'voxi-photos',
-  sessionOwner: new Map(),
-}
+  sessionOwner: new Map<string, string>(),
+  // Durable collection persistence (COLLECTION-PERSISTENCE-PLAN) — survives restarts + multi-instance autoscale.
+  threads: durable.threads,
+  photos: durable.photos,
+  reveals: durable.reveals,
+  podcasts: durable.podcasts,
+  messages: durable.messages,
+  refunds: durable.refunds,
+  speech,
+  // v1 has no paywall: full access so the TestFlight loop is never entitlement-blocked. Real StoreKit 2
+  // verification (appstore.ts) lands with billing; until then everyone is a voyager.
+  planFor: async () => 'voyager',
+})
 
-const app = createApp(deps)
-
+// Health probe bypasses telemetry entirely (Cloud Run probes are frequent — a span per probe floods Trace).
+const wrapped = withRequestTelemetry((req: Request) => app.fetch(req), { role: 'bff' })
 const server = serve({
   port: PORT,
   hostname: '0.0.0.0',
+  idleTimeout: 200,
   fetch(req: Request) {
     const url = new URL(req.url)
-    // Cloud Run / load-balancer health probe — cheap, unauthenticated, no business logic.
     if (url.pathname === '/healthz' || url.pathname === '/') {
       return new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } })
     }
-    return app.fetch(req)
+    return wrapped(req)
   },
 })
+logger.info('voxi-api_listening', { port: server.port, onCloudRun: ON_CLOUD_RUN })
 
-// eslint-disable-next-line no-console
-console.log(`voxi-api listening on :${server.port}`)
-
-// Graceful shutdown so in-flight streams drain before Cloud Run kills the instance.
+// Graceful shutdown: stop accepting, drain in-flight streams, close the DB pool before Cloud Run kills us.
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, () => {
-    // eslint-disable-next-line no-console
-    console.log(`received ${sig}, stopping`)
+    logger.info('shutdown', { signal: sig })
     server.stop()
-    process.exit(0)
+    durable.close().finally(() => process.exit(0))
   })
 }

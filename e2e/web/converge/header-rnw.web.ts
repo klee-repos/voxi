@@ -103,8 +103,9 @@ await check('no uncaught errors across the per-screen header journeys (real comp
 await rig.stop()
 
 // ---- real stack (adversarial-review M1): drive the PROVEN flow harness (camera → shutter → reveal), whose
-// screens now carry the new header, and assert the over-photo back chevron returns to camera through a REAL
-// NavHost router that HAS canGoBack (no TypeError on the converge shim). ----
+// screens now carry the new header. The camera and reveal are ONE surface (the camera-as-a-page merge): the
+// shutter opens the fresh item IN PLACE (no route hop) and its over-photo back chevron slides back to the
+// viewfinder — asserted here to confirm the header renders + returns correctly on the merged home. ----
 const IMG =
   'data:image/svg+xml,' +
   encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="24"><rect width="16" height="24" fill="#E8843E"/></svg>')
@@ -115,14 +116,15 @@ console.log('\nconverge: REAL stack (flow-client) — the header back chevron re
 await fp.goto(flow.base + '/')
 await fd.waitFor(ids.camera.screen, { timeoutMs: 8000 })
 await fd.tap(ids.camera.shutter)
-await check('flow: shutter deepens the real NavHost stack (camera → /processing)', async () => {
+await check('flow: shutter opens the fresh item IN PLACE on the merged home (over-photo back chevron, no /reveal route hop)', async () => {
   const deadline = Date.now() + 8000
   while (Date.now() < deadline) {
     const n = await fp.evaluate(() => document.body.getAttribute('data-last-nav'))
-    if (n && /processing/.test(n)) return
+    if (n && /reveal/.test(n)) throw new Error('a /reveal navigation fired — capture must open in place on the merged home')
+    if ((await fd.state(ids.nav.back)).visible) return // the item page surfaced its over-photo back chevron
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error('shutter did not navigate to /processing')
+  throw new Error('shutter did not open the item in place (no over-photo back chevron appeared)')
 })
 await fp.evaluate((img) => {
   const s = (window as unknown as { __captureStore?: { setState: (x: unknown) => void } }).__captureStore
@@ -134,7 +136,7 @@ await check('flow: the real reveal shows the over-photo back chevron (nav.back) 
 })
 await fp.evaluate(() => document.body.removeAttribute('data-last-nav'))
 await fd.tap(ids.nav.back)
-await check('flow: tapping back returns to camera through the real router (canGoBack, no TypeError — M1)', async () => {
+await check('flow: tapping the over-photo back chevron returns to the viewfinder in place (menu header restored, no dead-click)', async () => {
   await fd.waitFor(ids.camera.screen, { timeoutMs: 6000 })
   await fd.waitFor(ids.nav.menuButton, { timeoutMs: 3000 })
 })

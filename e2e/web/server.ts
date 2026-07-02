@@ -38,13 +38,13 @@ import { registerFor, type ConfidenceBand } from '../../packages/shared/src/conf
 // ---------------------------------------------------------------------------
 // Deterministic eve stream — terminal outcome chosen by the seeded object.
 // ---------------------------------------------------------------------------
-type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill'
+type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill' | 'logobrand'
 
 /** Parse the seeded object out of the photoUrl the client sent (e.g. "obj:unknown"); default = probable. */
 function scanOf(photoUrl: string): Scan {
   const m = /obj:([a-z]+)/.exec(photoUrl)
   const v = m?.[1]
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill'] as Scan[]).includes(v as Scan)
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(v as Scan)
     ? (v as Scan)
     : 'probable'
 }
@@ -64,7 +64,7 @@ function scanFromReferer(referer: string | null): Scan | null {
   } catch {
     return null
   }
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -80,6 +80,23 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
   if (scan === 'fail') {
     yield JSON.stringify({ type: 'error', index: 0, code: 'hard_failure', message: 'The Guide lost the thread. Let us try that capture again.' })
     yield JSON.stringify({ type: 'done', index: 1, sessionId })
+    return
+  }
+  if (scan === 'logobrand') {
+    // Round 4 (REVEAL-WHAT-MAKER): a make+model product whose brand is a LOGO (no OCR text) → PROBABLE, but the
+    // buckets are the FIXED shape: the WHAT names the category (never a bare hedge), the MAKER names the brand
+    // (deriveMaker corroborated-brand lane), the PURPOSE anchors the object. This is the seeded stand-in for the real
+    // Xbox reveal so the agentic E2E can prove the real screen SURFACES that content under real bucket taps.
+    yield JSON.stringify({ type: 'confidence_band', index: 0, band: 'PROBABLE', title: 'Xbox Wireless Controller', candidates: ['2020 Microsoft Xbox Wireless Controller'] })
+    yield JSON.stringify({ type: 'token', index: 1, text: 'This appears to be a wireless game controller, quite likely from the Xbox family of devices.' })
+    const src = 'https://en.wikipedia.org/wiki/Xbox'
+    yield JSON.stringify({ type: 'fact', index: 2, text: 'The Xbox console was originally called the "DirectX-box" after its graphics software.', sourceUrl: src, sourceTitle: 'Xbox', quote: 'originally called the DirectX-box' })
+    yield JSON.stringify({ type: 'fact', index: 3, text: 'Bill Gates pitched the Xbox as a "Trojan horse" for Windows in the living room.', sourceUrl: src, sourceTitle: 'Xbox', quote: 'a Trojan horse for Windows in the living room' })
+    yield JSON.stringify({ type: 'fact', index: 4, text: "The console's green colour came from the only marker its designer had to hand.", sourceUrl: src, sourceTitle: 'Xbox', quote: 'the green colour came from the only marker available' })
+    yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'This controller is made to play games on an Xbox console, translating a player’s hands into the game without a cable.', sourceUrl: src, sourceTitle: '', quote: 'a controller for playing games on an Xbox console' })
+    yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Branded by Microsoft, the American technology company behind the Xbox line of consoles and their controllers.', sourceUrl: src, sourceTitle: '', quote: 'Microsoft, the company behind Xbox' })
+    yield JSON.stringify({ type: 'description_upgrade', index: 7, text: 'This appears to be a wireless game controller from the Xbox family — Microsoft’s gaming line.' })
+    yield JSON.stringify({ type: 'done', index: 8, sessionId })
     return
   }
   if (scan === 'slow') {

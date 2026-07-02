@@ -73,14 +73,20 @@ export interface PgStores {
   close(): Promise<void>
 }
 
-/**
- * Open a file-backed PGlite at `dataDir` and return the durable stores backed by it. Tables are created if
- * absent (bootstraps a fresh dir) and missing columns are added idempotently (resumes/upgrades an existing
- * dir), so a pre-existing `.voxi-data/bff` from before this feature gains the new columns/tables on boot.
- */
-export async function createPgStores(dataDir: string): Promise<PgStores> {
-  const db = await PGlite.create(dataDir)
+/** The minimal Postgres surface these stores need — satisfied by PGlite (local/dev, file-backed) AND by the
+ *  thin `pg` adapter in cloudsql-stores.ts (Cloud Run → Cloud SQL). All SQL + store logic lives ONCE below. */
+export interface PgLike {
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[]; affectedRows?: number }>
+  exec(sql: string): Promise<unknown>
+  close(): Promise<void>
+}
 
+/**
+ * Build the durable stores over any PgLike. Tables are created if absent (bootstraps a fresh DB) and missing
+ * columns are added idempotently (resumes/upgrades an existing one), so a pre-existing store gains the new
+ * columns/tables on boot. The SQL is standard Postgres — identical against PGlite and Cloud SQL.
+ */
+export async function buildPgStores(db: PgLike): Promise<PgStores> {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS entitlements (
       user_id   text PRIMARY KEY,
@@ -153,8 +159,13 @@ export async function createPgStores(dataDir: string): Promise<PgStores> {
       text       text   NOT NULL,
       source     text   NOT NULL DEFAULT 'text' CHECK (source IN ('text','voice')),
       client_key text,
-      created_at bigint NOT NULL
+      created_at bigint NOT NULL,
+      -- durable send order for the conversation. created_at is a wall clock (ms): it ties on rapid appends and can
+      -- even step backward, so it must NOT decide order. seq is a single monotonic sequence — the true send order.
+      seq        bigint GENERATED ALWAYS AS IDENTITY
     );
+    -- upgrade a pre-seq DB: IDENTITY backfills seq in heap order, which for this append-only table is insertion order.
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS seq bigint GENERATED ALWAYS AS IDENTITY;
     CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id, created_at);
     CREATE UNIQUE INDEX IF NOT EXISTS messages_client_key
       ON messages (thread_id, client_key) WHERE client_key IS NOT NULL;
@@ -395,7 +406,7 @@ export async function createPgStores(dataDir: string): Promise<PgStores> {
     async listByThread(threadId) {
       const res = await db.query<MessageRow>(
         `SELECT id, thread_id, user_id, role, text, source, client_key, created_at
-         FROM messages WHERE thread_id = $1 ORDER BY created_at, id`,
+         FROM messages WHERE thread_id = $1 ORDER BY seq`,
         [threadId],
       )
       return res.rows.map(rowToMessage)
@@ -446,6 +457,11 @@ export async function createPgStores(dataDir: string): Promise<PgStores> {
       await db.close()
     },
   }
+}
+
+/** Local/dev: a file-backed PGlite at `dataDir` (durable across restarts). Cloud Run uses createCloudSqlStores. */
+export async function createPgStores(dataDir: string): Promise<PgStores> {
+  return buildPgStores(await PGlite.create(dataDir))
 }
 
 interface ThreadRow {
