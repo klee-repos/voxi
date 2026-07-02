@@ -1,11 +1,12 @@
 /**
  * The Voxi structured logger.
  *
- * Every call writes ONE line of NDJSON to stdout — the always-on local capture that needs no infrastructure
- * (`docker logs`, a terminal pane, or a file redirect all just work, and Cloud Run forwards stdout for free).
- * When telemetry is initialised with an OTLP endpoint the same record is ALSO shipped to the collector /
- * Grafana Cloud. Trace correlation is automatic: whatever traceId/spanId/userId/sessionId is in the ambient
- * request context (see context.ts) is stamped on the line.
+ * Every call writes ONE line of NDJSON to stdout — the always-on capture that needs no infrastructure
+ * (`docker logs`, a terminal pane, or a file redirect all just work, and Cloud Run forwards stdout straight
+ * into Cloud Logging, parsed to a structured `jsonPayload`, for free). When telemetry is initialised with an
+ * OTLP endpoint the same record is ALSO shipped to that collector (for trace export to Cloud Trace). Trace
+ * correlation is automatic: whatever traceId/spanId/userId/sessionId is in the ambient request context (see
+ * context.ts) is stamped on the line.
  *
  * API is intentionally tiny:
  *   logger.info('msg', { field: 1 })

@@ -21,7 +21,8 @@ import { VertexEmbeddingProvider, EMBED_DIM } from '../../eve-agent/agent/lib/em
 import { mkdirSync } from 'node:fs'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 
-// Structured logs → stdout (always) + OTLP → Grafana Cloud when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+// Structured logs → stdout (always; Cloud Run captures them into Cloud Logging) + OTLP trace export to a
+// collector → Cloud Trace when OTEL_EXPORTER_OTLP_ENDPOINT is set.
 initTelemetry({ service: 'voxi-api', role: 'bff' })
 
 if (!process.env.CLERK_JWT_KEY && !process.env.CLERK_SECRET_KEY) {

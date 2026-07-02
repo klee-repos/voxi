@@ -1,12 +1,12 @@
 /**
  * A minimal, dependency-free OTLP/HTTP (protobuf-JSON) exporter for logs + spans.
  *
- * It speaks the OTLP/HTTP JSON encoding directly over `fetch`, so we ship to any OTLP endpoint — a local
- * OTel Collector or Grafana Cloud's OTLP gateway — with NO `@opentelemetry/*` SDK. Configuration is the two
- * standard env vars every backend documents:
+ * It speaks the OTLP/HTTP JSON encoding directly over `fetch`, so we ship to any OTLP endpoint — an OTel
+ * Collector sidecar (which forwards to Cloud Trace via the `googlecloud` exporter) or the local dev stack —
+ * with NO `@opentelemetry/*` SDK. Configuration is the two standard env vars every backend documents:
  *
- *   OTEL_EXPORTER_OTLP_ENDPOINT   base URL, e.g. https://otlp-gateway-<region>.grafana.net/otlp
- *   OTEL_EXPORTER_OTLP_HEADERS    comma list, e.g. Authorization=Basic <base64(instanceID:token)>
+ *   OTEL_EXPORTER_OTLP_ENDPOINT   base URL, e.g. http://localhost:4318 (collector sidecar)
+ *   OTEL_EXPORTER_OTLP_HEADERS    comma list, e.g. Authorization=Bearer <token>,x-goog-user-project=<proj>
  *
  * When the endpoint is unset the exporter is never constructed — logs stay on stdout only. Export failures
  * are best-effort and NEVER throw into the app: a down collector must not take a request with it.
