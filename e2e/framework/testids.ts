@@ -171,6 +171,10 @@ export const ids = {
     upgrade: 'drawer.upgrade',
     signOut: 'drawer.signOut',
   },
+  // E2E-only diagnostic affordances — rendered ONLY when the harness injects a Sentry DSN (never in prod bundles).
+  dev: {
+    sentryThrow: 'dev.sentryThrow', // taps → captureIfUnexpected(secret-bearing error) → local envelope sink
+  },
 } as const
 
 export type TestId = string

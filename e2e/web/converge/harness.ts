@@ -117,6 +117,12 @@ export interface ConvergeRig {
   driver: PlaywrightDriver
   errors: string[]
   stop: () => Promise<void>
+  /** Present only when standUp is given `{ sentry: true }` — the local Sentry envelope sink + a bounded poll. */
+  sentry?: {
+    events: () => string[]
+    reset: () => void
+    waitFor: (pred: (events: string[]) => boolean, timeoutMs?: number) => Promise<string[]>
+  }
 }
 
 /**
@@ -159,6 +165,31 @@ export async function standUp(clientEntry: string, harnessOpts?: HarnessOpts, la
     window.fetch = (...args: Parameters<typeof fetch>) => realFetch(...args)
   })
 
+  // Sentry (opt-in): inject a SAME-ORIGIN DSN before the bundle evaluates, so @sentry/browser POSTs its envelopes
+  // back to this harness (the sink in createWebHarness) instead of sentry.io — no network, no real project. The port
+  // is only known now (ephemeral :0), which is why this is an initScript, not a bake into the served HTML.
+  let sentry: ConvergeRig['sentry']
+  if (harnessOpts?.sentry) {
+    const dsn = `http://ekey@localhost:${server.port}/1`
+    await page.addInitScript((d) => {
+      ;(window as unknown as { __VOXI_SENTRY_DSN__?: string }).__VOXI_SENTRY_DSN__ = d
+    }, dsn)
+    sentry = {
+      events: () => harness.sentryEnvelopes(),
+      reset: () => harness.resetSentry(),
+      // Bounded poll of the server-side sink (same process). No arbitrary sleeps: the runner forces a flush first.
+      async waitFor(pred, timeoutMs = 5000) {
+        const deadline = Date.now() + timeoutMs
+        for (;;) {
+          const evs = harness.sentryEnvelopes()
+          if (pred(evs)) return evs
+          if (Date.now() > deadline) return evs
+          await new Promise((r) => setTimeout(r, 50))
+        }
+      },
+    }
+  }
+
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
   const driver = new PlaywrightDriver(page)
@@ -169,6 +200,7 @@ export async function standUp(clientEntry: string, harnessOpts?: HarnessOpts, la
     page,
     driver,
     errors,
+    sentry,
     async stop() {
       await browser.close()
       server.stop()

@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
-import { logger } from './logger'
-import { redact } from './redact'
+import { logger, onError, type ErrorLogEvent } from './logger'
+import { redact, redactDeep, redactString } from './redact'
 import { parseTraceparent, formatTraceparent, newTraceId, newSpanId, runWithContext } from './context'
 import { OtlpExporter } from './otlp'
 
@@ -76,6 +76,73 @@ describe('redact', () => {
     expect(out.nested.token).toBe('[redacted]')
     expect(out.nested.ok).toBe('fine')
     expect(out.big.length).toBeLessThan(4000)
+  })
+
+  test('masks secrets embedded by VALUE anywhere in a string', () => {
+    // The highest-risk vector: a secret no key-name guards, sitting inside an error message or source line.
+    expect(redactString('connect failed: postgresql://voxi_app:S3cr3tPw@/voxi?host=/cloudsql/x')).not.toContain(
+      'S3cr3tPw',
+    )
+    expect(redactString('bad key sk_live_ABC123DEF456 rejected')).not.toContain('sk_live_ABC123DEF456')
+    expect(redactString('auth: Bearer eyJabc.def.ghi failed')).not.toContain('eyJabc.def.ghi')
+    expect(redactString('photo was data:image/jpeg;base64,QUJDREVG here')).not.toContain('base64,QUJDREVG')
+    expect(redactString('normal message with no secrets')).toBe('normal message with no secrets')
+  })
+
+  test('redactDeep scrubs a secret buried in a Sentry-event-shaped frame (past the flat depth cap)', () => {
+    // exception.values[0].stacktrace.frames[0].{context_line,vars} — where contextLines/localVariables would leak.
+    const event = {
+      exception: {
+        values: [
+          {
+            value: 'query failed for postgresql://u:PGPASS@/db',
+            stacktrace: {
+              frames: [
+                { context_line: "const url = 'postgresql://u:PGPASS@/db'", vars: { dsn: 'postgresql://u:PGPASS@/db' } },
+              ],
+            },
+          },
+        ],
+      },
+    }
+    const scrubbed = JSON.stringify(redactDeep(event))
+    expect(scrubbed).not.toContain('PGPASS')
+  })
+})
+
+describe('onError hook', () => {
+  test('fires on error/fatal only, with redacted fields + the original error, and never escapes', () => {
+    const seen: ErrorLogEvent[] = []
+    const off = onError((e) => seen.push(e))
+    try {
+      logger.info('nope', { a: 1 })
+      logger.warn('still-nope')
+      const err = new Error('kaboom')
+      logger.error('boom', err, { authorization: 'Bearer secret', ms: 5 })
+      logger.fatal('dead', new Error('fatal-one'))
+
+      expect(seen).toHaveLength(2)
+      expect(seen[0]!.level).toBe('error')
+      expect(seen[0]!.msg).toBe('boom')
+      expect(seen[0]!.err).toBeInstanceOf(Error)
+      // fields handed to the hook are already redacted (key-based)
+      expect(seen[0]!.fields!.authorization).toBe('[redacted]')
+      expect(seen[0]!.fields!.ms).toBe(5)
+      expect(seen[1]!.level).toBe('fatal')
+    } finally {
+      off()
+    }
+  })
+
+  test('a throwing hook does not break logger.error', () => {
+    const off = onError(() => {
+      throw new Error('hook is broken')
+    })
+    try {
+      expect(() => logger.error('boom', new Error('x'))).not.toThrow()
+    } finally {
+      off()
+    }
   })
 })
 

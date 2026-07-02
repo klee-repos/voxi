@@ -115,6 +115,9 @@ if [ "${STEP:-all}" = "all" ]; then
   put voxi-clerk-jwt-key    "$(envval CLERK_JWT_KEY)"
   put voxi-url-signing-key  "$(envval VOXI_URL_SIGNING_KEY)"
   EL="$(envval ELEVENLABS_API_KEY)"; [ -n "$EL" ] && put voxi-elevenlabs-key "$EL" || true
+  # Sentry error-monitoring DSN — low-sensitivity (public key) but kept in Secret Manager for consistency. Optional:
+  # only seeded when SENTRY_DSN is in .env.local, so the backend degrades to `sentry_disabled` until you provision it.
+  SD="$(envval SENTRY_DSN)"; [ -n "$SD" ] && put voxi-sentry-dsn "$SD" || true
   put voxi-database-url "postgresql://${DB_USER}:${DB_PW}@/${DB_NAME}?host=/cloudsql/${CONN}"
 fi
 
@@ -131,13 +134,17 @@ CONN="${PROJECT}:${REGION}:${SQL_INSTANCE}"
 SECRETS="CLERK_JWT_KEY=voxi-clerk-jwt-key:latest,VOXI_URL_SIGNING_KEY=voxi-url-signing-key:latest,DATABASE_URL=voxi-database-url:latest"
 gcloud secrets describe voxi-elevenlabs-key --project "$PROJECT" >/dev/null 2>&1 \
   && SECRETS="${SECRETS},ELEVENLABS_API_KEY=voxi-elevenlabs-key:latest"
+# Sentry DSN appended ONLY if the secret exists — so a STEP=images redeploy before you've provisioned it deploys
+# cleanly (the backend just logs sentry_disabled) instead of failing on a missing --set-secrets reference.
+gcloud secrets describe voxi-sentry-dsn --project "$PROJECT" >/dev/null 2>&1 \
+  && SECRETS="${SECRETS},SENTRY_DSN=voxi-sentry-dsn:latest"
 gcloud run deploy "$SVC" --project "$PROJECT" --region "$REGION" \
   --image "${IMAGE}:${SHA}" \
   --service-account "$SA_EMAIL" \
   --add-cloudsql-instances "$CONN" \
   --allow-unauthenticated \
   --set-secrets "$SECRETS" \
-  --set-env-vars "GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production" \
+  --set-env-vars "GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production,SENTRY_RELEASE=${SHA}" \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 5 --concurrency 40 --timeout 300
 
 BFF_URL="$(gcloud run services describe "$SVC" --project "$PROJECT" --region "$REGION" --format='value(status.url)')"

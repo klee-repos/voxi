@@ -24,6 +24,11 @@ import { AuthProvider } from '../../../app/src/lib/clerk'
 import { DrawerHost } from '../../../app/src/components/Drawer'
 import { NavHost } from './shims/expo-router'
 import { useCaptureStore } from '../../../app/src/state/captureStore'
+import {
+  initObservability,
+  captureIfUnexpected,
+  VoxiErrorBoundary,
+} from '../../../app/src/lib/observability'
 import Welcome from '../../../app/app/welcome'
 import FirstRun from '../../../app/app/first-run'
 import Camera from '../../../app/app/(tabs)/camera'
@@ -55,18 +60,55 @@ if (typeof window !== 'undefined') {
   ;(window as unknown as { __captureStore?: unknown }).__captureStore = useCaptureStore
 }
 
+// Init the REAL observability module (same code that ships) so the E2E exercises the shipping init + boundary,
+// not a stand-in. It reads window.__VOXI_SENTRY_DSN__, which the harness injects ONLY when opts.sentry is set —
+// so every other agentic runner leaves Sentry disabled and this is inert there.
+initObservability()
+
+/**
+ * A VISIBLE, DSN-gated dev affordance the agent perceives + taps. On tap it captures a secret-bearing error
+ * DIRECTLY (a React error boundary can't catch an event-handler throw, and a prod bundle won't route it to
+ * window.onerror — so a "throw and hope it's caught" trigger is non-deterministic; a direct capture isn't).
+ * Rendered ONLY under the Sentry E2E, never in a prod bundle.
+ */
+function DevSentryTrigger(): React.ReactElement | null {
+  const dsn =
+    typeof window !== 'undefined' &&
+    (window as unknown as { __VOXI_SENTRY_DSN__?: unknown }).__VOXI_SENTRY_DSN__
+  if (!dsn) return null
+  return (
+    <button
+      data-testid="dev.sentryThrow"
+      style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 99999, padding: 8 }}
+      onClick={() =>
+        captureIfUnexpected(
+          // A message stuffed with every secret shape the redactor must scrub, proven end-to-end at the sink.
+          new Error(
+            'e2e sentry probe :: postgresql://voxi_app:PROBE_PGPW@/voxi sk_live_PROBEKEY123 data:image/png;base64,QUJDREVG /media/p?sig=PROBESIG&exp=1',
+          ),
+        )
+      }
+    >
+      sentry-throw
+    </button>
+  )
+}
+
 export function ConvergeRoot(): React.ReactElement {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <ApiProvider>
-          <div data-testid="converge.root" style={{ height: '100%' }}>
-            {/* DrawerHost is passed as NavHost's `wrap` so it lives INSIDE the router context — a drawer row then
-                actually navigates (see shims/expo-router.tsx), while its open/closed state survives screen swaps. */}
-            <NavHost routes={routes} initial="/welcome" wrap={DrawerHost} />
-          </div>
-        </ApiProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <VoxiErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <ApiProvider>
+            <div data-testid="converge.root" style={{ height: '100%' }}>
+              {/* DrawerHost is passed as NavHost's `wrap` so it lives INSIDE the router context — a drawer row then
+                  actually navigates (see shims/expo-router.tsx), while its open/closed state survives screen swaps. */}
+              <NavHost routes={routes} initial="/welcome" wrap={DrawerHost} />
+              <DevSentryTrigger />
+            </div>
+          </ApiProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </VoxiErrorBoundary>
   )
 }

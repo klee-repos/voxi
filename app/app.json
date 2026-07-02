@@ -85,7 +85,15 @@
           "microphonePermission": "Voxi uses the microphone for voice chat with the Guide."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "organization": "kvnlee",
+          "project": "voxi-app"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -94,6 +102,7 @@
       "clerkPublishableKey": "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}",
       "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}",
       "pipecatConnectUrl": "${EXPO_PUBLIC_PIPECAT_CONNECT_URL}",
+      "sentryDsn": "${EXPO_PUBLIC_SENTRY_DSN}",
       "router": {},
       "eas": {
         "projectId": "12b59473-2cb0-4703-9003-7b1e294f17f3"

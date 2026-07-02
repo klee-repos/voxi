@@ -14,7 +14,8 @@
   "scripts": {
     "test": "bun test",
     "e2e:web:auth": "bun e2e/web/run-auth.web.ts",
-    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/agentic-swipe.web.ts && bun e2e/web/converge/agentic-sweep.web.ts",
+    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/agentic-swipe.web.ts && bun e2e/web/converge/agentic-sweep.web.ts && bun e2e/web/converge/sentry-capture.web.ts",
+    "e2e:web:agentic:sentry": "bun e2e/web/converge/sentry-capture.web.ts",
     "e2e:web:agentic:auth": "bun e2e/web/converge/agentic-auth.web.ts",
     "e2e:web:agentic:collection": "bun e2e/web/converge/agentic-collection.web.ts",
     "e2e:web:agentic:reveal": "bun e2e/web/converge/reveal-agentic.web.ts",
@@ -22,7 +23,8 @@
     "e2e:web:agentic:sweep": "bun e2e/web/converge/agentic-sweep.web.ts",
     "e2e:web:explore": "bun run e2e:web:agentic",
     "e2e:web:explore-mcp": "bun e2e/web/converge/agentic-explore-ab.web.ts",
-    "e2e:ios": "echo 'run on a Mac w/ Xcode: maestro test e2e/flows/'",
+    "e2e:native:bff": "bun e2e/native/test-bff.ts",
+    "e2e:ios": "bash e2e/native/run-maestro.sh",
     "e2e:live": "VOXI_E2E_MODE=live bun e2e/web/run-auth.web.ts",
     "judge:reveal": "bun e2e/judge/run-reveal-judge.web.ts",
     "judge:reveal:live": "bun e2e/judge/run-reveal-judge.web.ts --live",
@@ -41,6 +43,7 @@
   "dependencies": {
     "@clerk/backend": "^3.9.0",
     "@electric-sql/pglite": "^0.5.3",
+    "@sentry/bun": "^10.17.0",
     "hono": "^4.12.27",
     "pg": "^8.13.1",
     "zod": "^4.4.3"

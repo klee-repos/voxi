@@ -15,6 +15,7 @@ import {
   type StreamEvent,
   type AudioBucket,
 } from '../../../packages/shared/src/events'
+import { captureIfUnexpected } from './observability'
 
 export type { StreamEvent, AudioBucket }
 
@@ -27,6 +28,9 @@ export interface SignedUploadUrl {
 export interface CreateThreadBody {
   photoUrl: string
   title?: string
+  /** E2E-only band steer (native Maestro tier). Sent as the `X-Voxi-Test-Seed` header, never in the body; the
+   *  test-BFF maps it to a deterministic reveal band. Undefined in production. */
+  testSeed?: string
 }
 export interface CreateThreadResult {
   threadId: string
@@ -171,6 +175,10 @@ export class ApiClient {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(`[api] fetch FAILED → ${init?.method ?? 'GET'} ${url} :: ${e instanceof Error ? e.name + ': ' + e.message : String(e)}`)
+      // A transport failure (fetch threw) is a CLIENT-only signal the BFF never saw — capture it. HTTP error
+      // responses (ApiError below) are NOT captured here: a 5xx is already reported server-side, and 402/refusal
+      // are expected outcomes.
+      captureIfUnexpected(e, { kind: 'network', method: init?.method ?? 'GET', path })
       throw e
     }
     // eslint-disable-next-line no-console
@@ -188,7 +196,10 @@ export class ApiClient {
 
   // POST /v1/threads — create a thread (1 photo = 1 eve session). Charges a scan; 402 → paywall.
   createThread(body: CreateThreadBody): Promise<CreateThreadResult> {
-    return this.json<CreateThreadResult>('/v1/threads', { method: 'POST', body: JSON.stringify(body) })
+    const { testSeed, ...rest } = body
+    // The E2E band seed rides a header (the native analog of the web harness's ?scan Referer), not the body.
+    const headers = testSeed ? { 'x-voxi-test-seed': testSeed } : undefined
+    return this.json<CreateThreadResult>('/v1/threads', { method: 'POST', body: JSON.stringify(rest), headers })
   }
 
   /**
@@ -209,6 +220,7 @@ export class ApiClient {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(`[api] multipart upload FAILED → ${url} :: ${e instanceof Error ? e.name + ': ' + e.message : String(e)}`)
+      captureIfUnexpected(e, { kind: 'network', method: 'POST', path: '/v1/threads' })
       throw e
     }
     const text = await res.text()

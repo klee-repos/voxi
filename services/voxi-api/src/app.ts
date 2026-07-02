@@ -13,6 +13,7 @@ import { threadOwnerVerdict } from './acl'
 import type { StreamEvent } from '../../../packages/shared/src/events'
 import { isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
 import { gatePodcastGeneration, charge, type Store, type Meter } from './metering'
+import { logger } from '../../../packages/telemetry/src/index'
 import { verifyAndApplyTransaction, applyNotification, planForUser, type AppleJwsVerifier, type EntitlementStore } from './appstore'
 import {
   runDedupSweep,
@@ -576,7 +577,7 @@ export function createApp(deps: Deps): Hono {
       try {
         bytes = await deps.speech.tts.synthesize(text)
       } catch (e) {
-        console.error('[speech] synth failed:', e instanceof Error ? e.message : e)
+        logger.error('speech_synth_failed', e instanceof Error ? e : new Error(String(e)), { threadId: id, bucket })
         return c.json({ error: 'synthesis_failed' }, 502)
       }
       await deps.speech.cache?.put(key, bytes).catch(() => {}) // caching is best-effort; never fail the response
@@ -629,7 +630,12 @@ export function createApp(deps: Deps): Hono {
     if (r.reason !== 'idempotent_replay') {
       await deps
         .podcastEnqueue?.({ token: r.token, catalogItemId: body.catalogItemId, version, subject: body.subject ?? body.catalogItemId, userId })
-        .catch((e) => console.error('[podcast] enqueue failed:', e instanceof Error ? e.message : e))
+        .catch((e) =>
+          logger.error('podcast_enqueue_failed', e instanceof Error ? e : new Error(String(e)), {
+            token: r.token,
+            catalogItemId: body.catalogItemId,
+          }),
+        )
     }
     return c.json({ token: r.token, replay: r.reason === 'idempotent_replay' })
   })

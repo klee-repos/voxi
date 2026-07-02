@@ -9,12 +9,25 @@
       "distribution": "internal",
       "ios": { "simulator": true }
     },
+    "maestro": {
+      "distribution": "internal",
+      "ios": { "simulator": true },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "http://localhost:8787/api",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "",
+        "EXPO_PUBLIC_TEST_MODE": "1",
+        "EXPO_PUBLIC_TEST_USER": "converge",
+        "EXPO_PUBLIC_SENTRY_DSN": ""
+      }
+    },
     "preview": {
       "distribution": "internal",
       "ios": { "resourceClass": "m-medium" },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_TEST_MODE": "0",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808"
       }
     },
     "production": {
@@ -23,7 +36,9 @@
       "ios": { "resourceClass": "m-medium" },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_TEST_MODE": "0",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808"
       }
     }
   },

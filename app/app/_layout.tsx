@@ -16,10 +16,29 @@ import { useReducedMotionSync } from '../src/lib/useReducedMotion'
 import { DrawerHost } from '../src/components/Drawer'
 import { parchment } from '../src/lib/theme'
 import { useVoxiFonts } from '../src/lib/fonts'
+import {
+  initObservability,
+  setObservabilityUser,
+  VoxiErrorBoundary,
+  wrapRoot,
+} from '../src/lib/observability'
+
+// Error monitoring — idempotent (index.js inits earliest on native; this backstops web + guarantees init before
+// any provider renders). No-op without a DSN.
+initObservability()
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
 })
+
+/** Tags Sentry events with the signed-in user (id only, no PII) so a native crash is attributable. */
+function SentryUserSync(): null {
+  const { userId } = useAuth()
+  React.useEffect(() => {
+    setObservabilityUser(userId ? { id: userId } : null)
+  }, [userId])
+  return null
+}
 
 /**
  * Keeps the theme's reduce-motion flag in sync with the OS/browser preference (PLAN §10.3), so the platform
@@ -68,23 +87,29 @@ function AppShell(): React.ReactElement {
   )
 }
 
-export default function RootLayout(): React.ReactElement | null {
+function RootLayout(): React.ReactElement | null {
   // Load fonts before painting; on a load error, fall through to system fallbacks rather than hang on a blank screen.
   const [fontsLoaded, fontError] = useVoxiFonts()
   if (!fontsLoaded && !fontError) return null
 
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider>
-            <ReduceMotionBridge />
-            <ApiProvider>
-              <AppShell />
-            </ApiProvider>
-          </ThemeProvider>
-        </QueryClientProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <VoxiErrorBoundary>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <SentryUserSync />
+          <QueryClientProvider client={queryClient}>
+            <ThemeProvider>
+              <ReduceMotionBridge />
+              <ApiProvider>
+                <AppShell />
+              </ApiProvider>
+            </ThemeProvider>
+          </QueryClientProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </VoxiErrorBoundary>
   )
 }
+
+// wrapRoot: native → Sentry.wrap (routing instrumentation + native context); web → identity.
+export default wrapRoot(RootLayout)

@@ -25,10 +25,15 @@ import { createCloudSqlStores } from '../../../services/voxi-api/src/cloudsql-st
 import { createPgStores } from '../../../services/voxi-api/src/pg-stores'
 import { warmGcpToken } from '../../../services/eve-agent/agent/lib/gcp-vision'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
+import { initSentry, flushSentry } from '../../../services/voxi-api/src/sentry'
 
 // Structured logs → stdout (Cloud Run captures them into Cloud Logging) + OTLP span export → Cloud Trace when
 // OTEL_EXPORTER_OTLP_ENDPOINT points at a collector. Must run before anything logs.
 initTelemetry({ service: 'voxi-api', role: 'bff' })
+
+// Error monitoring (Sentry). OPTIONAL + fail-soft: absent SENTRY_DSN → disabled; a bad init never blocks boot.
+// Subscribes to the logger's error/fatal stream, so every 5xx/throw already routed through @voxi/telemetry ships.
+initSentry()
 
 const PORT = Number(process.env.PORT ?? 8080)
 const ON_CLOUD_RUN = !!process.env.K_SERVICE
@@ -126,9 +131,12 @@ logger.info('voxi-api_listening', { port: server.port, onCloudRun: ON_CLOUD_RUN 
 
 // Graceful shutdown: stop accepting, drain in-flight streams, close the DB pool before Cloud Run kills us.
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
     logger.info('shutdown', { signal: sig })
     server.stop()
+    // Drain the Sentry queue before we exit — a 5xx captured microseconds before scale-down would otherwise be
+    // dropped (the async transport hasn't flushed and process.exit skips beforeExit).
+    await flushSentry()
     durable.close().finally(() => process.exit(0))
   })
 }

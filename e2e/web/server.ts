@@ -67,6 +67,17 @@ function scanFromReferer(referer: string | null): Scan | null {
   return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
 }
 
+/**
+ * Native Maestro tier band-steer: the real iOS binary has no browser Referer, so the app forwards its optional
+ * band seed as the `X-Voxi-Test-Seed` header (set from the `voxi://e2e?seed=<band>` deep link). Same effect as the
+ * Referer path — returns null (untouched, real-bytes + PROBABLE) when absent or invalid, so thumbnail-bearing
+ * captures are unaffected.
+ */
+function scanFromHeader(seed: string | null): Scan | null {
+  if (!seed) return null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(seed as Scan) ? (seed as Scan) : null
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** The seeded eve NDJSON stream. Real event shapes (events.ts taxonomy); deterministic per object. */
@@ -644,6 +655,8 @@ export interface HarnessOpts {
   plans?: Record<string, 'free' | 'explorer' | 'voyager'>
   /** wire the spoken-reveal /speech route with a deterministic FakeTts (default true; set false for the negative control). */
   speech?: boolean
+  /** opt in to the Sentry envelope sink + same-origin DSN injection (standUp). Off for every other runner. */
+  sentry?: boolean
 }
 
 /**
@@ -667,10 +680,27 @@ function tinyMp3(): Uint8Array<ArrayBuffer> {
 
 export function createWebHarness(
   seedOrOpts?: Record<string, Entitlements> | HarnessOpts,
-): { fetch: (req: Request) => Promise<Response>; store: Store } {
+): {
+  fetch: (req: Request) => Promise<Response>
+  store: Store
+  sessionOwner: Map<string, string>
+  evict: (threadId: string) => void
+  /** Raw Sentry envelope bodies the app's SDK POSTed to the same-origin DSN (the local sink). */
+  sentryEnvelopes: () => string[]
+  resetSentry: () => void
+} {
   process.env.VOXI_TEST_MODE = '1'
+  // Local Sentry ingest sink: the app's @sentry/browser POSTs envelopes to /api/<projectId>/envelope/ (derived
+  // from the injected same-origin DSN). We record the raw text so a runner can assert capture + redaction — no
+  // network, no real project. This MUST be intercepted before the /api-strip-and-forward below or it hits the BFF.
+  const sentryEnvelopeStore: string[] = []
   const opts: HarnessOpts =
-    seedOrOpts && ('seed' in seedOrOpts || 'trust' in seedOrOpts || 'plans' in seedOrOpts)
+    seedOrOpts &&
+    ('seed' in seedOrOpts ||
+      'trust' in seedOrOpts ||
+      'plans' in seedOrOpts ||
+      'speech' in seedOrOpts ||
+      'sentry' in seedOrOpts)
       ? (seedOrOpts as HarnessOpts)
       : { seed: seedOrOpts as Record<string, Entitlements> | undefined }
 
@@ -816,16 +846,26 @@ export function createWebHarness(
       liveSessions.delete(threadId)
       sessionOwner.delete(threadId)
     },
+    sentryEnvelopes: () => sentryEnvelopeStore,
+    resetSentry: () => {
+      sentryEnvelopeStore.length = 0
+    },
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url)
       if (url.pathname === '/') return new Response(HTML, { headers: { 'content-type': 'text/html' } })
+      // Sentry envelope sink — FIRST, before the /api strip-and-forward, so envelopes are captured here instead of
+      // 404ing against the BFF (a mis-order would leave the sink empty = a false "no error captured" green).
+      if (/^\/api\/[^/]+\/envelope\/?$/.test(url.pathname)) {
+        sentryEnvelopeStore.push(await req.text())
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+      }
       if (url.pathname.startsWith('/api/')) {
         let forward = req
         // Band-steering for the REAL camera: a shutter tap POSTs a signed-URL photoUrl (no `obj:` marker); if the
         // page was opened with `?scan=<object>` (carried on the Referer), seed that object so a genuine capture can
         // reach any band/refusal. Untouched for the mock shell + data-URI captures (they already carry `obj:`/bytes).
         if (url.pathname === '/api/v1/threads' && req.method === 'POST' && (req.headers.get('content-type') ?? '').includes('application/json')) {
-          const scan = scanFromReferer(req.headers.get('referer'))
+          const scan = scanFromReferer(req.headers.get('referer')) ?? scanFromHeader(req.headers.get('x-voxi-test-seed'))
           if (scan) {
             const raw = await req.text()
             let body: { photoUrl?: unknown } | null = null

@@ -49,6 +49,35 @@ let cfg: Config = {
 
 const CTX_KEYS = ['traceId', 'spanId', 'requestId', 'userId', 'sessionId'] as const
 
+/**
+ * A subscriber to error/fatal log events. This is the seam an error-monitoring backend (Sentry) hooks into
+ * WITHOUT this package taking a dependency on it — the entrypoint registers the hook, keeping @voxi/telemetry
+ * zero-dep. `fields` are already redacted; `err` is the original throwable (so a hook can capture a real stack).
+ */
+export interface ErrorLogEvent {
+  level: 'error' | 'fatal'
+  msg: string
+  err: unknown
+  fields?: Record<string, unknown>
+  traceId?: string
+  spanId?: string
+  requestId?: string
+  userId?: string
+  sessionId?: string
+}
+export type ErrorHook = (event: ErrorLogEvent) => void
+
+const errorHooks: ErrorHook[] = []
+
+/** Register a hook invoked on every error/fatal log. Returns an unsubscribe fn. A throwing hook never escapes. */
+export function onError(hook: ErrorHook): () => void {
+  errorHooks.push(hook)
+  return () => {
+    const i = errorHooks.indexOf(hook)
+    if (i >= 0) errorHooks.splice(i, 1)
+  }
+}
+
 function emit(level: Level, msg: string, fields: Record<string, unknown> | undefined, err: unknown): void {
   if (RANK[level] < cfg.minRank) return
   const now = Date.now()
@@ -88,6 +117,29 @@ function emit(level: Level, msg: string, fields: Record<string, unknown> | undef
       traceId: typeof ctx.traceId === 'string' ? ctx.traceId : undefined,
       spanId: typeof ctx.spanId === 'string' ? ctx.spanId : undefined,
     })
+  }
+
+  // Fan out error/fatal to registered hooks (Sentry). Each is best-effort: a throwing or slow hook must never
+  // turn a logged error into a crash inside the telemetry layer, so every call is isolated in try/catch.
+  if ((level === 'error' || level === 'fatal') && errorHooks.length > 0) {
+    const event: ErrorLogEvent = {
+      level,
+      msg,
+      err,
+      fields: attributes,
+      traceId: typeof ctx.traceId === 'string' ? ctx.traceId : undefined,
+      spanId: typeof ctx.spanId === 'string' ? ctx.spanId : undefined,
+      requestId: typeof ctx.requestId === 'string' ? ctx.requestId : undefined,
+      userId: typeof ctx.userId === 'string' ? ctx.userId : undefined,
+      sessionId: typeof ctx.sessionId === 'string' ? ctx.sessionId : undefined,
+    }
+    for (const hook of errorHooks) {
+      try {
+        hook(event)
+      } catch {
+        // swallow — a broken error sink must not break logging
+      }
+    }
   }
 }
 

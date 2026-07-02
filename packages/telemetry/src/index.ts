@@ -13,8 +13,11 @@ export {
   initTelemetry,
   shutdownTelemetry,
   getExporter,
+  onError,
   type Logger,
   type Level,
+  type ErrorHook,
+  type ErrorLogEvent,
 } from './logger'
 export { withRequestTelemetry, outboundHeaders, routePattern, type RequestTelemetryOptions } from './http'
 export {
@@ -27,5 +30,5 @@ export {
   formatTraceparent,
   type RequestContext,
 } from './context'
-export { redact } from './redact'
+export { redact, redactDeep, redactString } from './redact'
 export { OtlpExporter, exporterFromEnv, parseHeaders, type OtlpResource } from './otlp'
