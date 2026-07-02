@@ -1,11 +1,10 @@
 /**
- * LIVE voice round-trip: Voxi narration TEXT → ElevenLabs TTS (British voice) → MP3 → Deepgram STT → TEXT,
- * asserting the transcript recovers the identity. Proves BOTH voice vendors (the spoken narration + the STT half
- * of the realtime conversation, PLAN §6.3) with a single closed loop. Run: `bun spikes/live-voice-roundtrip.ts`.
+ * LIVE voice round-trip: text → ElevenLabs TTS → MP3 → Deepgram STT → text, asserting the transcript recovers
+ * the identity. Proves both voice vendors in one closed loop. Run: `bun spikes/live-voice-roundtrip.ts`.
  */
 const el = process.env.ELEVENLABS_API_KEY
 const dg = process.env.DEEPGRAM_API_KEY
-const voiceId = process.env.ELEVENLABS_VOXI_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb'
+const voiceId = '19STyYD15bswVz51nqLf' // Voxi's voice
 if (!el || !dg) {
   console.error(`missing keys — ELEVENLABS_API_KEY:${!!el} DEEPGRAM_API_KEY:${!!dg}`)
   process.exit(1)

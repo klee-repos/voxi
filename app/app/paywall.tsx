@@ -1,12 +1,7 @@
 /**
- * Paywall (PLAN §10.2 / §13) — shown when a metered action is denied (BFF 402, e.g. scan_limit_reached). The
- * limit message is in-persona and reflects WHICH meter ran out (passed as ?reason=); subscribe drives
- * StoreKit 2 DIRECTLY on device (no billing vendor); restore re-checks entitlements. ids: paywall.*.
- *
- * States covered: idle, PURCHASING / RESTORING (busy buttons), SUCCESS (entitlement granted → dismiss),
- * "nothing to restore" notice, ERROR (in-persona, both flows), and OFFLINE (purchases need a connection, so
- * the actions are disabled behind the global banner). The purchase calls go through a `purchases` seam that is
- * a deterministic stub by default (web/E2E) and the real StoreKit 2 wrapper (`expo-iap`) on device.
+ * Paywall (PLAN §10.2 / §13) — shown when a metered action is denied (BFF 402). The limit message reflects
+ * WHICH meter ran out (passed as ?reason=). Subscribe/restore go through the `purchases` seam: a deterministic
+ * stub on web/E2E, the real StoreKit 2 wrapper (`expo-iap`) on device. ids: paywall.*.
  */
 import React, { useState } from 'react'
 import { useRouter, useLocalSearchParams } from 'expo-router'

@@ -8,6 +8,7 @@ import { useCaptureStore, deriveBucketStatus, type StatusSlice } from './capture
 
 const base: StatusSlice = {
   band: null,
+  whatItIs: '',
   sections: {},
   facts: [],
   researchComplete: false,
@@ -16,11 +17,15 @@ const base: StatusSlice = {
 }
 
 describe('deriveBucketStatus', () => {
-  test('what is active the instant the band settles (never a jarring loading→active flip)', () => {
-    expect(deriveBucketStatus('what', base, false)).toBe('loading')
-    expect(deriveBucketStatus('what', { ...base, band: 'CONFIDENT' }, false)).toBe('active')
-    // active on band-settle even before any whatItIs token has streamed
-    expect(deriveBucketStatus('what', { ...base, band: 'PROBABLE' }, false)).toBe('active')
+  test('what follows the SAME loading→active logic as the others: loading until its description streams, then active', () => {
+    expect(deriveBucketStatus('what', base, false)).toBe('loading') // no band yet
+    // band settled but the description has not streamed yet → still loading (no longer specially lit while the
+    // other icons sit in loading on a fresh open / swipe replay)
+    expect(deriveBucketStatus('what', { ...base, band: 'CONFIDENT' }, false)).toBe('loading')
+    // active once the description content is present
+    expect(deriveBucketStatus('what', { ...base, band: 'CONFIDENT', whatItIs: 'A 1976 Canon AE-1.' }, false)).toBe('active')
+    // a stream drop / offline before the description → unavailable (retriable), same as the others
+    expect(deriveBucketStatus('what', { ...base, band: 'PROBABLE', researchError: true }, false)).toBe('unavailable')
   })
 
   test('facts: loading → active on first fact → empty on researchComplete', () => {
@@ -64,6 +69,29 @@ describe('capture store actions', () => {
     st.appendSection('purpose', { text: 'dossier upgrade', sourceUrl: 'u', sourceTitle: 't', quote: 'q' })
     expect(useCaptureStore.getState().sections.purpose?.text).toBe('dossier upgrade')
     expect(useCaptureStore.getState().sawAnySection).toBe(true)
+  })
+
+  test('isRevisit: markRevisit sets it; startCapture + reset clear it (default fresh-analysis)', () => {
+    const st = useCaptureStore.getState()
+    expect(useCaptureStore.getState().isRevisit).toBe(false)
+    st.markRevisit()
+    expect(useCaptureStore.getState().isRevisit).toBe(true)
+    // startCapture (a fresh capture) resets to analyze
+    useCaptureStore.getState().startCapture('data:image/jpeg;base64,x')
+    expect(useCaptureStore.getState().isRevisit).toBe(false)
+    // and a revisit marks AFTER startCapture (the order revisitThread uses)
+    useCaptureStore.getState().startCapture('p')
+    useCaptureStore.getState().markRevisit()
+    expect(useCaptureStore.getState().isRevisit).toBe(true)
+    useCaptureStore.getState().reset()
+    expect(useCaptureStore.getState().isRevisit).toBe(false)
+  })
+
+  test('isRevisit survives the processing unavailable-retry flag reset (only startCapture/reset clear it)', () => {
+    useCaptureStore.getState().markRevisit()
+    // processing.run()'s fresh-run reset touches ONLY the research flags — never isRevisit.
+    useCaptureStore.setState({ researchError: false, researchComplete: false })
+    expect(useCaptureStore.getState().isRevisit).toBe(true)
   })
 
   test('researchComplete / researchError / lastSeenIndex set + reset clears them', () => {

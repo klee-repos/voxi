@@ -1,7 +1,6 @@
 /**
- * LIVE identification CLI: real Vertex Gemini + Cloud Vision (via the gcp-vision lib, authed through the
- * gcloud CLI — no ADC, no SA key) fed into the shared arbitration. This is a thin wrapper over the single
- * source of truth in services/eve-agent/agent/lib/gcp-vision.ts. Run: `bun spikes/live-identify.ts <img>`.
+ * LIVE identification CLI: real Gemini + Cloud Vision (gcp-vision lib, authed via gcloud CLI) → shared
+ * arbitration. Thin wrapper over services/eve-agent/agent/lib/gcp-vision.ts. Run: `bun spikes/live-identify.ts <img>`.
  */
 import { arbitrate, type Candidate } from '../packages/shared/src/arbitration'
 import { geminiIdentify, visionWebDetect, loadImageBytes } from '../services/eve-agent/agent/lib/gcp-vision'

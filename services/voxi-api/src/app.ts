@@ -37,7 +37,7 @@ export interface EveClient {
   narrationText?(sessionId: string, userId: string, bucket?: AudioBucket): Promise<string | null>
 }
 
-/** Single-voice TTS seam for the spoken reveal (ElevenLabs "George" in prod, a deterministic fake in tests). */
+/** Single-voice TTS seam for the spoken reveal (ElevenLabs in prod, a deterministic fake in tests). */
 export interface NarrationTtsProvider {
   /** Uint8Array<ArrayBuffer> so the bytes satisfy Hono's `c.body` Data type under strict tsc. */
   synthesize(text: string): Promise<Uint8Array<ArrayBuffer>>

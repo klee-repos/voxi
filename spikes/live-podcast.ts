@@ -1,9 +1,9 @@
 /**
- * LIVE two-voice podcast render (PLAN §6.2), end-to-end through the REAL `renderPodcast` pipeline:
- *   closed grounded facts → Gemini writes a claim-structured ARLO/MAVE script → the REAL honesty + defamation
- *   gates → live ElevenLabs multi-voice TTS (George + Alice) → a real WAV episode → atomic asset publish.
- * Nothing is faked except the store/muxer plumbing (in-memory + local WAV instead of GCS/HLS — the ffmpeg
- * segmentation is the only prod step not runnable here). Run: `bun spikes/live-podcast.ts`.
+ * LIVE two-voice podcast render through the REAL `renderPodcast` pipeline:
+ *   grounded facts → Gemini writes a claim-structured script → real honesty + defamation gates → live
+ *   ElevenLabs multi-voice TTS → WAV episode → asset publish.
+ * Only the store/muxer plumbing is faked (in-memory + local WAV; ffmpeg/HLS is the one prod step not runnable
+ * here). Run: `bun spikes/live-podcast.ts`.
  */
 import {
   renderPodcast,

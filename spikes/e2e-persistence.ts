@@ -1,11 +1,7 @@
 /**
- * PROOF that the PGlite-backed BFF stores are genuinely durable across a process restart (task #20).
- *
- * No cheating: we write real rows through real SQL to a file-backed dataDir, CLOSE the PGlite entirely, then
- * reopen createPgStores() on the SAME dir (simulating a fresh process) and assert every value survived. We
- * also prove the atomic decrement refuses when insufficient and that putToken is idempotent (first token wins).
- *
- * Run: cd /Users/kvnlee/dev/voxi && bun spikes/e2e-persistence.ts
+ * PROOF that the PGlite-backed BFF stores are durable across a process restart: write real rows to a file-backed
+ * dataDir, close PGlite, reopen createPgStores() on the same dir, assert every value survived. Also proves the
+ * atomic decrement refuses when insufficient and putToken is idempotent. Run: `bun spikes/e2e-persistence.ts`.
  */
 import { rmSync } from 'node:fs'
 import { createPgStores } from '../services/voxi-api/src/pg-stores'

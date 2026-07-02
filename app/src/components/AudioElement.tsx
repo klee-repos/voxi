@@ -1,15 +1,11 @@
 /**
  * The audio playback element (podcast.audio / reveal.narrationAudio — the E2E `expect.playing()` asserts
- * currentTime advances).
+ * currentTime advances). On web we render a REAL DOM `<audio>` carrying the testID so the driver can assert
+ * playback; on native, react-native-track-player drives audio (see AudioElement.native.tsx).
  *
- * On web (the E2E harness / react-native-web) we render a REAL DOM `<audio>` element carrying the testID so the
- * Playwright/agent-browser driver can assert playback; `playing` toggles play()/pause(). On native, audio is
- * driven by react-native-track-player (see AudioElement.native.tsx). The seam keeps the player screen identical.
- *
- * `onPlayingChange` reports the element's REAL playing state back to the caller (fired on play/pause/ended AND
- * when a gesture-less autoplay is BLOCKED — play() rejects). This is what keeps the reveal's play/replay button
- * in sync with reality: a blocked autoplay reports `false`, so the button shows "Hear it" and a single tap plays.
- * `seekToStartOnPlay` restarts from 0 each time playback begins, so the reveal's button is a true "replay".
+ * `onPlayingChange` reports the element's REAL playing state, including when a gesture-less autoplay is BLOCKED
+ * (play() rejects) — so a blocked autoplay reports `false` and the reveal button shows "Hear it" until a tap.
+ * `seekToStartOnPlay` restarts from 0 each time playback begins, so the button is a true "replay".
  */
 import React, { useEffect, useRef } from 'react'
 import { View, Platform } from 'react-native'

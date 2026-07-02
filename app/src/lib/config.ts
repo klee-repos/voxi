@@ -18,6 +18,6 @@ export const config = {
     process.env.EXPO_PUBLIC_PIPECAT_CONNECT_URL ?? extra.pipecatConnectUrl ?? '',
 }
 
-// Startup diagnostic: confirm the inlined endpoints the device is actually targeting.
+// Startup diagnostic: the endpoints the device is actually targeting.
 // eslint-disable-next-line no-console
 console.log(`[config] apiBaseUrl=${config.apiBaseUrl} pipecat=${config.pipecatConnectUrl || '(none)'}`)

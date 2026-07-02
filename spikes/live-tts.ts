@@ -1,10 +1,8 @@
 /**
- * LIVE ElevenLabs TTS: turn Voxi's persona narration TEXT (the honesty-gated output of the live cascade) into
- * SPEECH in a dry British voice — the spoken layer on top of the already-live Gemini narration (PLAN §6.2/§6.3).
- * Run: `bun spikes/live-tts.ts "text to speak"`  (defaults to the real Canon AE-1 narration).
+ * LIVE ElevenLabs TTS: narration text → speech. Run: `bun spikes/live-tts.ts "text to speak"`.
  */
 const key = process.env.ELEVENLABS_API_KEY
-const voiceId = process.env.ELEVENLABS_VOXI_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb' // George — British storyteller
+const voiceId = '19STyYD15bswVz51nqLf' // Voxi's voice
 if (!key) {
   console.error('ELEVENLABS_API_KEY missing (set it in .env.local)')
   process.exit(1)
@@ -24,7 +22,6 @@ const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?ou
   body: JSON.stringify({
     text,
     model_id: 'eleven_multilingual_v2',
-    // A dry narrator: moderate stability, natural similarity, a touch of style for wit.
     voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.25, use_speaker_boost: true },
   }),
 })

@@ -10,8 +10,7 @@
  *   empty               — no thread to compose against (deep-linked cold) → route back to a capture;
  *   error (failed)      — gate refused (402 → paywall) OR the worker returned `failed` → in-persona apology,
  *                         retry, and report-episode still reachable (never a dead screen);
- *   offline             — global.offlineBanner pins to the top; we don't fabricate "ready" when the network is
- *                         down (the previous version's silent fall-through to ready is removed).
+ *   offline             — global.offlineBanner pins to the top; we don't fabricate "ready" when the network is down.
  * Reduce-motion (PLAN §10.3): the cover cross-fades in instead of rising; the orb honors the flag itself.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -59,8 +58,7 @@ function PodcastBody(): React.ReactElement {
   const [failReason, setFailReason] = useState<'limit' | 'render' | 'network' | null>(null)
   const cancelledRef = useRef(false)
 
-  // Modal dismiss X (right slot), guarded → fallback camera on deep-link/reload. Present on EVERY state incl.
-  // READY (which previously had no close control on web — a latent trap this fixes).
+  // Modal dismiss X, guarded → fallback camera on deep-link/reload. Present on EVERY state incl. READY.
   const closeHeader = <AppHeader leading="none" showClose />
 
   const compose = useCallback(async (): Promise<void> => {

@@ -47,10 +47,7 @@ await check('no uncaught errors while mounting the real camera tree', async () =
 // (charges a scan from the seeded entitlement, real metering), then router.push('/processing'). We observe the
 // real navigation intent via the expo-router shim's data-last-nav (the same seam reveal-rnw asserts on).
 await check('shutter drives a real BFF createThread → navigation to /processing (expo-router seam)', async () => {
-  // Tapping the REAL shutter calls api.signUpload + api.createThread on the REAL BFF (charges a scan from the
-  // seeded entitlement — real metering), then router.push('/processing'). We observe the real navigation intent
-  // via the expo-router shim's data-last-nav (the same seam reveal-rnw asserts on) and poll until the async
-  // round-trip settles.
+  // Poll until the async createThread → router.push('/processing') round-trip settles.
   await d.tap(ids.camera.shutter)
   const deadline = Date.now() + 8000
   let nav = ''

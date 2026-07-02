@@ -1,11 +1,9 @@
 /**
  * Microphone permission seam (PLAN §10.2 screen 2 / §15 — mic = voice chat; prime BEFORE the OS prompt).
  *
- * Mirrors the camera seam (cameraPermission.ts) for the mic, which the camera seam doesn't cover. vision-camera
- * exposes `Camera.requestMicrophonePermission()` natively; the module is absent in the E2E web harness, so the
- * request is lazy + guarded and resolves deterministically there. The harness can pin the resolved status via
- * `EXPO_PUBLIC_MIC_PERMISSION` (granted | denied | undetermined) so the priming/denied paths are reachable
- * without a device. We never block onboarding on a denial — the user can grant later from Settings/conversation.
+ * vision-camera exposes `Camera.requestMicrophonePermission()` natively; the module is absent in the E2E web
+ * harness, so the request is lazy + guarded. The harness pins the resolved status via `EXPO_PUBLIC_MIC_PERMISSION`
+ * (granted | denied | undetermined) so the priming/denied paths are reachable without a device.
  */
 import { Platform } from 'react-native'
 

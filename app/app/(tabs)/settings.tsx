@@ -1,11 +1,6 @@
 /**
- * Settings / account (PLAN §10.2 screen 12) — subscription status (from GET /v1/me), the privacy line ("no
- * facial recognition"), reduce-motion toggle (drives the a11y motion swap, PLAN §10.3), Apple-required account
- * deletion (cascades via DELETE /v1/account), and sign-out. ids: settings.*.
- *
- * States covered: LOADING (me query in flight), ERROR/OFFLINE for the subscription row (retry, never blocks
- * the privacy/deletion/sign-out controls), a DELETING in-progress state, and the global OfflineBanner. The
- * reduce-motion toggle reflects + sets the theme flag so every animated surface honours it immediately.
+ * Settings / account (PLAN §10.2 screen 12) — subscription status (GET /v1/me), the privacy line, reduce-motion
+ * toggle (PLAN §10.3), Apple-required account deletion (DELETE /v1/account), and sign-out. ids: settings.*.
  */
 import React, { useState } from 'react'
 import { View, Pressable, StyleSheet, Alert, Platform } from 'react-native'

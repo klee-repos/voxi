@@ -1,16 +1,11 @@
 /**
- * Billing seam (PLAN §13 / D — StoreKit 2 DIRECT, no third-party billing vendor). The paywall and settings
- * screens consume THIS interface, never the StoreKit module directly, so the screens render + the E2E paywall
- * flow runs without a StoreKit sandbox.
+ * Billing seam (PLAN §13 / D — StoreKit 2 direct, no third-party billing vendor). Screens consume THIS interface,
+ * never the StoreKit module directly, so they render + the E2E paywall flow runs without a StoreKit sandbox. On
+ * device the real factory (`purchases.native`) wraps `expo-iap` and is a drop-in swap.
  *
- * Default = a deterministic in-process stub (web/E2E/CI): `purchase` reports entitled, `restore` reports
- * nothing-to-restore — enough to exercise the success/notice/error branches deterministically. On device the
- * real factory (`purchases.native`) wraps `expo-iap` (Apple StoreKit 2) and is a drop-in swap.
- *
- * Nothing on device is trusted as the source of truth for entitlements — the client forwards the StoreKit 2
- * SIGNED transaction (JWS) to the BFF, which VERIFIES it against Apple (see services/voxi-api/src/appstore.ts)
- * and the BFF's GET /v1/me is authoritative (PLAN §6.4). A successful purchase just dismisses the wall; the next
- * /me read reflects the server-verified plan. There is no RevenueCat and no client-trusted entitlement.
+ * The client is never trusted for entitlements: it forwards the StoreKit 2 SIGNED transaction (JWS) to the BFF,
+ * which verifies it against Apple (services/voxi-api/src/appstore.ts) and GET /v1/me is authoritative (PLAN §6.4).
+ * A successful purchase just dismisses the wall; the next /me read reflects the server-verified plan.
  */
 export type Plan = 'free' | 'explorer' | 'voyager'
 

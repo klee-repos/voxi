@@ -179,7 +179,7 @@ await check('the card audio round-trips through the REAL /speech route (a data:a
   }
   throw new Error('bucket audio never played from /speech: ' + fmt(await audioState()))
 })
-await check('the Curious-facts card shows ≥3 verified chips + a tappable source proof', async () => {
+await check('the Curious-facts card: ≥3 fact rows, each with its OWN source link showing a title (never a raw URL)', async () => {
   await d.tap(ids.nav.close) // close the What card
   await pollState(ids.reveal.bucketFacts, 'active')
   await d.tap(ids.reveal.bucketFacts)
@@ -191,11 +191,14 @@ await check('the Curious-facts card shows ≥3 verified chips + a tappable sourc
     if (n >= 3) break
     await new Promise((r) => setTimeout(r, 150))
   }
-  if (n < 3) throw new Error('expected ≥3 fact chips, got ' + n)
-  await page.locator(`[data-testid="${ids.reveal.factSource}"]`).first().click()
-  await page.waitForTimeout(250)
-  const bodyText = await page.evaluate(() => document.body.textContent || '')
-  if (!/Hide source/.test(bodyText)) throw new Error('source proof did not open on tap')
+  if (n < 3) throw new Error('expected ≥3 fact rows, got ' + n)
+  // The source sits UNDER each fact (not grouped/deduped) and shows the webpage TITLE — a prettified site name when
+  // the page has no title — never a raw URL.
+  const srcTexts = await page.locator(`[data-testid="${ids.reveal.factSource}"]`).evaluateAll((els) => els.map((e) => (e.textContent || '').trim()))
+  if (srcTexts.length < n) throw new Error(`each fact needs its own source link; ${srcTexts.length} links for ${n} facts`)
+  if (!srcTexts.some((t) => t.includes('Cannondale SuperSix EVO'))) throw new Error('real page title not shown: ' + JSON.stringify(srcTexts)) // title branch
+  if (!srcTexts.some((t) => t === 'Cannondale')) throw new Error('hostname-fallback title not shown: ' + JSON.stringify(srcTexts)) // empty-title → site name
+  if (srcTexts.some((t) => /https?:\/\//.test(t))) throw new Error('a raw URL leaked into a source link (D3 regression): ' + JSON.stringify(srcTexts))
 })
 
 await rig.stop()

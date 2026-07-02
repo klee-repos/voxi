@@ -1,13 +1,11 @@
 /**
  * FadeRise — the reduce-motion-aware mount transition for content that "rises" into view (PLAN §10.3).
  *
- * The reveal card and the podcast cover "rise" as the particles converge (design-notes §Processing). With
- * reduce-motion ON we MUST swap that motion for a plain cross-fade (no translate, faster) but still show the
- * orb and the content — the flag never hides anything, it only calms the motion.
+ * With reduce-motion ON we swap the rise for a plain cross-fade (no translate, faster) but still show the
+ * content — the flag never hides anything, it only calms the motion.
  *
- * Implementation note: this uses the Animated API from react-native (driverless / JS-driven) rather than
- * Reanimated worklets so it renders identically under react-native-web (the E2E harness) and on native, and
- * never blocks first paint. The real build can swap a Reanimated entering animation behind this same seam.
+ * Uses the RN Animated API (JS-driven) rather than Reanimated worklets so it renders identically under
+ * react-native-web (the E2E harness) and on native. The real build can swap a Reanimated entering animation here.
  */
 import React, { useEffect, useRef } from 'react'
 import { Animated, type ViewStyle } from 'react-native'

@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Protocol, runtime_checkable
 
+from .persona import ELEVENLABS_VOXI_WIRE_VOICE_ID
 from .prompts import render_prompt
 
 
@@ -341,27 +342,25 @@ class GeminiLLM:
 @dataclass
 class ElevenLabsTTS:
     """
-    Real ElevenLabs text-to-speech (TtsProvider) in the canonical Voxi voice (George). Every chunk is tagged
-    with the SESSION's canonical voice_id so the pipeline's voice-consistency gate passes — a vendor fallback
-    that returned a different timbre would be caught, never played silently.
+    Real ElevenLabs text-to-speech (TtsProvider). Every chunk is tagged with the SESSION's canonical
+    voice_id so the pipeline's voice-consistency gate passes — a vendor fallback that returned a different
+    timbre would be caught, never played silently.
 
-    `voice_id` here is the LOGICAL canonical id the pipeline asserts on (persona.voice_id). The actual
-    ElevenLabs voice id (George = ELEVENLABS_VOXI_VOICE_ID) is a separate wire detail; they are decoupled so
-    the pipeline's identity check is stable across a vendor-account failover to a second George clone.
+    `voice_id` is the logical canonical id the pipeline asserts on; the ElevenLabs wire id is decoupled from
+    it so the identity check stays stable across a vendor-account failover to a second clone of the voice.
     """
 
     voice_id: str  # the canonical logical id the pipeline asserts on
     api_key: str = ""
-    el_voice_id: str = ""  # the ElevenLabs wire voice id (George)
+    el_voice_id: str = ""  # the ElevenLabs wire voice id; empty ⇒ ELEVENLABS_VOXI_WIRE_VOICE_ID
     model_id: str = "eleven_flash_v2_5"
     output_format: str = "mp3_44100_128"
     name: str = "elevenlabs"
 
     def __post_init__(self) -> None:
         self.api_key = _require("ELEVENLABS_API_KEY", self.api_key or os.getenv("ELEVENLABS_API_KEY"))
-        # The env value may carry a trailing comment; keep only the id token.
-        raw = self.el_voice_id or os.getenv("ELEVENLABS_VOXI_VOICE_ID", "")
-        self.el_voice_id = _require("ELEVENLABS_VOXI_VOICE_ID", raw.split()[0] if raw else None)
+        # Wire voice id defaults to the baked-in constant; an explicitly passed el_voice_id still wins.
+        self.el_voice_id = (self.el_voice_id or ELEVENLABS_VOXI_WIRE_VOICE_ID).split()[0]
 
     async def synthesize(self, text: str) -> AsyncIterator[TtsChunk]:
         from elevenlabs.client import ElevenLabs

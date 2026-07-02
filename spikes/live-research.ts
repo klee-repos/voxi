@@ -1,10 +1,7 @@
 /**
- * LIVE grounded research (ANALYSIS-VOICE-PLAN A1) — the real Vertex Gemini Google-Search-grounded call that
- * turns a confirmed identity into CITABLE facts, each paired with the source URL that grounds it. This is what
- * lets the reveal narration be specific + valuable (make/model/year + an interesting fact) while staying inside
- * the honesty gate. Auth is the same gcloud CLI token as identification — NO new creds.
- *
- * Run: `bun spikes/live-research.ts "1976 Canon AE-1"`  (defaults to the Canon AE-1).
+ * LIVE grounded research: real Gemini Google-Search-grounded call turning a confirmed identity into citable
+ * facts, each paired with its grounding source URL. Auth via the gcloud CLI token (no new creds).
+ * Run: `bun spikes/live-research.ts "1976 Canon AE-1"`.
  */
 import { LiveResearcher } from '../services/eve-agent/agent/providers/live-research'
 

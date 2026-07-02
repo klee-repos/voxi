@@ -15,7 +15,8 @@ On each /offer it builds a per-connection Pipecat pipeline:
 The pipeline runs in a background task for the life of the peer connection. This is the SAME cascade the
 transport-agnostic core (voxi_voice.pipeline) exercises with fakes; here it runs over real WebRTC media.
 
-Boot:  DEEPGRAM_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOXI_VOICE_ID, GCP_PROJECT (+ gcloud login) in env.
+Boot:  DEEPGRAM_API_KEY, ELEVENLABS_API_KEY, GCP_PROJECT (+ gcloud login) in env. (The voice id is baked in
+       as ELEVENLABS_VOXI_WIRE_VOICE_ID, not an env knob.)
 Run:   uvicorn voice_server:app --host 0.0.0.0 --port 7071
        (or: python voice_server.py --port 7071)
 
@@ -31,7 +32,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from voxi_voice.persona import VOXI_PERSONA
+from voxi_voice.persona import ELEVENLABS_VOXI_WIRE_VOICE_ID, VOXI_PERSONA
 from voxi_voice.telemetry import get_logger
 
 log = get_logger("voxi-voice", role="voice")
@@ -71,7 +72,7 @@ async def health() -> dict:
         "service": "voxi-voice",
         "deepgram": bool(os.getenv("DEEPGRAM_API_KEY")),
         "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
-        "voxi_voice_id": bool(os.getenv("ELEVENLABS_VOXI_VOICE_ID")),
+        "voxi_voice_id": ELEVENLABS_VOXI_WIRE_VOICE_ID,  # baked-in, no env
         "gcp_project": os.getenv("GCP_PROJECT") or None,
         "live_connections": len(_connections),
     }

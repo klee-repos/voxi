@@ -25,6 +25,7 @@ import { useApi } from '../../src/lib/api'
 import { useOffline, isOfflineError } from '../../src/lib/useOffline'
 import { useRevisitThread } from '../../src/lib/useRevisitThread'
 import { threadsKey } from '../../src/lib/queryKeys'
+import { orderThreads } from '../../src/lib/collectionOrder'
 import type { ThreadSummary } from '../../src/lib/apiClient'
 
 /** Date buckets for the "chat history" grouping (newest first). */
@@ -49,7 +50,7 @@ interface DateGroup {
 }
 function groupByDate(threads: ThreadSummary[]): DateGroup[] {
   const now = Date.now()
-  const sorted = [...threads].sort((a, b) => b.createdAt - a.createdAt)
+  const sorted = orderThreads(threads) // newest-first — the SAME order the reveal pages through (shared helper)
   const out: DateGroup[] = []
   for (const t of sorted) {
     const label = bucketLabel(t.createdAt, now)
@@ -139,11 +140,8 @@ export default function Threads(): React.ReactElement {
       <Title>Your collection</Title>
       <Muted style={{ marginBottom: space.md }}>{threads.length} catalogued · ∞ to go</Muted>
 
-      {/* The collection is the GRID of captures (the proto-Pokédex), organised into DATE-GROUPED titled
-          sections (Today / Yesterday / earlier — the X "Chat History" model). `threads.grid` marks the whole
-          collection container; each capture tile is the single canonical `threads.item` (one per thread, so
-          the selector matches exactly N), titled by its auto-title and tappable to REVISIT the durable eve
-          session. This unifies "grid of captures" + "date-grouped titled threads" without duplicating ids. */}
+      {/* `threads.grid` marks the whole collection container; each tile is the single canonical `threads.item`
+          (one per thread, so the selector matches exactly N) and taps to REVISIT the durable eve session. */}
       <ScrollView
         {...tid(ids.threads.grid)}
         contentContainerStyle={{ paddingBottom: space.xl }}

@@ -10,8 +10,8 @@
  *
  * The bar ALWAYS owns its own top inset. Full-bleed screens (camera viewfinder, processing/reveal photo) render
  * it inside their absolute overlay with `onMedia` (white glyphs in a scrim circle). Every other screen mounts it
- * via `<Screen header={<AppHeader/>}>`, which drops the top safe-area edge so the header is the SINGLE inset
- * owner (no double-inset) and its measured box (`nav.header`) is identical across screens.
+ * via `<Screen header={<AppHeader/>}>`, which drops the top safe-area edge so the header is the SINGLE inset owner
+ * (no double-inset).
  *
  * Leading/close default to a GUARDED dismiss: `router.canGoBack() ? router.back() : router.replace(fallback)`,
  * so a deep-linked / web-reloaded screen never dead-clicks. Screens override via `onLeadingPress`/`onClose` to

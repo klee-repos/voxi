@@ -1,9 +1,7 @@
 /**
- * PulseRings — the Shazam "listening" pulse, in design.md green: three concentric hairline rings that expand
- * outward from the narrator Orb and fade, staggered, while the Guide "searches". Decorative (hidden from AT).
- * RN `Animated` (JS-driven, `useNativeDriver:false`) so it renders identically web + native. Reduce-motion (or
- * when inactive/settled) → two STATIC concentric hairlines, no pulse; the orb is never hidden. Container carries
- * `processing.rings`.
+ * PulseRings — three staggered concentric hairline rings that expand and fade around the narrator Orb.
+ * Decorative (hidden from AT). RN `Animated` (`useNativeDriver:false`) so it renders identically web + native.
+ * Reduce-motion / inactive → two STATIC hairlines, no pulse. Container carries `processing.rings`.
  */
 import React, { useEffect, useRef } from 'react'
 import { View, Animated, StyleSheet } from 'react-native'

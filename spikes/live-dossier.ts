@@ -1,8 +1,7 @@
 /**
- * LIVE deep-research dossier (PROMPT-QUALITY §3.B). Runs the REAL dossierProviderFromEnv() — Firecrawl deep crawl
- * (if FIRECRAWL_API_KEY) → Gemini fact extraction with verbatim quotes → the CLOSED PROVENANCE LOOP (quote⊆source
- * + sourceMatchesSubject + quote⊨text) — and prints each VERIFIED fact with its attached proof. No Firecrawl key →
- * the Gemini-grounding fallback (gcloud only). Run: `bun spikes/live-dossier.ts "Canon AE-1"`.
+ * LIVE deep-research dossier via the REAL dossierProviderFromEnv(): Firecrawl deep crawl (if FIRECRAWL_API_KEY)
+ * → Gemini fact extraction → closed provenance loop (quote⊆source + sourceMatchesSubject + quote⊨text), printing
+ * each verified fact with its proof. No Firecrawl key → Gemini-grounding fallback. Run: `bun spikes/live-dossier.ts "Canon AE-1"`.
  */
 import { dossierProviderFromEnv } from '../services/eve-agent/agent/providers/live-dossier'
 import type { DossierInput } from '../services/eve-agent/agent/subagents/researcher'

@@ -138,10 +138,56 @@ await check('the agent perceives + taps the refusal recovery action (real click 
   throw new Error('refusal recovery did not fire the camera nav intent')
 })
 
+// ── Goal 5: an EMPTY reveal (deep-linked with nothing captured) is a calm INVITE — the agent perceives it and
+//    opens the camera. Proves the empty-state redesign (no error-style "Nothing to show yet"). ──
+await page.goto(`${base}/?scan=empty`)
+await check('the EMPTY reveal renders the calm INVITE, not the old "Nothing to show yet" error copy', async () => {
+  await d.waitFor(ids.reveal.primaryAction, { timeoutMs: 8000 })
+  const cta = (await d.state(ids.reveal.primaryAction)).text ?? ''
+  if (!/open the camera/i.test(cta)) throw new Error('empty CTA should invite to the camera; got ' + JSON.stringify(cta))
+  const body = await page.evaluate(() => document.body.innerText)
+  if (/nothing to show yet/i.test(body)) throw new Error('the old error-style empty copy is still present')
+})
+await check('the agent perceives the invite and taps "Open the camera" (real click → /camera nav intent)', async () => {
+  const openCamera: Planner = async (_g, obs, history) => {
+    if (did(history, 'tap', ids.reveal.primaryAction)) return { kind: 'done', rationale: 'opened camera' }
+    if (obs.visibleIds.includes(ids.reveal.primaryAction)) return { kind: 'tap', id: ids.reveal.primaryAction, rationale: 'open the camera' }
+    return { kind: 'done', rationale: 'no invite action' }
+  }
+  await new Agent(d, openCamera).achieve('open the camera from the empty invite', { maxSteps: 3 })
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline) {
+    const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
+    if (nav && /camera/.test(nav)) return
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('the invite CTA did not fire the /camera nav intent')
+})
+
+// ── Goal 6: FLASH GUARD. On a READY reveal, tapping back must NOT repaint the empty branch. The converge mounts
+//    ONLY reveal (nav is recorded, not swapped) so reveal never unmounts — a buggy pre-nav reset() would therefore
+//    PERSISTENTLY show the empty copy here (not a sub-frame flash). The fix defers+gates the reset, so the READY
+//    view stays put while the /camera nav intent still fires. This deterministically catches the flash regression. ──
+await page.goto(`${base}/?scan=confident`)
+await check('READY → tap back → the empty branch does NOT repaint (title persists; /camera nav fires)', async () => {
+  await d.waitFor(ids.reveal.title, { timeoutMs: 8000 })
+  const bd = Date.now() + 8000
+  while (Date.now() < bd) { if ((await d.state(ids.reveal.howSure)).attrs.band) break; await new Promise((r) => setTimeout(r, 100)) }
+  const titleBefore = (await d.state(ids.reveal.title)).text ?? ''
+  await d.tap(ids.nav.back)
+  await page.waitForTimeout(400) // give a (buggy) synchronous reset time to repaint the empty branch
+  const nav = await page.evaluate(() => document.body.getAttribute('data-last-nav'))
+  if (!nav || !/camera/.test(nav)) throw new Error('back did not fire the /camera nav intent; data-last-nav=' + nav)
+  const body = await page.evaluate(() => document.body.innerText)
+  if (/nothing to show yet|ready when you are/i.test(body)) throw new Error('tapping back repainted the EMPTY branch — the flash regression')
+  const titleAfter = (await d.state(ids.reveal.title)).text ?? ''
+  if (!titleAfter || titleAfter !== titleBefore) throw new Error(`the READY title must persist after back; "${titleBefore}" → "${titleAfter}"`)
+})
+
 await rig.stop()
 console.log(
   fails() === 0
-    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real reveal dock by perception (open What → hear it, open Facts → chips, Ask Voxi → nav), every outcome pinned deterministically'
+    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real reveal dock by perception (open What → hear it, open Facts → chips, Ask Voxi → nav, open camera from the empty invite), every outcome pinned deterministically'
     : `\nAGENTIC FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

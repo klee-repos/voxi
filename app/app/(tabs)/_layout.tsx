@@ -1,15 +1,10 @@
 /**
- * The (tabs) group is the LEFT PUSH-DRAWER's collection/settings shell (design.md nav), not a bottom tab bar.
- * The `DrawerHost` itself now lives at the ROOT layout (`app/_layout.tsx`) so the drawer wraps the pushed
- * capture flow (processing/reveal) too — this group is just a plain `Stack`. The hamburger lives on the camera
- * screen (`AppHeader`) and the drawer re-hosts the collection / settings nav the tab bar used to (the same
- * `nav.threadsTab` / `nav.settingsTab` ids, now in `DrawerMenu`).
+ * The (tabs) group is the LEFT PUSH-DRAWER's collection/settings shell (design.md nav), not a bottom tab bar —
+ * `DrawerHost` lives at the ROOT layout, so this group is just a plain `Stack`. The folder name stays `(tabs)`
+ * so every `router.*('/(tabs)/camera'|'/threads'|'/settings')` call across app + E2E keeps resolving.
  *
- * The folder name stays `(tabs)` so every `router.*('/(tabs)/camera'|'/threads'|'/settings')` call across the
- * app + E2E keeps resolving. `initialRouteName: 'camera'` anchors the Stack: converting `<Tabs>` (whose back
- * default is the first tab) into a `<Stack>` would otherwise leave a deep-link/replace/web-reload on
- * threads|settings with no camera beneath it and undefined Back behavior. This anchor keeps camera as the
- * always-present back target.
+ * `initialRouteName: 'camera'` anchors the Stack: without it a deep-link/replace/web-reload onto threads|settings
+ * would leave no camera beneath it and undefined Back behavior. This keeps camera as the always-present back target.
  */
 import React from 'react'
 import { Stack } from 'expo-router'

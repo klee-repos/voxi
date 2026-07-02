@@ -1,18 +1,13 @@
 /**
- * Production HTTP entrypoint for the voxi-api BFF (PLAN §3 — the ONLY public surface).
+ * Production HTTP entrypoint for the voxi-api BFF — the ONLY public surface. Lives under infra/ because
+ * docker-deploy owns the container: services/voxi-api exports `createApp(deps)` but has no server of its own;
+ * this entry supplies real deps and serves it on $PORT for Cloud Run (listen 0.0.0.0:$PORT, health probe,
+ * clean SIGTERM). Vendor wiring is read from env / Secret Manager — see infra/deploy/README.md for the inventory.
  *
- * Lives under infra/ (not services/) because docker-deploy owns the container, not the service code:
- * services/voxi-api exports `createApp(deps)` (a Hono app) and is wired by the e2e harness for tests, but
- * has no long-lived server of its own. This entry supplies the real deps and serves it on $PORT for Cloud Run.
- *
- * Cloud Run contract: listen on 0.0.0.0:$PORT (default 8080), respond to the platform health probe, and shut
- * down cleanly on SIGTERM. All vendor wiring (Clerk verify, eve client, GCS signer, Cloud SQL store) is read
- * from env / Secret Manager — see infra/deploy/README.md for the var → service → secret-ref inventory.
- *
- * NOTE: the collaborators below are *seams*, not stubs-to-force-green. Clerk JWT verify and the signed-URL
- * HMAC are real when their secrets are present; the eve client, Cloud SQL store, and deletion cascade are the
- * documented integration points the eve-backend / db workflows own. Until those land this entry boots and
- * serves /healthz and the auth gate, and fails loudly (not silently) on a route that needs an unwired dep.
+ * The collaborators below are *seams*, not stubs-to-force-green: Clerk verify + signed-URL HMAC are real when
+ * their secrets are present; the eve client, Cloud SQL store, and deletion cascade are integration points the
+ * eve-backend / db workflows own. Until those land, this boots /healthz + the auth gate and fails loudly on a
+ * route that needs an unwired dep.
  */
 import { serve } from 'bun'
 import { createApp, type Deps, type EveClient } from '../../../services/voxi-api/src/app'

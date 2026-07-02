@@ -1,11 +1,9 @@
 /**
  * Connectivity seam (PLAN §10.2 state matrix — every screen specifies an `offline` state).
  *
- * On web (the E2E harness) this reflects `navigator.onLine` and the `online`/`offline` window events, so the
- * `global.offlineBanner` surface appears the instant connectivity drops. On native there is no `navigator`, so
- * the hook reports "online" by default and screens fall back to treating a network/stream failure as offline
- * (the same belt-and-suspenders the processing screen already uses). A real build swaps in `@react-native-
- * community/netinfo` behind this exact hook — a drop-in, no screen changes.
+ * On web this reflects `navigator.onLine` + the `online`/`offline` window events. On native there is no
+ * `navigator`, so the hook reports "online" and screens fall back to treating a network/stream failure as
+ * offline. A real build swaps in `@react-native-community/netinfo` behind this exact hook — no screen changes.
  */
 import { useEffect, useState } from 'react'
 

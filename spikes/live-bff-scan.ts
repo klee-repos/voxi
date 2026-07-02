@@ -1,13 +1,9 @@
 /**
- * END-TO-END LIVE proof of the app path (PLAN §3, §4.3, §5): a real photo goes through the REAL BFF Hono routes
- * (`POST /v1/threads` → charge a scan → create session; `GET /v1/threads/:id/stream` → NDJSON) backed by a REAL
- * `EveClient` that runs the REAL identification cascade (LiveSafetyClassifier + LiveVisionProvider → live Cloud
- * Vision + Vertex Gemini → shared arbiter → the events.ts contract). Nothing is faked except auth+quota
- * plumbing (Clerk/metering are covered by their own deterministic tests). Run: `bun spikes/live-bff-scan.ts <img-url>`.
- *
- * This is the honest live analogue of app.test.ts's fake-eve integration test: same routes, same contract, but
- * the reveal is produced by real GCP calls end-to-end. It does NOT stand in for the full durable eve workflow
- * (storyteller narration / voice are creds+framework-gated); it proves the IDENTIFICATION half of the path live.
+ * END-TO-END LIVE proof of the app path: a real photo through the REAL BFF routes (`POST /v1/threads` →
+ * `GET /v1/threads/:id/stream`) backed by a real EveClient running the real identification cascade against live
+ * Cloud Vision + Gemini. Only auth+quota plumbing is faked. Run: `bun spikes/live-bff-scan.ts <img-url>`.
+ * The live analogue of app.test.ts's fake-eve test; proves the identification half only (durable eve
+ * narration/voice are creds+framework-gated).
  */
 import { createApp, type EveClient, type Deps } from '../services/voxi-api/src/app'
 import { testVerifier } from '../services/voxi-api/src/auth'

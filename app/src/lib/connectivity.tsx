@@ -1,10 +1,6 @@
 /**
- * Connectivity compatibility shim → the canonical seam is `useOffline` (src/lib/useOffline.ts).
- *
- * Some screens consume a `useConnectivity()` accessor (`{ online }`); the project standardised on the boolean
- * `useOffline(force?)` hook + `isOfflineError`. This re-exports a thin `useConnectivity` over `useOffline` so
- * both shapes resolve to ONE source of truth (no second detection mechanism, no drift). New code should prefer
- * `useOffline` directly; this exists so existing imports keep working.
+ * Connectivity compatibility shim — re-exports `useConnectivity()` (`{ online }`) over the canonical
+ * `useOffline` seam, so both shapes resolve to ONE detection mechanism. New code should prefer `useOffline`.
  */
 import { useOffline } from './useOffline'
 

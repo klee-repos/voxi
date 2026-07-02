@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from typing import Literal
 
+from .persona import ELEVENLABS_VOXI_WIRE_VOICE_ID
 from .prompts import render_prompt
 
 
@@ -99,7 +100,7 @@ def build_pipeline_for_connection(
     )
 
     stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3")
-    el_voice = os.environ.get("ELEVENLABS_VOXI_VOICE_ID", "").split()[0]
+    el_voice = ELEVENLABS_VOXI_WIRE_VOICE_ID  # Voxi's voice
     tts = ElevenLabsTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id=el_voice,

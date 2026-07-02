@@ -2,9 +2,8 @@
  * Live GCP vision calls (Vertex Gemini + Cloud Vision), authed via the gcloud CLI (no ADC, no SA key).
  * PLAN §5 Stage-1 (VLM) + Stage-2 (web grounding). Shared by the live VisionProvider and the accuracy spike.
  *
- * Auth model (confirmed working against project eighth-duality-354701): a bearer token minted from
- * `gcloud auth print-access-token`, cached ~50min. Vertex takes the project in the URL path; Cloud Vision
- * needs the `X-Goog-User-Project` quota-project header.
+ * Auth model: a bearer token minted from `gcloud auth print-access-token`, cached ~50min. Vertex takes the
+ * project in the URL path; Cloud Vision needs the `X-Goog-User-Project` quota-project header.
  */
 import { loadPrompt } from '../prompts'
 

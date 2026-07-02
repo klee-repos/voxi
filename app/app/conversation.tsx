@@ -44,8 +44,8 @@ export default function Conversation(): React.ReactElement {
   const [conn, setConn] = useState<ConnState>('connecting')
   const scrollRef = useRef<ScrollView>(null)
 
-  // Modal dismiss X (right slot), guarded → fallback camera. Immersive orb screen → no header title by design
-  // (documented deviation from design.md nav-modal's centered title; the orb IS the identity here).
+  // Modal dismiss X, guarded → fallback camera. No header title by design (deviation from design.md nav-modal's
+  // centered title; the orb IS the identity here).
   const closeHeader = <AppHeader leading="none" showClose />
 
   const session = useMemo(

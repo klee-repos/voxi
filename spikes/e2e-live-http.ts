@@ -1,8 +1,7 @@
 /**
  * E2E against the ACTUAL RUNNING server over HTTP (not in-process) — the exact path the phone takes: real Clerk
- * token → POST http://<bff>/v1/threads with the captured photo as a data-URI → GET .../stream → a grounded
- * reveal. Proves the assembled live server (catalog moat + durable persistence + cascade) truly serves a
- * CONFIDENT identification. Also opens a voice session (voiceMin gate + connect URL). Run from repo root.
+ * token → POST /v1/threads (photo as data-URI) → GET .../stream → grounded reveal, then opens a voice session.
+ * Proves the assembled live server serves a CONFIDENT identification. Run from repo root.
  */
 const BFF = process.env.BFF_URL ?? 'http://127.0.0.1:8787'
 const SECRET = process.env.CLERK_SECRET_KEY

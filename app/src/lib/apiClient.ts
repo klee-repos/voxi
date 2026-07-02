@@ -291,7 +291,7 @@ export class ApiClient {
   }
 
   // POST /v1/purchases/verify — forward a StoreKit 2 signed transaction (JWS) for server-side verification.
-  // The server is the source of truth; a subsequent me() reflects the verified plan. (No RevenueCat.)
+  // The server is the source of truth; a subsequent me() reflects the verified plan.
   verifyPurchase(signedTransaction: string): Promise<{ plan: 'free' | 'explorer' | 'voyager' }> {
     return this.json<{ plan: 'free' | 'explorer' | 'voyager' }>('/v1/purchases/verify', {
       method: 'POST',

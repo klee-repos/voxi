@@ -61,10 +61,8 @@ const palette = {
   arlo: '#6FB1FC', // enthusiast (cool blue)
   mave: '#E8A0C0', // skeptic/fact-checker (warm rose)
 
-  // orb — the luminous AI narrator, brought INTO design.md's palette (green + blue + warm neutral; no 2nd hue).
-  // Approved via /plan-design-review: aurora sphere, green core → blue halo, calm-but-alive. This replaces the
-  // old off-brand violet/cyan/gold (which read as AI-slop "blue-to-purple" and clashed on both surfaces).
-  orbCore: '#F2FBF5', // warm-white-green HOT CENTER — reads on charcoal AND cream
+  // orb — aurora sphere in design.md's palette: green core → blue halo (no 2nd hue).
+  orbCore: '#F2FBF5', // hot center — reads on charcoal AND cream
   orbGreenSoft: '#57B871', // inner glow (design.md green-soft)
   orbGreen: '#29AB60', // sphere body (design.md brand green)
   orbBlue: '#3D89F5', // outer shell / cool rim (design.md blue)
@@ -140,13 +138,9 @@ export const speakers = {
 } as const
 
 /**
- * Type scale — design.md fonts loaded in src/lib/fonts.ts.
- *   serif = Fraunces (logo/display: the "voxi" wordmark + reveal/podcast display titles)
- *   sans  = Nunito   (UI everything)
- * RN ignores fontWeight on a named static instance — pick the weight-specific family
- * from `family` (e.g. type.family.sans['600']) instead of pairing a base family with a
- * fontWeight prop. `size` is the app's own scale (kept; design.md informs component styles,
- * not the immersive orb-screen ramp). base=16 already equals design.md body.
+ * Type scale — serif = Fraunces (wordmark/display), sans = Nunito (UI). Fonts loaded in src/lib/fonts.ts.
+ * RN ignores fontWeight on a named static instance — pick the weight-specific family from `family`
+ * (e.g. type.family.sans['600']) instead of pairing a base family with a fontWeight prop.
  */
 export const type = {
   serif: 'Fraunces_700Bold', // logo/display serif — the "voxi" wordmark & reveal titles
@@ -172,10 +166,9 @@ export const type = {
 }
 
 /**
- * Ready-to-use text styles = the design.md type ramp, built from `type.family` (string family NAMES only — NO
- * `@expo-google-fonts` `.ttf` imports, so this is safe to pull into the react-native-web converge bundle, unlike
- * `src/lib/fonts.ts`, which loads the actual font modules). `letterSpacing` is in points. Prefer these over
- * composing `type.family.*` + sizes by hand. `fonts.ts` re-exports this for back-compat.
+ * Ready-to-use text styles, built from `type.family` (string family NAMES only — no `.ttf` imports, so this is
+ * safe to pull into the react-native-web converge bundle, unlike `src/lib/fonts.ts`). Prefer these over composing
+ * `type.family.*` + sizes by hand. `fonts.ts` re-exports this for back-compat.
  */
 export const typeStyles = {
   logo:         { fontFamily: type.family.serif['800'], fontSize: 22, letterSpacing: -0.22, lineHeight: 22 },
@@ -217,19 +210,13 @@ export const shadow = {
 } as const
 
 /**
- * Liquid Glass material (Apple, "Adopting Liquid Glass") — a DARK, warm "Control Center" frost. The reveal dock
- * floats over a full-bleed photo, so the material is DARK with LIGHT text: the photo shows through dimmed + blurred
- * (never washed to a flat gray, which is what a light tint does over a photo), and near-white text stays legible over
- * ANY photo. Same treatment the reveal's own `loadingPill` already uses over the photo. Consumed by both `GlassFill`
- * variants (web backdrop-filter / native GlassView+BlurView) so the material can't drift between platforms.
+ * Liquid Glass material — a DARK, warm frost for the reveal dock floating over a full-bleed photo. Consumed by both
+ * `GlassFill` variants (web backdrop-filter / native GlassView+BlurView) so the material can't drift between platforms.
  *
- * The `tint` ALPHA is contrast-load-bearing: `theme.test.ts` composites the LIGHT text (`dark.text`, mist100) over the
- * tint on WHITE (the worst case — a bright photo behind the dark glass yields the lightest composite → lowest contrast
- * for light text) and asserts ≥ AA (4.5:1). At 0.68 → 5.6:1 (pass); drop it toward ~0.6 and the guard fails on purpose.
- * Small muted captions are SUPPLEMENTARY (the icon glyph + full a11y label are the real signifier) — a translucent
- * material can't keep muted text AA over the brightest photo region (Apple uses adaptive vibrancy; RNW has no
- * equivalent). When the native blur module isn't linked (no prebuild), the tint alone degrades to a clean dark scrim
- * panel — dim, legible, intentional — never the gray a light tint collapses to.
+ * The `tint` ALPHA is contrast-load-bearing: `theme.test.ts` composites the LIGHT text (mist100) over the tint on WHITE
+ * (worst case) and asserts ≥ AA (4.5:1). At 0.68 → 5.6:1 (pass); drop it toward ~0.6 and the guard fails on purpose.
+ * Muted captions are SUPPLEMENTARY (the icon glyph + a11y label are the real signifier). Without the native blur module
+ * (no prebuild), the tint alone degrades to a clean dark scrim panel.
  */
 export const glass = {
   tint: 'rgba(20,17,13,0.68)', // dock over the photo — dark warm frost; AA-guaranteed for LIGHT text (mist100)

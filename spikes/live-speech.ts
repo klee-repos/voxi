@@ -1,9 +1,6 @@
 /**
- * LIVE spoken reveal (ANALYSIS-VOICE-PLAN B1) — the production `LiveNarrationTts` seam the BFF `/speech` route
- * uses, exercised end-to-end against real ElevenLabs. Proves the class (not just the raw spike) turns the
- * honesty-gated narration into a valid MP3 in Voxi's British voice. Needs ELEVENLABS_API_KEY in .env.local.
- *
- * Run: `bun spikes/live-speech.ts "text to speak"`  (defaults to a real reveal narration).
+ * LIVE spoken reveal: exercises the production `LiveNarrationTts` seam (the one the BFF `/speech` route uses)
+ * against real ElevenLabs. Needs ELEVENLABS_API_KEY. Run: `bun spikes/live-speech.ts "text to speak"`.
  */
 import { LiveNarrationTts } from '../services/voxi-api/src/live-tts'
 

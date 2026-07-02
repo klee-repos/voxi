@@ -1,8 +1,7 @@
 /**
- * Device (native) billing wiring — Metro resolves THIS over `wireBilling.ts` on iOS. It installs the real
- * StoreKit 2 seam (`expo-iap`) carrying the ApiClient's authenticated server verifier, so a purchase's signed
- * transaction is verified by the BFF (no billing vendor). Only imported on native, so the web/converge bundle
- * never pulls `expo-iap`.
+ * Device (native) billing wiring — Metro resolves THIS over `wireBilling.ts` on iOS. Installs the real
+ * StoreKit 2 seam (`expo-iap`) carrying the ApiClient's server verifier, so a signed transaction is verified
+ * by the BFF.
  */
 import type { ApiClient } from './apiClient'
 import { setPurchasesSeam } from './purchases'

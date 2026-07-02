@@ -50,6 +50,11 @@ await check('the capture settled on a real reveal with a real identified title',
   if (!capturedTitle.trim()) throw new Error('reveal.title empty after capture')
 })
 
+await check('a FRESH capture is flagged analyze (durable openedvia anchor — not a revisit)', async () => {
+  const via = (await d.state(ids.reveal.position)).attrs.openedvia
+  if (via !== 'analyze') throw new Error(`fresh capture openedvia="${via}", expected "analyze"`)
+})
+
 // Baseline AFTER the capture (one scan already charged, one thread persisted). The revisit must not move these.
 const scanAfterCapture = await remainingScan()
 const countAfterCapture = await threadCount()
@@ -72,6 +77,11 @@ await check('reopening the tile REVISITS the real reveal (same identified title)
   const t = (await d.state(ids.reveal.title)).text ?? ''
   if (!t.trim()) throw new Error('reveal.title empty on revisit')
   if (t.trim() !== capturedTitle.trim()) throw new Error(`revisit title "${t}" != captured "${capturedTitle}"`)
+})
+
+await check('a REVISIT is flagged revisit — the loader is retrieval, not re-analysis (Feature B)', async () => {
+  const via = (await d.state(ids.reveal.position)).attrs.openedvia
+  if (via !== 'revisit') throw new Error(`revisit openedvia="${via}", expected "revisit"`)
 })
 
 await check('the revisit REPLAYED, not re-captured (no new thread, no extra scan charged)', async () => {

@@ -82,6 +82,30 @@ describe('buildDossier — happy path', () => {
   })
 })
 
+describe('buildDossier — Phase B display sourceTitle (REVEAL-CARD-CLEANUP §3.4)', () => {
+  test('adopts a REAL page title (deep path) but drops subject-as-title (grounding fallback) to ""', () => {
+    // Deep path: the fetched title is a genuine page title (≠ subject) → surfaced for the reveal Sources list.
+    const r1 = build([F1], [AE1])
+    expect(r1.ok).toBe(true)
+    if (!r1.ok) return
+    expect(r1.dossier.facts[0]!.sourceTitle).toBe('Canon AE-1 - Wikipedia')
+
+    // Grounding fallback: the source title is hard-coded to the SUBJECT (a sourceMatchesSubject anchor, NOT a page
+    // title) and the URL is an opaque Vertex redirect. Adopting it would render the object's OWN name as the page
+    // title — so the fold-guard drops it to '' and the client derives an honest hostname/suppresses the proxy.
+    const groundingSrc: FetchedSource = {
+      url: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123',
+      title: ITEM_INPUT.subject,
+      text: AE1.text,
+    }
+    const groundingFact: ProposedFact = { text: F1.text, claimType: 'spec', sourceUrl: groundingSrc.url, sourceTitle: ITEM_INPUT.subject, quote: F1.quote }
+    const r2 = build([groundingFact], [groundingSrc])
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    expect(r2.dossier.facts[0]!.sourceTitle).toBe('')
+  })
+})
+
 describe('buildDossier — adversarial negative controls (each drops the offending fact, keeps the rest)', () => {
   const bad = (extra: ProposedFact, reason: string, sources = [AE1], input = ITEM_INPUT) => {
     const r = buildDossier(input, { overview: FLAVOR_OVERVIEW, facts: [F1, F2, F3, extra], sources }, { judge: strictJudge })

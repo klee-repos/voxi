@@ -58,6 +58,8 @@ crash.*.log
 e2e/fixtures/tapes/*.live.json
 e2e/artifacts/
 coverage/
+# E2E runner result logs — write-only run output (Bun.write), regenerated each run
+e2e/web/.*-result.txt
 
 # ─── Logs ────────────────────────────────────────────────────────────
 *.log

@@ -1,8 +1,8 @@
 /**
- * Native StoreKit 2 billing (device only) — the drop-in for the `purchases` seam, backed by `expo-iap`. There is
- * NO third-party billing vendor (no RevenueCat): we do the StoreKit 2 purchase, then forward the SIGNED
- * transaction (JWS) to the BFF (`POST /v1/purchases/verify`), which verifies it against Apple and updates the
- * entitlement. The BFF's GET /v1/me is the source of truth; this returns the server-verified plan.
+ * Native StoreKit 2 billing (device only) — the drop-in for the `purchases` seam, backed by `expo-iap`. No
+ * third-party billing vendor: we do the StoreKit 2 purchase, then forward the SIGNED transaction (JWS) to the BFF
+ * (`POST /v1/purchases/verify`), which verifies it against Apple and updates the entitlement. The BFF's GET /v1/me
+ * is the source of truth; this returns the server-verified plan.
  *
  * This module imports `expo-iap`, which only exists in the native build. It is imported ONLY by
  * `wireBilling.native.ts` (a Metro platform-split file), so the web/converge bundle — which resolves the no-op

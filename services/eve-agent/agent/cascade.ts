@@ -268,7 +268,10 @@ export async function* runIdentificationCascade(
     // Enrich the closed evidence with GROUNDED facts the narrator may cite (best-effort; a failure/timeout falls
     // back to web evidence only). CONFIDENT grounds the item, PROBABLE grounds only the class — never the model.
     let evidence = result.evidence
-    const researchInput = buildResearchInput(result)
+    // Skip the sync CLASS researcher for a brand-primary object — its generic category facts ("a ceramic mug retains
+    // heat") only produce a GENERIC first-pass purpose that muddies a branded reveal. The dossier BRAND lane supplies
+    // the real, specific purpose/maker; until it lands the bucket honestly loads rather than showing category filler.
+    const researchInput = result.observedBrand && isDistinctiveBrand(result.observedBrand) ? null : buildResearchInput(result)
     if (deps.researcher && researchInput) {
       try {
         const facts = await deps.researcher.research(researchInput)

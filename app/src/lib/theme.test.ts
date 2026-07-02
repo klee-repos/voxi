@@ -152,6 +152,19 @@ describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.
     expect(contrast(dark.text, compositeOver(glass.tintStrong, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
   })
 
+  // The reveal BucketCard's SOURCE TITLE is a blue link (dark.accentSecondary) — the load-bearing signifier of the
+  // Sources list, so it must clear AA. It reads AA ONLY because the morph card always sits over CARD_SCRIM (the deep
+  // scrim behind the card, RevealDock.tsx CARD_SCRIM) UNDER the `strong` glass (tintStrong): that composite ≈ dark.bg,
+  // where blue is ~4.60:1. Guard it (the plain scrim-less form is ~3.43:1 and would FAIL) so removing the scrim behind
+  // the card, or lightening tintStrong, re-opens the issue in CI. (docs/REVEAL-CARD-CLEANUP-PLAN.md §2a/§6 R4.)
+  const CARD_SCRIM = 'rgba(20,18,14,0.55)' // = RevealDock.tsx CARD_SCRIM (scrim behind the morph card)
+  test('blue source-title link ≥ 4.5:1 on the card material (tintStrong over CARD_SCRIM over white)', () => {
+    const cardBackdrop = compositeOver(glass.tintStrong, compositeOver(CARD_SCRIM, '#FFFFFF'))
+    expect(contrast(dark.accentSecondary, cardBackdrop)).toBeGreaterThanOrEqual(4.5)
+    // Document the dependency on the scrim: bare glass over a white photo is sub-AA for this blue.
+    expect(contrast(dark.accentSecondary, compositeOver(glass.tintStrong, '#FFFFFF'))).toBeLessThan(4.5)
+  })
+
   // A DARK, warm, translucent frost (Control-Center style): dark so light text is legible + so a photo shows through
   // DIMMED (a LIGHT tint here is exactly the gray-wash bug); warm so it stays on-brand; translucent so it's glass.
   test('glass.tint is a dark, warm, translucent frost', () => {

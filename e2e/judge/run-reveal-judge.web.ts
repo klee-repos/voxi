@@ -53,7 +53,8 @@ async function deterministicGate(): Promise<void> {
     check('description is present + substantial (≥20 words)', desc.trim().split(/\s+/).filter(Boolean).length >= 20, `${desc.slice(0, 60)}…`)
     await d.tap(ids.nav.close) // close the What card before opening Facts (a single card overlay at a time)
 
-    // Facts: open the Facts card → ≥3 individual chips, EACH carrying a source-proof affordance (the "proof if challenged").
+    // Facts: open the Facts card → ≥3 fact rows, EACH with its own source link (under the fact) showing the webpage
+    // title (a prettified site name when the page has no title), never a raw URL.
     await d.tap(ids.reveal.bucketFacts)
     await d.waitFor(ids.reveal.facts, { timeoutMs: 4000 })
     const deadline = Date.now() + 8000
@@ -63,15 +64,10 @@ async function deterministicGate(): Promise<void> {
       if (nFacts >= 3) break
       await new Promise((r) => setTimeout(r, 150))
     }
-    check('≥3 individual fact chips render (not one tray)', nFacts >= 3, `${nFacts} chips`)
-    const nSources = await page.locator(`[data-testid="${ids.reveal.factSource}"]`).count()
-    check('every fact chip carries a source-proof affordance', nSources >= nFacts && nFacts > 0, `${nSources} source affordances for ${nFacts} facts`)
-
-    // tap one proof → the verbatim quote appears (provenance is real, not decorative).
-    await page.locator(`[data-testid="${ids.reveal.factSource}"]`).first().click()
-    await page.waitForTimeout(250)
-    const body = await page.evaluate(() => document.body.textContent || '')
-    check('tapping a source reveals the verbatim quote (proof)', /Hide source/.test(body) && /[“"]/.test(body))
+    check('≥3 individual fact rows render (not one tray)', nFacts >= 3, `${nFacts} rows`)
+    // Provenance: each fact carries its OWN source link (under the fact) showing a human-readable TITLE, never a raw URL.
+    const srcTexts = await page.locator(`[data-testid="${ids.reveal.factSource}"]`).evaluateAll((els) => els.map((e) => (e.textContent || '').trim()))
+    check('each fact has its own source link with a title, no raw URL', srcTexts.length >= nFacts && nFacts > 0 && srcTexts.every((t) => t.length > 0 && !/https?:\/\//.test(t)), `${srcTexts.length} links for ${nFacts} facts`)
   } finally {
     await rig.stop()
   }

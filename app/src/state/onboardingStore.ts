@@ -1,10 +1,7 @@
 /**
- * Onboarding / consent preferences (Zustand) — the durable-intent the first-run flow collects.
- *
- * Holds the photo→public SHARE consent (defaults OFF — global exemplars require explicit opt-in, PLAN §7.4) and
- * the coarse camera/mic permission outcomes captured during priming, so the camera screen and Settings can read
- * the user's choices without re-prompting. This is UI/session intent; the authoritative consent record lives
- * server-side (PLAN §11 `photo_sharing_consent`). Kept tiny and dependency-light to mirror captureStore.
+ * Onboarding / consent preferences (Zustand) — intent the first-run flow collects: photo→public share consent
+ * and the coarse camera/mic permission outcomes. This is UI/session intent only; the authoritative consent
+ * record lives server-side (PLAN §11 `photo_sharing_consent`).
  */
 import { create } from 'zustand'
 import type { CameraPermissionStatus } from '../lib/cameraPermission'

@@ -18,11 +18,13 @@ from dataclasses import dataclass
 
 from .prompts import load_prompt
 
-# The single canonical Voxi voice_id (PLAN §6.1 "ONE consistent voice"). The same id is used for the
-# pre-rendered v3 description and the live Flash v2.5 stream — verified to carry timbre across v3/Flash.
-# Here it is the seam: TtsProvider implementations must echo whatever voice_id the session was minted with,
-# and the pipeline asserts every spoken turn used THIS id (no silent vendor-fallback to a different timbre).
+# The single canonical Voxi voice_id (PLAN §6.1 "ONE consistent voice"). The seam: TtsProvider
+# implementations must echo whatever voice_id the session was minted with, and the pipeline asserts every
+# spoken turn used THIS id (no silent vendor-fallback to a different timbre).
 CANONICAL_VOXI_VOICE_ID = "voxi-dry-british-v1"
+
+# Voxi's ElevenLabs voice. Decoupled from CANONICAL_VOXI_VOICE_ID above so a vendor failover can't trip the gate.
+ELEVENLABS_VOXI_WIRE_VOICE_ID = "19STyYD15bswVz51nqLf"
 
 # The persona prompt lives in `prompts/persona.md` (loaded verbatim). Kept terse on purpose: §8.1 demands
 # short declaratives. It is the realtime-voice variant of instructions.md — same rules, trimmed of the

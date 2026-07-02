@@ -1,9 +1,7 @@
 /**
- * CaptureOrb — the Shazam-style central capture control: ONE flat green disc (the audio-first PRIMARY lane),
- * a single white aperture glyph, a shallow shadow (design.md), NO gradient and NO bloom (that is reserved for
- * the narrator Orb). Carries the existing `camera.shutter` id. Idle breathing + press-spring via RN `Animated`
- * (JS-driven → identical web + native, converge-safe); reduce-motion freezes to a static disc. Fires a Medium
- * impact haptic on press (native-guarded via the haptics seam).
+ * CaptureOrb — the central capture control: a flat green disc + white aperture glyph, no gradient/bloom (that is
+ * reserved for the narrator Orb). Carries the `camera.shutter` id. Idle breathing + press-spring via RN
+ * `Animated` (converge-safe); reduce-motion freezes to a static disc. Fires a haptic on press.
  */
 import React, { useEffect, useRef } from 'react'
 import { Animated, Pressable, View, StyleSheet } from 'react-native'
@@ -76,9 +74,7 @@ export function CaptureOrb({
           { width: size, height: size, borderRadius: size / 2, backgroundColor: busy ? '#238C4F' : surface.accent, transform: [{ scale }] },
         ]}
       >
-        {/* darker-green inner rim → definition */}
         <View style={[styles.rim, { width: size - 8, height: size - 8, borderRadius: (size - 8) / 2 }]} />
-        {/* Lucide aperture glyph (design.md icon base) — white on the flat green disc */}
         <Aperture size={Math.round(size * 0.44)} color="#FFFFFF" strokeWidth={2} />
       </Animated.View>
     </Pressable>

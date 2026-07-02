@@ -7,6 +7,7 @@
  */
 import { create } from 'zustand'
 import type { ConfidenceBand } from '../../../packages/shared/src/confidence'
+import { abortThreadStream } from '../lib/threadStream'
 
 export type RevealOutcome = 'reveal' | 'partial' | 'interview' | 'failure' | 'refusal'
 
@@ -57,11 +58,17 @@ export interface CaptureState {
   researchError: boolean
   /** highest stream `index` seen — the `?startIndex=` seed for the unavailable-retry resume. */
   lastSeenIndex: number | null
+  /** true when this reveal was opened by REVISITING a catalogued item (collection/tray revisit OR an in-place
+   *  swipe) rather than a fresh analysis — flips the loader copy to calm "opening your entry" retrieval (never
+   *  the fresh-analysis "cross-referencing / narrowing"), and gates off the scan-line + celebratory haptics. */
+  isRevisit: boolean
   outcome: RevealOutcome | null
   error: string | null
 
   startCapture(photoUri: string | null): void
   setThread(threadId: string): void
+  /** mark the current capture as a revisit (called AFTER startCapture, which resets the flag to false). */
+  markRevisit(): void
   setLoadingLine(line: string): void
   setBand(band: ConfidenceBand, title: string, candidates: string[]): void
   appendText(text: string): void
@@ -93,14 +100,21 @@ const initial = {
   researchComplete: false,
   researchError: false,
   lastSeenIndex: null as number | null,
+  isRevisit: false,
   outcome: null as RevealOutcome | null,
   error: null as string | null,
 }
 
 export const useCaptureStore = create<CaptureState>((set) => ({
   ...initial,
-  startCapture: (photoUri) => set({ ...initial, photoUri }),
+  // Reseeding for a new capture/revisit ends any prior in-flight stream (fresh keepAlive OR a prior swipe) so a
+  // late event from the previous thread can't land in this one (threadStream single-owner invariant).
+  startCapture: (photoUri) => {
+    abortThreadStream()
+    set({ ...initial, photoUri })
+  },
   setThread: (threadId) => set({ threadId }),
+  markRevisit: () => set({ isRevisit: true }),
   setLoadingLine: (loadingLine) => set({ loadingLine }),
   setBand: (band, title, candidates) =>
     set({ band, title, candidates, outcome: band === 'UNKNOWN' ? 'interview' : band === 'PROBABLE' ? 'partial' : 'reveal' }),
@@ -118,13 +132,17 @@ export const useCaptureStore = create<CaptureState>((set) => ({
   setLastSeenIndex: (index) => set((s) => ({ lastSeenIndex: s.lastSeenIndex === null || index > s.lastSeenIndex ? index : s.lastSeenIndex })),
   setOutcome: (outcome) => set({ outcome }),
   setError: (error) => set({ error, outcome: 'failure' }),
-  reset: () => set({ ...initial }),
+  reset: () => {
+    abortThreadStream()
+    set({ ...initial })
+  },
 }))
 
 /**
  * Pure derivation of a bucket's dock-icon state (ANALYSIS-UX §4.4) — exported so the UI and the unit tests agree.
- *   • `what`   — active the instant the band is settled (identity is known; narration is guaranteed to follow), so
- *                the primary icon never flips loading→active jarringly while tokens stream (adversarial D).
+ *   • `what`   — SAME loading→active logic as the others: active once its content (the description) has streamed,
+ *                loading until then; unavailable on drop/offline. No longer active the instant the band settles —
+ *                that lit `what` alone while purpose/maker/facts still read loading on a fresh open / swipe replay.
  *   • `facts`  — active on the first fact; else empty on researchComplete; else unavailable on drop/offline.
  *   • purpose/maker — a `section` with text → active; an empty-marker section → empty (researched, nothing found);
  *                no section yet + researchComplete → empty if any section was seen else HIDDEN (legacy revisit,
@@ -132,10 +150,15 @@ export const useCaptureStore = create<CaptureState>((set) => ({
  */
 export type StatusSlice = Pick<
   CaptureState,
-  'band' | 'sections' | 'facts' | 'researchComplete' | 'researchError' | 'sawAnySection'
+  'band' | 'whatItIs' | 'sections' | 'facts' | 'researchComplete' | 'researchError' | 'sawAnySection'
 >
 export function deriveBucketStatus(bucket: 'what' | SectionBucket | 'facts', s: StatusSlice, offline: boolean): BucketStatus {
-  if (bucket === 'what') return s.band ? 'active' : 'loading'
+  if (bucket === 'what') {
+    if (!s.band) return 'loading'
+    if (s.whatItIs) return 'active'
+    if (s.researchError || offline) return 'unavailable'
+    return 'loading'
+  }
   if (bucket === 'facts') {
     if (s.facts.length > 0) return 'active'
     if (s.researchComplete) return 'empty'
@@ -150,9 +173,8 @@ export function deriveBucketStatus(bucket: 'what' | SectionBucket | 'facts', s: 
 }
 
 // Dev/E2E testability seam (never attached in a production build): expose the store on the browser global so
-// Playwright can drive the capture flow to any state — reveal READY/LOADING, processing, refusal — without a
-// live backend scan or Clerk sign-in. Same spirit as the FakeAuth fallback (lib/clerk) and the BFF test-seed:
-// it seeds the SAME state the real NDJSON stream would produce, so what renders is the real screen, not a mock.
+// Playwright can drive the capture flow to any state without a live backend scan or Clerk sign-in. It seeds the
+// SAME state the real NDJSON stream would produce, so what renders is the real screen, not a mock.
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   ;(globalThis as unknown as { __captureStore?: typeof useCaptureStore }).__captureStore = useCaptureStore
 }

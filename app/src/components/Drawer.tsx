@@ -85,8 +85,8 @@ export function DrawerHost({ children, enabled = true }: { children: React.React
   const scale = reduceMotion ? 1 : anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.92] })
   const shellRadius = anim.interpolate({ inputRange: [0, 1], outputRange: [0, radius.xl] })
 
-  // Web → DOM `inert` traps focus in the menu; native → the two props VoiceOver honors. (RNW ignores all three
-  // RN props, so `inert` is the web trap.) The scrim is a sibling, so it stays clickable while the shell is inert.
+  // Web → DOM `inert` traps focus in the menu; native → the two props VoiceOver honors. The scrim is a sibling,
+  // so it stays clickable while the shell is inert.
   const shellA11y: Record<string, unknown> =
     Platform.OS === 'web'
       ? open

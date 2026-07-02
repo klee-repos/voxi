@@ -1,19 +1,18 @@
 /**
  * LiveNarrationTts — the production `NarrationTtsProvider` for the spoken reveal (ANALYSIS-VOICE-PLAN B1).
  *
- * A single-voice ElevenLabs synth in Voxi's British voice ("George" by default), reusing the request shape the
- * live TTS spike proved (`spikes/live-tts.ts`). Returns `Uint8Array<ArrayBuffer>` so the BFF can hand the bytes
- * straight to Hono's `c.body`. Constructed only when `ELEVENLABS_API_KEY` is present — otherwise the BFF leaves
- * `speech` unset and `/v1/threads/:id/speech` 503s (loud, never a fake success).
+ * Returns `Uint8Array<ArrayBuffer>` so the BFF can hand the bytes straight to Hono's `c.body`. Constructed only
+ * when `ELEVENLABS_API_KEY` is present — otherwise the BFF leaves `speech` unset and `/v1/threads/:id/speech`
+ * 503s (loud, never a fake success).
  */
 import type { NarrationTtsProvider } from './app'
 
-const VOXI_VOICE = 'JBFqnCBsd6RMkjVDRZzb' // "George" — British, mature, dry storyteller
+const VOXI_VOICE = '19STyYD15bswVz51nqLf' // Voxi's voice
 
 export class LiveNarrationTts implements NarrationTtsProvider {
   constructor(
     private apiKey: string,
-    private voiceId: string = process.env.ELEVENLABS_VOXI_VOICE_ID || VOXI_VOICE,
+    private voiceId: string = VOXI_VOICE,
     private timeoutMs = 15000,
   ) {}
 
@@ -25,7 +24,6 @@ export class LiveNarrationTts implements NarrationTtsProvider {
       body: JSON.stringify({
         text,
         model_id: 'eleven_multilingual_v2',
-        // A dry narrator: moderate stability, natural similarity, a touch of style for wit (matches the spike).
         voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.25, use_speaker_boost: true },
       }),
     })

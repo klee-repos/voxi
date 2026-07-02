@@ -1,9 +1,7 @@
 /**
- * Cross-screen status banners (testids.global.*).
- *
- * `OfflineBanner` shows when connectivity drops (the global.offlineBanner contract id). `SafetyRefusal` is the
- * deterministic non-identifying refusal surface (PLAN §8.4) — it MUST read visually distinct from a confidence
- * chip (a separate, calm museum-warm treatment), and carries testids.global.safetyRefusal.
+ * Cross-screen status banners (testids.global.*). `OfflineBanner` shows when connectivity drops.
+ * `SafetyRefusal` is the non-identifying refusal surface (PLAN §8.4) — it MUST read visually distinct from a
+ * confidence chip, and carries testids.global.safetyRefusal.
  */
 import React from 'react'
 import { View, Text, StyleSheet } from 'react-native'

@@ -132,12 +132,20 @@ export class LiveNarrator implements Narrator {
       noExternal: evidence.length === 1 && evidence[0]!.ref === 'id',
     })
 
-    let clauses: Array<Clause & { bucket?: NarrativeBucket }>
-    try {
-      const out = await geminiJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
-      clauses = out.clauses ?? []
-    } catch {
-      return { clauses: [], dropped: 0 } // narration is best-effort; a failure just means no narration, never a crash
+    // Retry a TRANSIENT empty/failed Gemini response. A single flaky call must not blank the maker/purpose buckets
+    // when the dossier HAS grounded facts to voice — that transient failure on the async dossier-UPGRADE pass is the
+    // real-world "maker missing" root cause (the code is correct; the call just returned nothing that once). We retry
+    // only on a THROW or empty RAW clauses; a gate that legitimately drops every clause is NOT retried (same input →
+    // same drop), so honest-empty stays honest-empty.
+    let clauses: Array<Clause & { bucket?: NarrativeBucket }> = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const out = await geminiJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
+        clauses = out.clauses ?? []
+        if (clauses.length) break
+      } catch {
+        /* transient Gemini failure (timeout / 5xx / malformed) → retry; narration is best-effort, never a crash */
+      }
     }
     // The REAL honesty gate: drop any falsifiable clause without valid grounding; render approved-only.
     return gateNarration(input, clauses, this.judge)

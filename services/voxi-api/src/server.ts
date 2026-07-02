@@ -54,7 +54,7 @@ const eve = new CascadeEveClient({ catalog, embedder: new VertexEmbeddingProvide
 const durable = await createPgStores(DATA_DIR)
 const local = buildLocalCollaborators({ photoPurge: (userId) => eve.purgeUser(userId), durable })
 
-// Spoken reveal (ANALYSIS-VOICE-PLAN B): ElevenLabs "George" voices the SERVER-OWNED narration. Wired only when
+// Spoken reveal (ANALYSIS-VOICE-PLAN B): ElevenLabs voices the SERVER-OWNED narration. Wired only when
 // ELEVENLABS_API_KEY is present — otherwise `speech` stays undefined and POST /v1/threads/:id/speech 503s (loud,
 // never faked). A bounded in-memory content-hash cache makes a stable reveal synthesize once (the autoplay+tap
 // double-play is free); prod can swap in an object-store/CDN cache behind the same seam.
@@ -107,7 +107,7 @@ const app = createApp({
   contributions: local.contributions, // real trust-gate + first-report auto-hide
   podcastStatus: podcast.status,
   podcastEnqueue: podcast.enqueue,
-  speech, // spoken reveal (ElevenLabs George) — undefined when no key → route 503s loud
+  speech, // spoken reveal (ElevenLabs) — undefined when no key → route 503s loud
 
   // Dev: full access so testing is never paywalled. (Real App Store JWS verification lands with billing; the
   // verifier exists in appstore.ts and is fail-closed, but a sandbox purchase can't be exercised here.)

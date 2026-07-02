@@ -1,16 +1,10 @@
 /**
- * Version-pin matrix smoke (PLAN.md §4.5 / §22.3, vercel/workflow #1416).
- *
- * eve is public-beta / pre-GA and the @workflow line churns; a cross-version transport break (#1416) silently
- * corrupts durable runs. So we PIN the exact (eve, @workflow/*, world-postgres) triple and assert on every PR:
- *   1. the installed versions EXACTLY match the G3-recorded pin (infra/g3-spike/out/pinned-versions.json),
- *      mirrored into infra/ci/pinned-versions.json as the committed source of truth;
+ * Version-pin matrix smoke. eve is pre-GA and the @workflow line churns; a cross-version transport break (#1416)
+ * silently corrupts durable runs. So we PIN the (eve, @workflow/*, world-postgres) triple and assert on every PR:
+ *   1. installed versions EXACTLY match the G3-recorded pin (mirrored into infra/ci/pinned-versions.json);
  *   2. no @workflow/* version drifted (the #1416 trap);
- *   3. the §4.5 "session resume after restart" smoke is green on that triple (delegated to the resume-smoke,
- *      which is cred-gated and reports SKIP-with-reason here rather than failing the build spuriously).
- *
- * Runs in CI and locally:  bun infra/ci/version-pin-matrix.ts
- * Exit codes: 0 = green (or legitimately-skipped pre-pin), 1 = a real pin violation (fail the PR).
+ *   3. the resume-after-restart smoke is green on that triple (delegated; cred-gated → SKIP-with-reason).
+ * Run: `bun infra/ci/version-pin-matrix.ts`. Exit: 0 = green (or legitimately-skipped pre-pin), 1 = pin violation.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,9 +1,8 @@
 /**
  * CatalogTile — the ONE catalog capture tile, shared by the Collection grid (`threads.tsx`) and the camera-home
- * "Recently catalogued" carousel (`RecentCard.tsx`). Before this, the Collection rendered rich photo tiles while
- * the camera-home tray rendered stale title-only cards off the SAME `['threads']` data — a DRY split that let the
- * two drift. This is the single source of truth: a durable capture thumbnail (`expo-image`, the persisted signed
- * `/media` URL) under a legibility scrim, with the identified label (`revealTitle || title`) + capture date.
+ * "Recently catalogued" carousel (`RecentCard.tsx`), so the two can't drift off the same `['threads']` data. A
+ * durable capture thumbnail (`expo-image`, the persisted signed `/media` URL) under a legibility scrim, with the
+ * identified label (`revealTitle || title`) + capture date.
  *
  *   ┌─────────────┐   photoUrl → <Image> fills the tile, scrim darkens the bottom for white label legibility
  *   │  [ photo ]  │   no photoUrl → cream card, dark label (older/no-capture threads never show a broken image)

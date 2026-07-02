@@ -44,6 +44,14 @@ function ConvergeRoot(): React.ReactElement {
       const token = 'test:converge'
       const authJson = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
 
+      // `?scan=empty` — no capture at all: leave the store at its initial state so the REAL reveal renders its
+      // EMPTY branch (the calm "Open the camera" invitation), the way a deep-link with nothing captured would.
+      if (scan === 'empty') {
+        store.getState().reset()
+        if (!cancelled) setReady(true)
+        return
+      }
+
       // 1) start a thread on the real BFF
       store.getState().startCapture(`obj:${scan}`)
       const tr = await fetch('/api/v1/threads', {

@@ -68,7 +68,6 @@ image, never in env files). Plain config is `--set-env-vars`. The Cloud Run runt
 | `VISION_API_KEY` | F | 🔐 | `vision-api-key:latest` | Cloud Vision web detection + SafeSearch (§5, §7.5, §15). |
 | `SERPAPI_KEY` | F | 🔐 | `serpapi-key:latest` | SerpApi Lens long-tail grounding fallback (§5, pluggable). |
 | `ELEVENLABS_API_KEY` | F, W | 🔐 | `elevenlabs-api-key:latest` | ElevenLabs TTS — narrator description + podcast premium swap (§6.1, §6.2). |
-| `ELEVENLABS_VOICE_ID` | F, W | 🔐 | `elevenlabs-voice-id:latest` | The canonical signature Voxi `voice_id` (§6.1/D6 — "one voice"). |
 | `DEEPGRAM_API_KEY` | (voice-bot¹) | 🔐 | `deepgram-api-key:latest` | Streaming STT for realtime voice (§6.3). Listed for completeness; the Pipecat bot is a sibling workflow. |
 | `APPSTORE_CONNECT_KEY` | A | 🔐 | `appstore-connect-api-key:latest` | Direct StoreKit 2 server-side entitlement verification (App Store Server API / Notifications V2) — **no billing vendor**; the transaction's `appAccountToken` = Clerk user id (§9, §13). Only needed for the LIVE App Store; JWS verification itself uses Apple's public root certs. |
 | `NCMEC_CREDENTIALS` | (intake²) | 🔐 | `ncmec-credentials:latest` | 2258A CSAM report path credentials (§15/RT-4). Bound to whichever service runs the intake pipeline. |

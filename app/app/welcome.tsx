@@ -1,12 +1,7 @@
 /**
- * Welcome / auth (PLAN §10.2 screen 1) — email-first OTP via Clerk on the warm cream canvas, the serif `voxi`
- * wordmark over the narrator Orb, the EULA + 16+ gate, and privacy/consent microcopy. Two phases in one screen:
- * email + terms → Continue sends the code → Verify confirms the session against the BFF (GET /v1/me) → first-run.
- *
- * Redesign (§3.1): serif Wordmark; a `KeyboardAvoidingView` + scroll so the gate toggles and the 52pt green CTA
- * stay reachable above the keyboard (the CTA is never sacrificed); the recoverable `ErrorState` renders attached
- * BENEATH the field it refers to (email in phase 1, OTP in phase 2), not floating by the CTA; autofill + focus
- * flow on both fields. Success routes to `/first-run`. Every `welcome.*` id + the state matrix are unchanged.
+ * Welcome / auth (PLAN §10.2 screen 1) — email-first OTP via Clerk, with the EULA + 16+ gate. Two phases in one
+ * screen: email + terms → Continue sends the code → Verify confirms the session against the BFF (GET /v1/me) →
+ * `/first-run`. `ErrorState` renders beneath the field it refers to (email in phase 1, OTP in phase 2).
  */
 import React, { useState } from 'react'
 import { View, StyleSheet, KeyboardAvoidingView, ScrollView, Platform } from 'react-native'

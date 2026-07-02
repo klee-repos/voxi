@@ -1,19 +1,16 @@
 /**
  * The Orb — Voxi's one persistent character: the AI narrator / Guide (PLAN §10.1 / D3).
  *
- * Design: an **aurora sphere** — a smooth luminous sphere, green HOT CORE → blue halo, on design.md's palette
- * (green + blue + warm neutral; no off-brand hue). Approved via /plan-design-review (D1 sphere · D2 green→blue ·
- * D3 calm-but-alive). It replaces the old flat, static, off-brand violet/cyan/gold discs. The composition is a
- * stack of concentric filled circles (the "nested translucent spheres" of Atlas's Smith, folded into one sphere);
- * EVERY layer carries a same-color blurred **shadow-glow** (box-shadow on web / blur on native) so its edge
- * feathers into the next — that airbrush blending is what turns discrete discs into one smooth radial falloff
- * instead of visible rings. Plain `Animated.View`s driven by RN's JS-driven `Animated` (`useNativeDriver:false`)
- * → renders IDENTICALLY web + native, converge/E2E safe (same doctrine as CaptureOrb / PulseRings / FadeRise).
+ * Design: an aurora sphere — green HOT CORE → blue halo, on design.md's palette. The composition is a stack of
+ * concentric filled circles; EVERY layer carries a same-color blurred shadow-glow (box-shadow on web / blur on
+ * native) so its edge feathers into the next — that airbrush blending turns discrete discs into one smooth radial
+ * falloff instead of visible rings. Plain `Animated.View`s on RN's JS-driven `Animated` (`useNativeDriver:false`)
+ * → renders IDENTICALLY web + native, converge/E2E safe.
  *
- * It reflects the 5 states (idle/listening/thinking/speaking/uncertain) with distinct but restrained motion, and
- * CARRIES `orb.state` via `tidWith` (dataSet on web, accessibilityValue on native) so E2E and VoiceOver can read
- * it. Reduce-motion keeps the orb alive but swaps the size pulse for a gentle opacity-only cross-fade (no
- * scaling/movement — vestibular-safe), per PLAN §10.3. Pass the matching id so each screen's orb is locatable.
+ * It reflects the 5 states (idle/listening/thinking/speaking/uncertain) and CARRIES `orb.state` via `tidWith`
+ * (dataSet on web, accessibilityValue on native) so E2E and VoiceOver can read it. Reduce-motion keeps the orb
+ * alive but swaps the size pulse for an opacity-only cross-fade (vestibular-safe), per PLAN §10.3. Pass the
+ * matching id so each screen's orb is locatable.
  */
 import React, { useEffect, useRef } from 'react'
 import { Animated, Easing, StyleSheet, View, type ViewStyle } from 'react-native'
@@ -45,15 +42,15 @@ interface OrbAnim {
 }
 
 const ANIM: Record<OrbState, OrbAnim> = {
-  // resting presence — a clear, slow "breath": halo expands, core brightens
+  // resting presence — slow breath
   idle: { period: 2800, scaleAmp: 0.07, bloomAmp: 0.24, coreBase: 0.82, shimmer: 0.2, bloomBase: 0.17, overall: 1 },
-  // attentive: faster, bigger pulse, brighter — like Spotify's green listening pulse
+  // attentive — faster, brighter pulse
   listening: { period: 1350, scaleAmp: 0.1, bloomAmp: 0.3, coreBase: 1.0, shimmer: 0.18, bloomBase: 0.22, overall: 1 },
-  // working: quick breath + strong core shimmer (the "churn")
+  // working — quick breath + strong core shimmer
   thinking: { period: 1500, scaleAmp: 0.06, bloomAmp: 0.2, coreBase: 0.76, shimmer: 0.4, bloomBase: 0.18, overall: 0.96 },
-  // emotive speech: fast, big bursts, brightest core
+  // emotive speech — fast bursts, brightest core
   speaking: { period: 820, scaleAmp: 0.13, bloomAmp: 0.34, coreBase: 1.0, shimmer: 0.34, bloomBase: 0.24, overall: 1 },
-  // hesitant: slow, dim, quiet halo
+  // hesitant — slow, dim, quiet halo
   uncertain: { period: 4600, scaleAmp: 0.04, bloomAmp: 0.12, coreBase: 0.6, shimmer: 0.1, bloomBase: 0.1, overall: 0.5 },
 }
 

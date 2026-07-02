@@ -1,14 +1,8 @@
 /**
- * §4.5 CI smoke — "session resume after restart" on the pinned (eve, @workflow/*, world-postgres) triple.
- * Run on EVERY version bump (renovate/changelog watch + manual upgrade gate, §4.5). This is the cheap, fast
- * cousin of the full G3 C1 falsifier (infra/g3-spike/scripts/10-resume-after-kill.sh): start a durable session,
- * restart the poller process, assert the session resumes and completes from its last checkpoint.
- *
+ * CI smoke — "session resume after restart" on the pinned (eve, @workflow/*, world-postgres) triple: start a
+ * durable session, restart the poller, assert it resumes and completes from its last checkpoint.
  * Cred/world-gated: needs an installed eve toolchain + a reachable world-postgres (WORLD_DATABASE_URL). Without
- * them it exits 0 with a SKIP reason — it does NOT fabricate a green (a faked resume would defeat the gate's
- * entire purpose, exactly like G3). Wire the real boot/restart once services/eve-agent + a CI Postgres exist.
- *
- * Run:  bun infra/ci/resume-smoke.ts
+ * them it exits 0 with a SKIP reason — it does NOT fabricate a green. Run: `bun infra/ci/resume-smoke.ts`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";

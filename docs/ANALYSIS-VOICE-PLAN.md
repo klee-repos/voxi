@@ -108,8 +108,8 @@ reveal**, this lengthens the pre-reveal wait.
 
 ## Part B — Speak the results in a British voice
 
-Voxi's spoken voice is **ElevenLabs "George"** (British, dry) — already live-proven (`spikes/live-tts.ts`, env
-`ELEVENLABS_API_KEY` / `ELEVENLABS_VOXI_VOICE_ID`). We add a BFF speech route + client playback on the reveal.
+Voxi's spoken voice is **ElevenLabs "Samara X"** (British, dry) — live-proven (`spikes/live-tts.ts`, needs
+`ELEVENLABS_API_KEY`; the `voice_id` is hardcoded in code, no env). We add a BFF speech route + client playback on the reveal.
 
 ### B1. BFF route `POST /v1/threads/:id/speech` (new) — SERVER-AUTHORITATIVE text
 

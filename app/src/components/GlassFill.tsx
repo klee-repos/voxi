@@ -1,14 +1,12 @@
 /**
- * GlassFill — an absolute-fill LIQUID GLASS layer (Apple, "Adopting Liquid Glass"), dropped as the FIRST child of an
- * existing card. It blurs + warm-tints whatever is painted BEHIND the card (the full-bleed reveal photo / the scrim),
- * clips to the card's corner radius, and NEVER participates in the card's layout (`position:absolute`,
- * `pointerEvents:'none'`) — so the host card keeps its EXACT paddings, `maxHeight`, flex children (the ScrollView's
- * height chain stays intact), and top-only sheet radius. This is why it's a fill layer, not a wrapper.
+ * GlassFill — an absolute-fill liquid-glass layer dropped as the FIRST child of an existing card. It blurs +
+ * warm-tints whatever is painted BEHIND the card and NEVER participates in the card's layout
+ * (`position:absolute`, `pointerEvents:'none'`), so the host card keeps its exact paddings, `maxHeight`, and flex
+ * height chain intact. This is why it's a fill layer, not a wrapper.
  *
- * Web/converge path (this file): a react-native-web View carrying `backdropFilter`. RNW 0.21 renders it but does NOT
- * auto-prefix an inline style literal, so the explicit `WebkitBackdropFilter` key is REQUIRED (not redundant). Native
- * uses the real iOS 26 material — see `GlassFill.native.tsx`. The two files share `GlassFillProps`; esbuild resolves
- * this base file (default resolveExtensions exclude `.native.tsx`, exactly like `AudioElement`).
+ * Web/converge path (this file): a react-native-web View carrying `backdropFilter`. Native uses the real iOS
+ * material — see `GlassFill.native.tsx`. esbuild resolves this base file (default resolveExtensions exclude
+ * `.native.tsx`).
  */
 import React from 'react'
 import { View, Platform, StyleSheet, type ViewStyle } from 'react-native'

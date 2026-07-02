@@ -19,10 +19,8 @@ export function ApiProvider({ children }: { children: React.ReactNode }): React.
     () => new ApiClient({ baseUrl: config.apiBaseUrl, getToken }),
     [getToken],
   )
-  // Wire the real StoreKit 2 billing seam on device with this client's authenticated server verifier (no vendor).
-  // `./wireBilling` is a platform split: Metro loads `wireBilling.native.ts` (→ expo-iap) on device; every other
-  // bundler (esbuild converge, web) resolves `wireBilling.ts`, a no-op — so `expo-iap` never enters the web bundle.
-  // Non-fatal: a billing-seam wiring failure must NEVER crash the app — purchases just fall back to the stub.
+  // Wire the StoreKit 2 billing seam (platform-split; no-op on web) with this client's server verifier.
+  // Non-fatal: a wiring failure must never crash the app — purchases just fall back to the stub.
   useEffect(() => {
     try {
       wireBilling(client)

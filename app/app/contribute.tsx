@@ -1,11 +1,9 @@
 /**
- * Add-a-tip / contribution (PLAN §10.2 screen 11 / §7.5) — contextual, first-time explanation of what/who sees
- * it, and a TRUST-LEVEL-HONEST post-submit banner driven by the SERVER (POST /v1/tips returns status): TL0 →
- * "a moderator will review"; TL2+ → "live now". A report control too. ids: contribute.*.
+ * Add-a-tip / contribution (PLAN §10.2 screen 11 / §7.5). A trust-level-honest post-submit banner driven by the
+ * SERVER (POST /v1/tips returns status): TL0 → "a moderator will review"; TL2+ → "live now". ids: contribute.*.
  *
- * States covered: idle, SUBMITTING (busy button + inline loading), trust-aware SUCCESS banner (statusBanner),
- * ERROR (in-persona retry), OFFLINE (global banner + disabled submit), and a distinct SAFETY-REFUSAL surface
- * (global.safetyRefusal) for a tip the Guide declines to take — visually separate from the status banner.
+ * States: idle, SUBMITTING, trust-aware SUCCESS banner, ERROR (in-persona retry), OFFLINE, and a distinct
+ * SAFETY-REFUSAL surface (global.safetyRefusal) for a tip the Guide declines — separate from the status banner.
  */
 import React, { useState } from 'react'
 import { View, StyleSheet } from 'react-native'

@@ -1,12 +1,10 @@
 /**
- * Unknown-item interview (PLAN §10.2 screen 10 / §7.3) — momentum-preserving: in-persona Q&A capped at 2–3
- * questions, SKIP on every step (skip = answer:null), a "why am I asked this" one-liner, and a single
- * visibility toggle DEFAULTING TO PRIVATE (a global exemplar requires the explicit toggle). Reads like
- * "co-writing an entry," not an error form. Drives POST /v1/interview + /answer. ids: interview.*.
+ * Unknown-item interview (PLAN §10.2 screen 10 / §7.3) — in-persona Q&A capped at 2–3 questions, SKIP on every
+ * step (skip = answer:null), and a visibility toggle DEFAULTING TO PRIVATE (a global exemplar requires the
+ * explicit opt-in). Drives POST /v1/interview + /answer. ids: interview.*.
  *
- * States covered: LOADING (opening the interview), ERROR/OFFLINE (open failed — retry, but the thread stays
- * private regardless), EMPTY (service returned no questions → straight to reveal), and the live Q&A. The orb
- * respects reduce-motion (the Orb component swaps its breathing for a static bloom).
+ * States: LOADING, ERROR/OFFLINE (open failed — the thread stays private regardless), EMPTY (no questions →
+ * straight to reveal), and the live Q&A.
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { View, StyleSheet } from 'react-native'
@@ -42,8 +40,8 @@ export default function Interview(): React.ReactElement {
 
   const offline = useOffline(netError)
 
-  // NEW back affordance (interview was a backward dead-end). Detail screen → guarded dismiss to the actual
-  // parent (camera, since processing replaced itself into interview), fallback camera on deep-link/reload.
+  // Guarded dismiss to the actual parent (camera — processing replaced itself into interview); falls back to
+  // camera on deep-link/reload.
   const backHeader = <AppHeader leading="back" />
 
   const open = useCallback(async (): Promise<boolean> => {

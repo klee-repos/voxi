@@ -14,10 +14,11 @@
   "scripts": {
     "test": "bun test",
     "e2e:web:auth": "bun e2e/web/run-auth.web.ts",
-    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/agentic-sweep.web.ts",
+    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/agentic-swipe.web.ts && bun e2e/web/converge/agentic-sweep.web.ts",
     "e2e:web:agentic:auth": "bun e2e/web/converge/agentic-auth.web.ts",
     "e2e:web:agentic:collection": "bun e2e/web/converge/agentic-collection.web.ts",
     "e2e:web:agentic:reveal": "bun e2e/web/converge/reveal-agentic.web.ts",
+    "e2e:web:agentic:swipe": "bun e2e/web/converge/agentic-swipe.web.ts",
     "e2e:web:agentic:sweep": "bun e2e/web/converge/agentic-sweep.web.ts",
     "e2e:web:explore": "bun run e2e:web:agentic",
     "e2e:web:explore-mcp": "bun e2e/web/converge/agentic-explore-ab.web.ts",

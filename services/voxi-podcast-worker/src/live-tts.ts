@@ -5,14 +5,13 @@
  * player-safe; the ffmpeg muxer (loudnorm + gapless + HLS segmentation) is the prod step — this proves the
  * multi-voice synthesis half live without ffmpeg (and without the Pro-tier `pcm_44100`).
  *
- * Casting (British): ARLO the enthusiast = "George" (warm storyteller); MAVE the skeptic/fact-checker = "Alice"
- * (clear, professional). Both are distinct timbres so the two-host dynamic is audible.
+ * ARLO and MAVE use distinct voices so the two-host dynamic is audible.
  */
 import type { TtsProvider, Script } from './render'
 
 const VOICE: Record<'arlo' | 'mave', string> = {
-  arlo: process.env.ELEVENLABS_ARLO_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb', // George — British storyteller
-  mave: process.env.ELEVENLABS_MAVE_VOICE_ID ?? 'Xb7hH8MSUJpSbSDYk0k2', // Alice — British educator
+  arlo: '19STyYD15bswVz51nqLf', // Voxi's voice
+  mave: 'Xb7hH8MSUJpSbSDYk0k2',
 }
 
 function concat(buffers: Uint8Array[]): Uint8Array {

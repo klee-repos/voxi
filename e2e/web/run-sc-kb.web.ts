@@ -98,7 +98,6 @@ try {
       const checked = await page.locator(`[data-testid="${ids.interview.visibilityToggle}"]`).isChecked()
       if (checked) throw new Error('visibility toggle defaulted to global/shared, expected private')
     })
-    // (default-private is already proven above via the testid'd toggle's checked state — no brittle label read)
 
     // kb-01 — the cap: skip/later through the interview. The service caps Q-count at 2–3; we must NOT be
     // offered a 4th. Skip Q1 → a DISTINCT Q2 appears → skip Q2 → the capped interview ends. (Skip is the

@@ -162,7 +162,7 @@ export function createRealVoiceSession(config: VoiceConfig): VoiceSession | null
   const nextId = (p: string) => `${p}_${(idCounter++).toString(36)}_${Date.now().toString(36)}`
 
   const transport = new RNSmallWebRTCTransport({
-    // The BFF-minted per-session URL is the SmallWebRTC /offer signalling endpoint (see voice-routes.ts).
+    // BFF-minted per-session SmallWebRTC /offer signalling endpoint (see voice-routes.ts).
     connectionUrl: config.connectUrl,
     waitForICEGathering: true,
     mediaManager: mediaManagerFactory(),

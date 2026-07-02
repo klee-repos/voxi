@@ -25,7 +25,9 @@
         "NSCameraUsageDescription": "Voxi uses the camera to photograph objects you want the Guide to identify. Point at objects, never people.",
         "NSMicrophoneUsageDescription": "Voxi uses the microphone for voice conversations with the Guide. Sessions are recorded and transcribed; you can switch to keyboard at any time.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSAllowsLocalNetworking": true
       }
     },
@@ -69,7 +71,8 @@
           "cameraPermission": "Voxi uses the camera for the Guide.",
           "microphonePermission": "Voxi uses the microphone for voice chat with the Guide."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

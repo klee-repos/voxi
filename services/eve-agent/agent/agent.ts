@@ -18,11 +18,10 @@
  */
 import { z } from 'zod'
 
-/** The brain default for the root agent (PLAN §4.2). Claude Sonnet 4.6 via the AI SDK Anthropic provider. */
+/** The brain default for the root agent (PLAN §4.2). */
 export const MODEL = {
-  /** provider package the runtime resolves (`@ai-sdk/anthropic`), kept as a string so this file imports nothing live. */
+  /** kept as a string so this file imports nothing live. */
   provider: '@ai-sdk/anthropic',
-  /** the model id the brain default binds to. */
   id: 'claude-sonnet-4-6',
   /** compaction on — long durable threads must not blow the context window (PLAN §4.2). */
   compaction: true,

@@ -7,8 +7,7 @@
  *   3. emits one structured access-log line, and
  *   4. emits one SERVER span to Tempo (when OTLP export is on) — enough for a cross-service RCA waterfall.
  *
- * Deeper spans (DB, downstream fetch) are a later, additive step via the OTel SDK; this gives the
- * per-hop trace + correlated logs with zero dependencies today.
+ * Per-hop spans only (no DB/downstream child spans) — the correlated-logs-plus-trace layer, zero deps.
  */
 import {
   runWithContext,

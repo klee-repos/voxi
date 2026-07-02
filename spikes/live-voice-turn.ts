@@ -1,17 +1,14 @@
 /**
- * LIVE voice conversation TURN (PLAN §6.3) — the core loop the Pipecat realtime pipeline orchestrates, proven
- * end-to-end with the real vendors, headlessly:
- *   user AUDIO → Deepgram STT → Gemini (Voxi persona, grounded, honesty-constrained) → ElevenLabs TTS → reply
- *   AUDIO → (STT again to confirm the reply is grounded).
- * The WebRTC transport is the only piece not exercised here (that is Pipecat/aiortc, services/voice-bot). Run:
- * `bun spikes/live-voice-turn.ts`.
+ * LIVE voice conversation turn against the real vendors, headless (no WebRTC transport):
+ *   user AUDIO → Deepgram STT → Gemini (Voxi persona) → ElevenLabs TTS → reply AUDIO → STT to confirm grounding.
+ * Run: `bun spikes/live-voice-turn.ts`.
  */
 import { geminiJSON } from '../services/eve-agent/agent/lib/gcp-vision'
 
 const el = process.env.ELEVENLABS_API_KEY!
 const dg = process.env.DEEPGRAM_API_KEY!
-const VOXI = process.env.ELEVENLABS_VOXI_VOICE_ID ?? 'JBFqnCBsd6RMkjVDRZzb' // George
-const USER = 'Xb7hH8MSUJpSbSDYk0k2' // Alice — a stand-in "user" voice (distinct from Voxi)
+const VOXI = '19STyYD15bswVz51nqLf' // Voxi's voice
+const USER = 'Xb7hH8MSUJpSbSDYk0k2' // a stand-in "user" voice (distinct from Voxi)
 if (!el || !dg) { console.error('need ELEVENLABS_API_KEY + DEEPGRAM_API_KEY'); process.exit(1) }
 
 async function tts(text: string, voice: string): Promise<Uint8Array> {

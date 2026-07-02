@@ -1,11 +1,7 @@
 /**
- * OS reduce-motion sync (PLAN §10.3 — reduce-motion swaps particle sequences for cross-fades, keeps the orb).
- *
- * The ThemeProvider holds the live `reduceMotion` flag (also user-settable in Settings). This hook seeds and
- * keeps it in sync with the platform accessibility setting so a user who has "Reduce Motion" on at the OS level
- * gets the calm orb on first launch — without us depending on a native module at import time (the E2E web
- * harness has no AccessibilityInfo). On web it reads the `prefers-reduced-motion` media query; on native it
- * reads `AccessibilityInfo` if present. Returns nothing — it drives the provider via `setReduceMotion`.
+ * OS reduce-motion sync (PLAN §10.3). Seeds and keeps ThemeProvider's `reduceMotion` flag in sync with the
+ * platform accessibility setting, without depending on a native module at import time (the E2E web harness has
+ * no AccessibilityInfo). Web reads `prefers-reduced-motion`; native reads `AccessibilityInfo` if present.
  */
 import { useEffect } from 'react'
 

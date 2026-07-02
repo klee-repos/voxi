@@ -185,12 +185,19 @@ export function buildDossier(input: DossierInput, proposed: ProposedDossier, opt
     // The closed loop: the evidence claim IS the verified quote (§2.2), so the narrator/overview gate also grades
     // against the quote, never a model paraphrase.
     evidence.push({ ref, sourceUrl: f.sourceUrl, claim: f.quote })
+    // Phase B (REVEAL-CARD-CLEANUP-PLAN §3.4): surface the REAL fetched page title so the reveal's Sources list can
+    // show a human title instead of a bare hostname — but ONLY when it is a genuine page title. On the credential-free
+    // grounding path the source `title` is hard-coded to `input.subject` (an internal sourceMatchesSubject anchor, NOT
+    // a webpage title), so adopting it would render the object's OWN name as if it were the page's title. Guard on
+    // `fold(title) !== fold(subject)`; otherwise leave '' so the client derives an honest hostname/site name.
+    const matchedTitle = proposed.sources.find((s) => s.url === f.sourceUrl)?.title ?? f.sourceTitle ?? ''
+    const displayTitle = fold(matchedTitle) === fold(input.subject) ? '' : matchedTitle
     kept.push({
       text: f.text,
       claimType: f.claimType,
       evidenceRef: ref,
       sourceUrl: f.sourceUrl,
-      sourceTitle: f.sourceTitle ?? '',
+      sourceTitle: displayTitle,
       quote: f.quote,
       order: kept.length,
     })

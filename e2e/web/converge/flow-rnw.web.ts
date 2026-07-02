@@ -77,9 +77,83 @@ await check('no uncaught errors across the whole journey', async () => {
 })
 
 await rig.stop()
+
+// A read/write handle on the REAL capture store (exposed by flow-entry) — used to observe reset timing across a
+// REAL NavHost screen swap (where reveal actually unmounts), which the single-screen reveal proof can't exercise.
+type StoreHandle = { getState: () => { threadId: string | null }; setState: (x: unknown) => void }
+const readThreadId = (pg: typeof p): Promise<string | null> =>
+  pg.evaluate(() => (window as unknown as { __captureStore?: StoreHandle }).__captureStore?.getState().threadId ?? null)
+
+// ── Exit rig A: a CAMERA exit clears the store — but only on UNMOUNT, so it can't flash the empty branch. ──
+console.log('\nconverge FLOW: reveal → back → camera clears the capture store (reset fires on unmount):')
+const rigA = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, podcast: 1, voiceMin: 10 } } })
+{
+  const da = rigA.driver
+  const pa = rigA.page
+  await pa.goto(rigA.base + '/')
+  await da.waitFor(ids.camera.screen, { timeoutMs: 8000 })
+  await da.tap(ids.camera.shutter)
+  await da.waitFor(ids.reveal.card, { timeoutMs: 12000 })
+  await check('the READY reveal has a threadId before exiting', async () => {
+    if (!(await readThreadId(pa))) throw new Error('expected a threadId on the READY reveal')
+  })
+  await check('tapping back swaps to the REAL camera screen AND clears the store (threadId → null on unmount)', async () => {
+    await da.tap(ids.nav.back)
+    await da.waitFor(ids.camera.screen, { timeoutMs: 5000 })
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline) {
+      if ((await readThreadId(pa)) === null) return
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    throw new Error('threadId was not cleared after a camera exit — the unmount reset did not fire')
+  })
+}
+await rigA.stop()
+
+// ── Exit rig B: the reveal→/processing retry must PRESERVE the store (adversarial regression guard). A blanket
+//    unmount reset would wipe threadId here and strand the user on a dead processing screen. ──
+console.log('\nconverge FLOW: unavailable bucket → /processing KEEPS threadId (no blanket unmount reset):')
+const rigB = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, podcast: 1, voiceMin: 10 } } })
+{
+  const db = rigB.driver
+  const pb = rigB.page
+  await pb.goto(rigB.base + '/')
+  await db.waitFor(ids.camera.screen, { timeoutMs: 8000 })
+  await db.tap(ids.camera.shutter)
+  await db.waitFor(ids.reveal.card, { timeoutMs: 12000 })
+  let threadId0: string | null = null
+  await check('capture the reveal threadId, then force a post-band research DROP (buckets → unavailable)', async () => {
+    threadId0 = await readThreadId(pb)
+    if (!threadId0) throw new Error('expected a threadId on the READY reveal')
+    // a post-band stream drop settles loading buckets to `unavailable` (retriable) — force it deterministically.
+    await pb.evaluate(() =>
+      (window as unknown as { __captureStore?: StoreHandle }).__captureStore?.setState({
+        researchError: true,
+        researchComplete: false,
+        sections: {},
+        facts: [],
+        sawAnySection: false,
+        whatItIs: '',
+      }),
+    )
+    await db.waitFor(ids.reveal.buckets, { timeoutMs: 3000 })
+  })
+  await check('tapping an unavailable bucket routes to /processing WITHOUT wiping the store (threadId survives)', async () => {
+    let tapped = ''
+    for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho, ids.reveal.bucketFacts]) {
+      if ((await db.state(b)).attrs.state === 'unavailable') { await db.tap(b); tapped = b; break }
+    }
+    if (!tapped) throw new Error('no bucket settled to `unavailable` after the forced research drop')
+    await db.waitFor(ids.processing.screen, { timeoutMs: 5000 })
+    const now = await readThreadId(pb)
+    if (now !== threadId0) throw new Error(`threadId must survive reveal→/processing (blanket-reset regression); was ${threadId0}, now ${now}`)
+  })
+}
+await rigB.stop()
+
 console.log(
   fails() === 0
-    ? '\nCONVERGE FLOW GREEN — the real camera → processing → reveal journey works end-to-end (image persists) behind the testID contract'
+    ? '\nCONVERGE FLOW GREEN — the real camera → processing → reveal journey works end-to-end (image persists), a camera exit clears the store on unmount, and a reveal→/processing retry preserves it'
     : `\nCONVERGE FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

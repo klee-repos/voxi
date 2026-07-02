@@ -1,10 +1,7 @@
 /**
- * H2 accuracy spike (PLAN §0 / §16) — HONEST scoring through the REAL identify_object tool + LiveVisionProvider
- * (real Gemini + Cloud Vision). Scores the ARBITRATED result the user actually sees, not "any stage got it".
- * Run: `bun spikes/accuracy-spike.ts`.
- *
- * CAVEAT: Wikipedia lead images are clean, canonical product shots — the OPTIMISTIC upper bound. Real phone
- * photos are the true test; drop them in .gcp/spike-images/ + labels.csv and I'll re-run against those.
+ * Accuracy spike — honest scoring through the REAL identify_object tool + LiveVisionProvider. Scores the
+ * ARBITRATED result the user actually sees, not "any stage got it". Run: `bun spikes/accuracy-spike.ts`.
+ * CAVEAT: Wikipedia lead images are clean product shots — an optimistic upper bound vs. real phone photos.
  */
 import { identify_object } from '../services/eve-agent/agent/tools/identify_object'
 import { LiveVisionProvider } from '../services/eve-agent/agent/providers/live-vision'

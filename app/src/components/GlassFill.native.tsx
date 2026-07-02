@@ -1,9 +1,8 @@
 /**
- * GlassFill (native) — the real Apple Liquid Glass on iOS 26 (`expo-glass-effect` `GlassView`, gated on
+ * GlassFill (native) — real Apple Liquid Glass on iOS 26 (`expo-glass-effect` `GlassView`, gated on
  * `isLiquidGlassAvailable()`), falling back to a warm-tinted `expo-blur` `BlurView` on iOS < 26 / Android. Same
- * absolute-fill, `pointerEvents:'none'`, radius-clipped contract as the web `GlassFill` (`GlassFill.tsx`), so the
- * host card's layout is untouched. Never seen by the converge esbuild bundle — it resolves the base `.tsx`
- * (default resolveExtensions exclude `.native.tsx`, exactly like `AudioElement.native.tsx`).
+ * absolute-fill, `pointerEvents:'none'`, radius-clipped contract as the web `GlassFill` (`GlassFill.tsx`).
+ * Converge/esbuild never resolves `.native.tsx`, so it gets the base `.tsx` instead.
  */
 import React from 'react'
 import { View, StyleSheet } from 'react-native'
@@ -15,8 +14,7 @@ import type { GlassFillProps } from './GlassFill'
 export function GlassFill({ radiusStyle, strong }: GlassFillProps): React.ReactElement {
   const tint = strong ? glass.tintStrong : glass.tint
   const clip = [StyleSheet.absoluteFill, styles.clip, radiusStyle]
-  // iOS 26: the genuine UIGlassEffect material. Pass the WARM tintColor so it honours the brand palette — a bare
-  // "regular" system glass would read cold/off-brand (design.md: green + blue + warm neutrals only).
+  // iOS 26: genuine UIGlassEffect. Pass the WARM tintColor — bare "regular" glass reads cold/off-brand (design.md).
   if (isLiquidGlassAvailable()) {
     return <GlassView glassEffectStyle="regular" tintColor={tint} style={clip} pointerEvents="none" />
   }

@@ -97,13 +97,19 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
     yield JSON.stringify({ type: 'confidence_band', index: 1, band: 'CONFIDENT', title: '2008 Cannondale SuperSix EVO', candidates: [] })
     // Phase 2 — async deep research: each VERIFIED fact streams in with its provenance (sourceUrl + verbatim quote),
     // then a richer description upgrade, THEN the deferred terminal `done`. A single monotonic index across phases.
+    // Two facts share the Wikipedia page (a REAL sourceTitle → the reveal Sources list shows the page title); the
+    // third cites a DISTINCT URL with NO title, exercising sourceLabel's hostname fallback (cannondale.com →
+    // "Cannondale"). dedupeSources therefore yields TWO citation rows — the both-branch converge coverage.
     const src = 'https://en.wikipedia.org/wiki/Cannondale_SuperSix_EVO'
+    const makerSrc = 'https://www.cannondale.com/en-us/bikes/road/supersix-evo'
     yield JSON.stringify({ type: 'fact', index: 2, text: "The SuperSix EVO is Cannondale's flagship lightweight road racing frame.", sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
     yield JSON.stringify({ type: 'fact', index: 3, text: 'Its frame is built from carbon fibre.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the frame is built from carbon fibre' })
-    yield JSON.stringify({ type: 'fact', index: 4, text: 'The EVO marks the evolution of the SuperSix platform, introduced in 2011.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the EVO evolution of the SuperSix was introduced in 2011' })
+    yield JSON.stringify({ type: 'fact', index: 4, text: 'The EVO marks the evolution of the SuperSix platform, introduced in 2011.', sourceUrl: makerSrc, sourceTitle: '', quote: 'the EVO evolution of the SuperSix was introduced in 2011' })
     // Normalized research buckets — each SPECIFIC to THIS exact model (never the generic "what a bicycle is").
-    yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame — stiff enough to sprint on, tuned to smooth rough tarmac.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
-    yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm that made its name on oversized aluminium frames before going all-in on this carbon platform.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the SuperSix EVO is Cannondale’s flagship' })
+    // Sections carry a real URL but NO sourceTitle, mirroring production (cascade.ts sectionFor hardcodes '') so the
+    // prose Sources row exercises the hostname fallback, not a fabricated title.
+    yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame — stiff enough to sprint on, tuned to smooth rough tarmac.', sourceUrl: src, sourceTitle: '', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm that made its name on oversized aluminium frames before going all-in on this carbon platform.', sourceUrl: src, sourceTitle: '', quote: 'the SuperSix EVO is Cannondale’s flagship' })
     yield JSON.stringify({ type: 'description_upgrade', index: 7, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer, built light for the climbs and named for its evolution of the SuperSix platform." })
     yield JSON.stringify({ type: 'done', index: 8, sessionId })
     return

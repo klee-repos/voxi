@@ -1,59 +1,44 @@
 /**
  * Concrete, AUDIO-ONLY MediaManager for the Pipecat RN SmallWebRTC transport (native / on-device only).
  *
- * The transport (`@pipecat-ai/react-native-small-webrtc-transport`) ships an ABSTRACT `MediaManager` base and
- * expects the host app to supply a concrete one that owns the mic (and, in a full client, cam + screen share).
- * Voxi is a voice Pokédex — 1 user talking to the Guide — so this manager is deliberately audio-only: cam and
- * screen share are hard-disabled no-ops, and `tracks().local.video` / `.screenVideo` are always null.
+ * The transport ships an ABSTRACT `MediaManager` base; this concrete one owns the mic. Voxi is audio-only, so
+ * cam and screen share are hard-disabled no-ops and `tracks().local.video` / `.screenVideo` are always null.
  *
- * This file is native-only. Metro resolves it over `voiceMediaManager.ts` (a null stub) on device via the
- * `.native` platform suffix, so `react-native-webrtc` never enters the web/E2E bundle. It is wired at startup
- * by the native entrypoint (app/index.js): `setVoiceMediaManagerFactory(createVoiceMediaManager)`.
+ * Native-only: Metro resolves it over `voiceMediaManager.ts` (a null stub) via the `.native` suffix, so
+ * `react-native-webrtc` never enters the web/E2E bundle. Wired at startup by app/index.js via
+ * `setVoiceMediaManagerFactory(createVoiceMediaManager)`.
  *
  * ── Transport contract (verified against lib/commonjs/transport.js @ v1.8.0) ──────────────────────────────
- * Construction (`new RNSmallWebRTCTransport({ mediaManager })`):
- *   - transport sets `mediaManager.onTrackStarted = _handleTrackStarted.bind(transport)` (base setter stores
- *     it in `_onTrackStartedCallback`; we invoke it via `this.onTrackStarted?.(event)`).
  * PipecatClient.connect() call order:
- *   1. transport.initialize(opts)   -> mediaManager.setClientOptions(opts)   (base; sets _micEnabled from
- *      opts.enableMic ?? true — for push-to-talk the app passes enableMic:false, so the mic starts gated).
- *   2. transport.initDevices()      -> mediaManager.initialize()             (WE acquire the mic here).
- *   3. transport.connect()          -> mediaManager.connect()                (idempotent re-acquire if needed),
- *      then startNewPeerConnection() -> addUserMedia() reads `tracks().local.audio` and calls
- *      getAudioTransceiver().sender.replaceTrack(audioTrack). So `tracks().local.audio` MUST be the live track.
- *   4. syncTrackStatus() reads `isMicEnabled`, `isCamEnabled`, and (only if supportsScreenShare) tracks().local
- *      .screenVideo. We report supportsScreenShare=false, so the screenVideo branch is never taken.
- *   onTrackStarted({track, type:'audio'}) -> transport._handleTrackStarted -> if pc exists, replaceTrack on the
- *   audio transceiver. Safe to call before pc exists (transport early-returns); addUserMedia() then wires it.
- * disconnect(): transport.stop() -> mediaManager.disconnect() — we stop tracks + release the stream.
+ *   1. initialize(opts) -> setClientOptions(opts): sets _micEnabled from opts.enableMic ?? true. Push-to-talk
+ *      passes enableMic:false, so the mic starts gated.
+ *   2. initDevices()    -> initialize():  WE acquire the mic here.
+ *   3. connect()        -> connect() (idempotent re-acquire), then addUserMedia() reads `tracks().local.audio`
+ *      and calls sender.replaceTrack(audioTrack). So `tracks().local.audio` MUST be the live track.
+ *   onTrackStarted({track, type:'audio'}) is safe to call before the pc exists (transport early-returns);
+ *   addUserMedia() then wires it.
  * ──────────────────────────────────────────────────────────────────────────────────────────────────────────
  *
  * ASSUMPTIONS (flagged for on-device verification — this file cannot run headlessly):
- *  A1. The transport imports `MediaStreamTrack` from `@daily-co/react-native-webrtc`; this manager imports from
- *      the SAME package (a direct app dependency — no metro alias). So the track objects we hand back come from
- *      the exact native module the transport's `sender.replaceTrack` expects. Keep BOTH on `@daily-co/*`: an
- *      earlier build aliased the transport to the community `react-native-webrtc`, the forks diverged at runtime,
- *      and voice silently degraded to the stub on device. Do not reintroduce a cross-fork alias.
- *  A2. Base `MediaManager` (JS) has no constructor args and sets `_micEnabled=true` before setClientOptions
- *      runs. We keep our own mic-enabled truth in the acquired track's `.enabled` and mirror `_micEnabled`.
- *  A3. `mediaDevices.enumerateDevices()` is typed `Promise<unknown>` and may return an empty/partial list on
- *      iOS before permission is granted. getAllMics() defends against non-arrays and shapes each entry into a
- *      MediaDeviceInfo-like record; it never throws.
+ *  A1. Keep BOTH the transport and this manager on `@daily-co/react-native-webrtc` — no metro alias. An earlier
+ *      build aliased the transport to the community `react-native-webrtc`; the forks diverged at runtime and
+ *      voice silently degraded to the stub on device. Do not reintroduce a cross-fork alias.
+ *  A2. Base `MediaManager` sets `_micEnabled=true` before setClientOptions runs. We keep the mic-enabled truth
+ *      in the acquired track's `.enabled` and mirror `_micEnabled`.
+ *  A3. `enumerateDevices()` may return an empty/partial list on iOS before permission is granted. getAllMics()
+ *      defends against non-arrays and never throws.
  *  A4. `getUserMedia({audio:true})` may reject (permission denied / no device). We surface a clear Error via
- *      the transport's onError callback (when available) and re-throw so PipecatClient's initDevices() reports
- *      a DeviceError — pipecat.ts's createVoiceSession catches transport construction/throws and falls back to
- *      the stub, so a mic failure can never crash the conversation screen.
+ *      the transport's onError callback and re-throw so initDevices() reports a DeviceError; createVoiceSession
+ *      (pipecat.ts) falls back to the stub, so a mic failure can never crash the conversation screen.
  */
 
 import { MediaManager } from '@pipecat-ai/react-native-small-webrtc-transport'
-// Import from '@daily-co/react-native-webrtc' — the SAME fork the transport requires (app/package.json depends on
-// it directly; the old metro alias that pointed it at the community fork is gone). Sharing one WebRTC module is
-// what makes `sender.replaceTrack` accept the tracks this manager hands back (see A1).
+// Same WebRTC fork the transport requires — sharing one module is what makes `sender.replaceTrack` accept the
+// tracks this manager hands back (see A1).
 import { mediaDevices } from '@daily-co/react-native-webrtc'
 
-// Local structural aliases: the transport's abstract signatures reference MediaStreamTrack / MediaDeviceInfo /
-// Tracks from '@daily-co/react-native-webrtc' + '@pipecat-ai/client-js', which are not exported as concrete
-// values. We type against structural shapes and let the `unknown` factory return absorb the nominal gap.
+// Structural aliases: the transport's abstract signatures reference types that aren't exported as concrete
+// values, so we type against structural shapes and let the `unknown` factory return absorb the nominal gap.
 type RNMediaStreamTrack = {
   readonly id: string
   readonly kind: string
@@ -163,6 +148,16 @@ class VoxiAudioMediaManager extends MediaManager {
     }
     this.audioTrack = null
     this.stream = null
+    // Restore a playback-capable AVAudioSession. @daily-co/react-native-webrtc forces `.playAndRecord` on mic
+    // acquire and NEVER restores it, so a reveal narration played after a voice call would otherwise hit
+    // AVFoundation -11800 / kCMBaseObjectError_ParamErr -12780 (H_session, docs/RCA-reveal-audio-avfoundation.md).
+    // Best-effort — a failed restore must not block teardown.
+    try {
+      const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio')
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false })
+    } catch {
+      /* non-fatal */
+    }
   }
 
   // ── Mic ────────────────────────────────────────────────────────────────────────────────────────────────

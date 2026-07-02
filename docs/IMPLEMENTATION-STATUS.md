@@ -284,8 +284,10 @@ through our `channels/eve.ts` `clerkVerifier` (networkless PEM → correct `user
 → null/401 (fail-closed). App id `app_3FsowBMR6ebn3qzvsHzm4uksnUQ`, dev instance `resolved-dove-95`. `@clerk/backend`
 declared at the repo root. The ONLY manual step was the browser OAuth login (`clerk auth login`).
 
-**Voice (ElevenLabs TTS + Deepgram STT) — ✅ LIVE + VERIFIED (2026-06-30).** Keys in `.env.local`. Voxi's voice is
-ElevenLabs **"George"** (British, mature, dry storyteller — `JBFqnCBsd6RMkjVDRZzb`). Proven live:
+**Voice (ElevenLabs TTS + Deepgram STT) — ✅ LIVE + VERIFIED (2026-06-30).** Keys in `.env.local`. Voxi's canonical
+voice is ElevenLabs **"Samara X"** (dry British narrator — `19STyYD15bswVz51nqLf`), hardcoded in code (no env knob;
+per-user voice selection will move into the app later). The 2026-06-30 live proof below ran on the prior "George"
+voice (`JBFqnCBsd6RMkjVDRZzb`). Proven live:
 `spikes/live-tts.ts` synthesizes the REAL honesty-gated narration to a valid 311 KB MP3; `spikes/live-voice-
 roundtrip.ts` closes the loop — narration TEXT → ElevenLabs → MP3 → Deepgram STT (confidence **1.000**) → recovers
 the identity (canon/1976/35/reflex/camera).

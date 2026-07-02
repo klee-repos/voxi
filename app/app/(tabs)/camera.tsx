@@ -1,18 +1,16 @@
 /**
- * Camera capture — the steady-state home (Shazam layout, design.md cream). A FULL-BLEED viewfinder fills the
- * screen; the controls float as an overlay: a top-left hamburger + `voxi` wordmark (`AppHeader`), a bottom bar
- * with the "Recently catalogued" toggle (`camera.recentToggle`, a Lucide icon → the floating `RecentCard`) on the
- * left and ONE central flat-green capture orb (`CaptureOrb`, Lucide aperture, carries `camera.shutter`), and a
- * short instruction line above it (`camera.retakeHint`). On web (no camera) the cream canvas + a faint reticle
- * IS the branded home.
+ * Camera capture — the steady-state home (Shazam layout, design.md cream). A full-bleed viewfinder fills the
+ * screen; the controls float as an overlay: hamburger + `voxi` wordmark (`AppHeader`), a bottom bar with the
+ * "Recently catalogued" toggle (→ the floating `RecentCard`) and the central capture orb (`CaptureOrb`). On web
+ * (no camera) the cream canvas + a faint reticle is the branded home.
  *
- * The data flow is UNCHANGED: onShutter → api.createThread (charges a scan; 402 → /paywall) → /processing.
- * Permission states (undetermined/denied) keep the centered narrator Orb (`processing.orb`); the granted home no
- * longer docks an orb (removed per design). Offline/capture-error paths preserved.
+ * Data flow: onShutter → api.createThread (charges a scan; 402 → /paywall) → /processing. Permission states
+ * (undetermined/denied) show the centered narrator Orb (`processing.orb`).
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { View, StyleSheet, Platform, Pressable, useWindowDimensions } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { View, StyleSheet, Platform, Pressable, useWindowDimensions, FlatList, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Images } from 'lucide-react-native'
@@ -29,11 +27,21 @@ import { useApi } from '../../src/lib/api'
 import { ApiError } from '../../src/lib/apiClient'
 import { useCaptureStore } from '../../src/state/captureStore'
 import { useRevisitThread } from '../../src/lib/useRevisitThread'
+import { pageableThreads } from '../../src/lib/collectionOrder'
+import { firstLine } from '../../src/lib/loadingCopy'
+import { LoadingPill } from '../../src/components/LoadingPill'
+import type { ThreadSummary } from '../../src/lib/apiClient'
 import { threadsKey } from '../../src/lib/queryKeys'
 import { createCameraPermission, type CameraPermissionStatus } from '../../src/lib/cameraPermission'
 import { CameraView, type CameraViewHandle } from '../../src/components/CameraView'
 import { toDataUri } from '../../src/lib/photo'
 import { haptics } from '../../src/lib/haptics'
+
+// Swipe-left-to-collection: the camera is page 0 of a horizontal pager, the newest catalogued item is page 1.
+// Page 0 is a TRANSPARENT spacer over the live viewfinder (so the camera never remounts); page 1 is the newest
+// photo. Settling on page 1 opens that item's reveal — the mirror of the reveal's "swipe past newest → camera".
+const VIEWFINDER_KEY = '__viewfinder__'
+const VIEWFINDER_PAGE: ThreadSummary = { threadId: VIEWFINDER_KEY, title: '', createdAt: 0 }
 
 export default function Camera(): React.ReactElement {
   const router = useRouter()
@@ -41,7 +49,7 @@ export default function Camera(): React.ReactElement {
   const { surface } = useTheme()
   // Full-bleed screens have only absolutely-positioned children, so give the Screen a concrete min height
   // (flex:1 alone collapses when the host root has no height — real Expo web fills 100vh; the harness doesn't).
-  const { height: winH } = useWindowDimensions()
+  const { width: winW, height: winH } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const startCapture = useCaptureStore((s) => s.startCapture)
   const setThread = useCaptureStore((s) => s.setThread)
@@ -61,6 +69,59 @@ export default function Camera(): React.ReactElement {
   const queryClient = useQueryClient()
   const recent = useQuery({ queryKey: threadsKey, queryFn: () => api.listThreads() })
   const threads = recent.data?.threads ?? []
+
+  // ---- Swipe left → the most recent catalogued item's reveal (a 2-page pager: viewfinder, newest). ----
+  const newest = pageableThreads(threads, null)[0] ?? null
+  const pagerRef = useRef<FlatList<ThreadSummary>>(null)
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A brief "Opening your entry…" beat as the swipe commits, so the transition into the reveal isn't an abrupt pop.
+  const [opening, setOpening] = useState(false)
+  const openingRef = useRef(false)
+  const settlePager = useCallback(
+    (x: number): void => {
+      if (openingRef.current) return // already committing this swipe
+      if (Math.round(x / (winW || 1)) >= 1 && newest) {
+        openingRef.current = true
+        setOpening(true)
+        haptics.tick()
+        setTimeout(() => {
+          revisit(newest) // fast-open → /reveal (its own pager takes over for older items)
+          pagerRef.current?.scrollToOffset({ offset: 0, animated: false }) // reset so returning shows the viewfinder
+          setOpening(false)
+          openingRef.current = false
+        }, 420)
+      }
+    },
+    [winW, newest, revisit],
+  )
+  const onPagerScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      const x = e.nativeEvent.contentOffset.x
+      if (scrollTimer.current) clearTimeout(scrollTimer.current)
+      scrollTimer.current = setTimeout(() => settlePager(x), 120)
+    },
+    [settlePager],
+  )
+  const onPagerSettle = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      if (scrollTimer.current) clearTimeout(scrollTimer.current)
+      settlePager(e.nativeEvent.contentOffset.x)
+    },
+    [settlePager],
+  )
+  useEffect(() => () => { if (scrollTimer.current) clearTimeout(scrollTimer.current) }, [])
+  const renderPagerPage = useCallback(
+    ({ item }: { item: ThreadSummary }): React.ReactElement =>
+      item.threadId === VIEWFINDER_KEY ? (
+        // Transparent — the live viewfinder shows through from the fixed layer beneath.
+        <View style={{ width: winW, height: winH }} />
+      ) : item.photoUrl ? (
+        <Image source={{ uri: item.photoUrl }} style={{ width: winW, height: winH }} contentFit="cover" />
+      ) : (
+        <View style={{ width: winW, height: winH, backgroundColor: surface.card }} />
+      ),
+    [winW, winH, surface.card],
+  )
 
   useEffect(() => {
     mounted.current = true
@@ -166,40 +227,63 @@ export default function Camera(): React.ReactElement {
   const overTint = onFeed ? '#FFFFFF' : surface.text
 
   return (
-    <Screen id={ids.camera.screen} padded={false}>
+    <Screen id={ids.camera.screen} padded={false} style={{ minHeight: winH }}>
       {/* full-bleed live feed (native) / cream canvas (web) behind everything */}
       <View style={StyleSheet.absoluteFill}>
         <CameraView ref={cameraRef} active={!busy} />
       </View>
+      {/* Swipe-left layer: page 0 is transparent (viewfinder shows through), page 1 is the newest catalogued photo;
+          settling on page 1 opens its reveal. Only present when there's a catalogued item to swipe to. */}
+      {newest ? (
+        <FlatList
+          {...tid(ids.camera.pager)}
+          ref={pagerRef}
+          data={[VIEWFINDER_PAGE, newest]}
+          keyExtractor={(t) => t.threadId}
+          renderItem={renderPagerPage}
+          horizontal
+          pagingEnabled
+          scrollEnabled={!trayOpen && !busy}
+          showsHorizontalScrollIndicator={false}
+          getItemLayout={(_d, index) => ({ length: winW, offset: winW * index, index })}
+          onScroll={onPagerScroll}
+          scrollEventThrottle={16}
+          onMomentumScrollEnd={onPagerSettle}
+          style={StyleSheet.absoluteFill}
+        />
+      ) : null}
       {!onFeed ? <View style={[styles.reticle, { borderColor: surface.border }]} pointerEvents="none" /> : null}
 
-      {/* floating overlay */}
-      <View style={styles.overlay} pointerEvents="box-none">
-        <AppHeader leading="menu" showWordmark onMedia={onFeed} />
-        <OfflineBanner visible={offline} />
-        <View style={styles.spacer} pointerEvents="none" />
-        {/* Hide the capture hint while the RecentCard is open — it would sit behind the floating card + scrim. */}
-        {!trayOpen ? (
-          <Muted {...tid(ids.camera.retakeHint)} style={[styles.hint, { color: overTint }]}>
-            {instruction}
-          </Muted>
-        ) : null}
-        <View style={[styles.bottomBar, { paddingBottom: space.xl + insets.bottom }]} pointerEvents="box-none">
-          <View style={styles.side}>
-            <Pressable
-              {...tid(ids.camera.recentToggle, 'Recently catalogued')}
-              accessibilityRole="button"
-              onPress={() => setTrayOpen(true)}
-              hitSlop={10}
-              style={[styles.iconBtn, { backgroundColor: onFeed ? 'rgba(0,0,0,0.35)' : surface.sunken }]}
-            >
-              <Images size={22} color={overTint} strokeWidth={2} />
-            </Pressable>
+      {/* floating overlay — hidden during the "opening" transition so only the photo + loading beat show (no
+          stray capture orb / recent toggle behind the loader). */}
+      {!opening ? (
+        <View style={styles.overlay} pointerEvents="box-none">
+          <AppHeader leading="menu" showWordmark onMedia={onFeed} />
+          <OfflineBanner visible={offline} />
+          <View style={styles.spacer} pointerEvents="none" />
+          {/* Hide the capture hint while the RecentCard is open — it would sit behind the floating card + scrim. */}
+          {!trayOpen ? (
+            <Muted {...tid(ids.camera.retakeHint)} style={[styles.hint, { color: overTint }]}>
+              {instruction}
+            </Muted>
+          ) : null}
+          <View style={[styles.bottomBar, { paddingBottom: space.xl + insets.bottom }]} pointerEvents="box-none">
+            <View style={styles.side}>
+              <Pressable
+                {...tid(ids.camera.recentToggle, 'Recently catalogued')}
+                accessibilityRole="button"
+                onPress={() => setTrayOpen(true)}
+                hitSlop={10}
+                style={[styles.iconBtn, { backgroundColor: onFeed ? 'rgba(0,0,0,0.35)' : surface.sunken }]}
+              >
+                <Images size={22} color={overTint} strokeWidth={2} />
+              </Pressable>
+            </View>
+            <CaptureOrb busy={busy} onPress={() => void onShutter()} size={80} />
+            <View style={styles.side} />
           </View>
-          <CaptureOrb busy={busy} onPress={() => void onShutter()} size={80} />
-          <View style={styles.side} />
         </View>
-      </View>
+      ) : null}
 
       <RecentCard
         open={trayOpen}
@@ -214,6 +298,14 @@ export default function Camera(): React.ReactElement {
           router.navigate('/(tabs)/threads')
         }}
       />
+
+      {/* Brief "opening" beat as the swipe-left commits — the SAME shared LoadingPill the processing screen uses
+          (so font/size/shape can't drift), bottom-anchored to match. */}
+      {opening ? (
+        <View {...tid(ids.camera.opening)} style={[styles.openingWrap, { paddingBottom: space.xxl + insets.bottom }]} pointerEvents="none">
+          <LoadingPill text={firstLine('revisit')} />
+        </View>
+      ) : null}
     </Screen>
   )
 }
@@ -228,4 +320,6 @@ const styles = StyleSheet.create({
   bottomBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.xl, paddingBottom: space.xl },
   side: { flex: 1, alignItems: 'flex-start' },
   iconBtn: { width: hit.min, height: hit.min, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  // The "opening…" transition beat — bottom-anchored wrap for the shared LoadingPill (matches processing's position).
+  openingWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingHorizontal: space.lg },
 })

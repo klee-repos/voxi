@@ -1,10 +1,8 @@
 /**
- * RecentCard — the camera-home "Recently catalogued" surface. REPLACES the old slide-up `Tray` bottom sheet
- * (grab handle + full-width scrim-dim) with a compact FLOATING CARD that matches the reveal's information panel:
- * it reuses the reveal `floatCard` geometry (rounded-xl, shallow shadow, side margins, centered, maxWidth) and
- * the `RevealDock` `BucketCard` MORPH (single-node opacity + translateY rise + subtle scale, `useNativeDriver:false`,
- * reduce-motion → cross-fade). The app is parchment (cream) everywhere, so this is a white card over cream (or over
- * the live viewfinder on native) — a hairline border defines its edge on the low-contrast cream canvas.
+ * RecentCard — the camera-home "Recently catalogued" surface: a compact floating card that reuses the reveal
+ * `floatCard` geometry and the `RevealDock` `BucketCard` MORPH (single-node opacity + translateY rise + subtle
+ * scale, `useNativeDriver:false`, reduce-motion → cross-fade). A white card over cream (or over the live
+ * viewfinder on native), with a hairline border defining its edge on the low-contrast canvas.
  *
  *   camera.recentToggle ─tap→  card morphs up from the bottom, clearing the capture bar:
  *   ┌ camera.recent (dark card) ─────────────────────────┐
@@ -13,9 +11,9 @@
  *   └────────────────────────────────────────────────────┘
  *   camera.recentClose = the light tap-away scrim behind it.
  *
- * Three states carried verbatim from the old carousel (a loading/errored `['threads']` query must NEVER collapse
- * to the empty ghost and falsely tell a returning collector they have zero finds): LOADING skeletons, ERROR +
- * retry, EMPTY ghost. Tap a tile → `onOpen(item)` (the shared `useRevisitThread` revisit, photo seeded).
+ * Three states — a loading/errored `['threads']` query must NEVER collapse to the empty ghost and falsely tell a
+ * returning collector they have zero finds: LOADING skeletons, ERROR + retry, EMPTY ghost. Tap a tile →
+ * `onOpen(item)` (the shared `useRevisitThread` revisit, photo seeded).
  */
 import React, { useEffect, useRef } from 'react'
 import { View, Text, ScrollView, Pressable, Animated, StyleSheet } from 'react-native'

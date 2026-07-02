@@ -1,10 +1,9 @@
 /**
- * Theme context — exposes the active surface (dark shell vs parchment reading surface) plus the static tokens,
- * and a reduce-motion flag (PLAN §10.3) that screens read to swap particle sequences for cross-fades.
+ * Theme context — exposes the active surface, the static tokens, and a reduce-motion flag (PLAN §10.3) that
+ * screens read to swap particle sequences for cross-fades.
  *
- * The default surface is the warm PARCHMENT (cream) — light EVERYWHERE, no dark fallback on any screen.
- * <SurfaceProvider> stays available but is not used to fall back to `dark` anywhere; `dark` survives only for
- * the token/AA tests.
+ * The default surface is the warm PARCHMENT (cream) — light everywhere, no dark fallback. `dark` survives only
+ * for the token/AA tests.
  */
 import React, { createContext, useContext, useMemo, useState } from 'react'
 import { dark, parchment, theme, type Surface } from './theme'
@@ -27,7 +26,7 @@ const Ctx = createContext<ThemeCtx | null>(null)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [reduceMotion, setReduceMotion] = useState(false)
-  const [speakAloud, setSpeakAloud] = useState(true) // default ON — the user asked for spoken results
+  const [speakAloud, setSpeakAloud] = useState(true)
   // The OS reduce-motion sync (PLAN §10.3) is mounted as <ReduceMotionBridge/> in _layout.tsx (inside this
   // provider) so it can call setReduceMotion via the context; the Settings toggle still overrides it.
   const value = useMemo<ThemeCtx>(

@@ -1,15 +1,11 @@
 /**
- * First-run (PLAN §10.2 screen 2 / D2 / §15) — "Meet Voxi" persona intro, then camera & mic permission PRIMING
- * before the OS prompts (mic = voice chat), a privacy acknowledgement ("objects, not people"; faces/plates
- * redacted; no facial recognition), and the photo→public SHARE consent toggle (defaults OFF — global exemplars
- * require explicit opt-in, PLAN §7.4). A step machine drives the firstRun.* contract ids. Finishing confirms the
- * session against the BFF (GET /v1/me), records the consent/completion intent, and lands on the camera tab.
+ * First-run (PLAN §10.2 screen 2 / D2 / §15) — "Meet Voxi" intro, camera & mic permission PRIMING before the OS
+ * prompts, a privacy acknowledgement, and the photo→public SHARE consent toggle (defaults OFF — global exemplars
+ * require explicit opt-in, PLAN §7.4). A step machine drives the firstRun.* ids. Finishing confirms the session
+ * against the BFF (GET /v1/me), records the consent/completion intent, and lands on the camera tab.
  *
- * State matrix (PLAN §10.2 D1): LOADING (requesting an OS permission / bootstrapping the session), ERROR (the
- * final BFF check failed — recoverable, the user keeps their consent choices and retries), OFFLINE (the global
- * banner via useOffline + final CTA disabled; priming copy stays readable), EMPTY (the "meet" step is the
- * resting intro). Reduce-motion is respected — the hero orb is calm (the Orb swaps its own animation) and the
- * busy line (LoadingLine) renders a static glyph under reduce-motion.
+ * State matrix (PLAN §10.2 D1): LOADING, ERROR (the final BFF check failed — recoverable, consent choices kept),
+ * OFFLINE (global banner + final CTA disabled), EMPTY (the "meet" step). Reduce-motion is respected.
  */
 import React, { useState } from 'react'
 import { View, StyleSheet } from 'react-native'

@@ -2,18 +2,7 @@
  * Root layout — mounts every provider (PLAN §9) and the expo-router Stack.
  *
  * Provider order (outer→inner): SafeArea → Clerk auth → React Query → Theme → ApiClient.
- * The ApiClient depends on the auth token, so ApiProvider sits inside AuthProvider. Routes:
- *   index           → entry redirect (auth gate)
- *   welcome         → email-first auth + EULA/age gate
- *   first-run       → "Meet Voxi" + permission priming + consent
- *   (tabs)          → camera (default landing) · threads · settings
- *   processing      → event-driven scan UX (modal-ish full screen)
- *   reveal          → entry card (parchment surface)
- *   podcast         → two-voice player (parchment read-along)
- *   conversation    → full-screen voice/keyboard
- *   interview       → unknown-item interview
- *   contribute      → add-a-tip sheet
- *   paywall         → limit / subscribe
+ * The ApiClient depends on the auth token, so ApiProvider sits inside AuthProvider.
  */
 import React from 'react'
 import { Stack } from 'expo-router'
@@ -33,9 +22,8 @@ const queryClient = new QueryClient({
 })
 
 /**
- * Seeds + keeps the theme's reduce-motion flag in sync with the OS/browser preference (PLAN §10.3), so a user
- * who has Reduce Motion on at the platform level gets the calm orb on first launch — not only after toggling
- * it in Settings. Mounted inside ThemeProvider; renders nothing.
+ * Keeps the theme's reduce-motion flag in sync with the OS/browser preference (PLAN §10.3), so the platform
+ * setting is honored on first launch, not only after toggling it in Settings. Mounted inside ThemeProvider.
  */
 function ReduceMotionBridge(): null {
   const { setReduceMotion } = useTheme()
@@ -44,11 +32,10 @@ function ReduceMotionBridge(): null {
 }
 
 /**
- * The global left push-drawer (design.md primary nav) now wraps the WHOLE route Stack — not just `(tabs)` — so
- * the hamburger opens it in place on the camera home AND on the pushed capture flow (processing/reveal), which
- * previously had no drawer host. Mounted inside every provider `DrawerMenu` needs (Auth/Query/Theme/Api).
- * `enabled={isSignedIn}` keeps the drawer + its edge-swipe off the pre-auth screens (index/welcome/first-run),
- * which have no hamburger anyway — so their behavior is unchanged.
+ * The global left push-drawer (design.md primary nav) wraps the WHOLE route Stack — not just `(tabs)` — so the
+ * hamburger opens it on the camera home AND on the pushed capture flow (processing/reveal). Mounted inside every
+ * provider `DrawerMenu` needs (Auth/Query/Theme/Api). `enabled={isSignedIn}` keeps the drawer + its edge-swipe
+ * off the pre-auth screens (index/welcome/first-run).
  */
 function AppShell(): React.ReactElement {
   const { isSignedIn } = useAuth()
@@ -79,9 +66,7 @@ function AppShell(): React.ReactElement {
 }
 
 export default function RootLayout(): React.ReactElement | null {
-  // Load the design-system fonts (Nunito + Fraunces) before painting UI. On a
-  // load error we fall through and render with system fallbacks rather than
-  // hang on a blank screen. .ttf are bundled, so this resolves near-instantly.
+  // Load fonts before painting; on a load error, fall through to system fallbacks rather than hang on a blank screen.
   const [fontsLoaded, fontError] = useVoxiFonts()
   if (!fontsLoaded && !fontError) return null
 

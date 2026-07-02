@@ -1,11 +1,9 @@
 /**
- * END-TO-END LIVE proof of the SPOKEN reveal (ANALYSIS-VOICE-PLAN B), exactly as the app hits it:
- *   real photo → POST /v1/threads → GET /stream (real cascade captures the server-owned narration) →
- *   POST /v1/threads/:id/speech → REAL ElevenLabs audio → the SAME base64→data:URL the client builds.
- *
- * This is what the fake-MP3 converge test could NOT prove: that AUDIBLE audio actually comes back and that the
- * client's data-URL encoding round-trips (a bug there = a corrupt/silent clip). Needs ELEVENLABS_API_KEY + gcloud.
- * Run: `bun spikes/live-speech-e2e.ts [img-url]`.
+ * END-TO-END LIVE spoken reveal, exactly as the app hits it:
+ *   real photo → POST /v1/threads → GET /stream → POST /v1/threads/:id/speech → REAL ElevenLabs audio →
+ *   the same base64→data:URL the client builds.
+ * Unlike the fake-MP3 converge test, this proves audible audio comes back and the client's data-URL encoding
+ * round-trips. Needs ELEVENLABS_API_KEY + gcloud. Run: `bun spikes/live-speech-e2e.ts [img-url]`.
  */
 import { createApp, type Deps } from '../services/voxi-api/src/app'
 import { testVerifier } from '../services/voxi-api/src/auth'

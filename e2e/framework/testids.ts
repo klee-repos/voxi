@@ -34,6 +34,8 @@ export const ids = {
     recentItemPhoto: 'camera.recentItemPhoto', // the persisted capture thumbnail on a recent tile (parity with threads.itemPhoto)
     recentToggle: 'camera.recentToggle', // icon button that opens the Recently-catalogued floating card
     recentClose: 'camera.recentClose', // light tap-away scrim behind the RecentCard (tap to close)
+    pager: 'camera.pager', // horizontal pager: swipe left off the viewfinder → the newest catalogued item's reveal
+    opening: 'camera.opening', // brief "opening your entry…" loading beat shown as the swipe-left commits
   },
   processing: {
     screen: 'processing.screen',
@@ -63,8 +65,8 @@ export const ids = {
     playNarration: 'reveal.playNarration', // subordinate icon-only narration play/pause orb (NOT the primary pill)
     narrationAudio: 'reveal.narrationAudio', // the <audio> that speaks the reveal in Voxi's British voice
     facts: 'reveal.facts', // "Curious facts" container — grows as async research verifies each fact
-    fact: 'reveal.fact', // one verified fact chip (multiple; appears progressively)
-    factSource: 'reveal.factSource', // per-fact source-proof affordance (tap → sourceTitle + quote + link)
+    fact: 'reveal.fact', // one verified fact row (fact text + its own source link; multiple, progressive)
+    factSource: 'reveal.factSource', // the per-fact source link under a fact (shows the page title; tap → opens it)
     // Research-bucket DOCK (ANALYSIS-UX redesign): four green research icons + a blue conversation icon. Each
     // research icon carries bucket.state: loading|active|empty|unavailable. Tap an active icon → it morphs into
     // `reveal.bucketCard` (the grounded content + per-bucket audio via reveal.playNarration/narrationAudio).
@@ -76,6 +78,11 @@ export const ids = {
     bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
     bucketCardScrim: 'reveal.bucketCardScrim', // tap-to-close scrim behind the morph card
     conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation (co-locates reveal.askVoxi)
+    // Swipe paging across catalogued items: a horizontal paging FlatList of the revealable collection. Swiping is
+    // the native scroll paging; on settle the landed item loads in place (no /processing, no re-bill).
+    pager: 'reveal.pager', // the horizontal paging FlatList (scroll container)
+    pagerCamera: 'reveal.pagerCamera', // the leading "camera" page — swiping past the newest item opens capture
+    position: 'reveal.position', // hidden anchor carrying index/count + openedvia (analyze|revisit) for E2E reads
   },
   podcast: {
     player: 'podcast.player',

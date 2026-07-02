@@ -20,7 +20,6 @@ Run from the voice-bot dir with creds loaded:
 from __future__ import annotations
 
 import asyncio
-import os
 import struct
 import sys
 import wave
@@ -64,7 +63,6 @@ async def main() -> int:
     print("── Voxi voice cascade verification (real Deepgram + Gemini + ElevenLabs) ──\n")
 
     # ---- 0. Make a spoken-question WAV with ElevenLabs (record-free input). ----
-    voice_env = os.getenv("ELEVENLABS_VOXI_VOICE_ID", "").split()[0]
     tts_wav = ElevenLabsTTS(voice_id=CANONICAL_VOXI_VOICE_ID, output_format="wav_24000")
     q_audio = b"".join([c.audio async for c in tts_wav.synthesize(QUESTION)])
     assert q_audio[:4] == b"RIFF", "expected a WAV from ElevenLabs"

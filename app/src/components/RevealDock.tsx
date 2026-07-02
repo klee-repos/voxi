@@ -1,22 +1,22 @@
 /**
- * The reveal DOCK (ANALYSIS-UX redesign) — replaces the scroll-over info sheet. Voxi answers four fixed questions
- * about any object as four green research icons (What it is · What it's for · Who made it · Curious facts) plus a
- * blue Ask-Voxi conversation icon (design.md's green=audio / blue=people lanes). Each research icon carries
- * `bucket.state` (loading|active|empty|unavailable) via `tidWith`; tapping an active one morphs it into a
- * `BucketCard` — the grounded content + a source proof + per-bucket audio.
+ * The reveal DOCK (ANALYSIS-UX redesign) — four green research icons (What it is · What it's for · Who made it ·
+ * Curious facts) plus a blue Ask-Voxi conversation icon (design.md's green=audio / blue=people lanes). Each
+ * research icon carries `bucket.state` (loading|active|empty|unavailable) via `tidWith`; tapping an active one
+ * morphs it into a `BucketCard` — the grounded content + a source proof + per-bucket audio.
  *
  * Converge-safe by construction: JS-driven `Animated` (`useNativeDriver:false`), lucide-only iconography, and NO
  * `react-native-gesture-handler` (between-bucket nav is a tappable labeled tab strip, never a swipe). State rides
  * `data-*` (via `tidWith`), never colour/glyph alone, so the E2E proof reads it deterministically.
  */
-import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, Pressable, Animated, StyleSheet, ScrollView, Linking, type ViewStyle } from 'react-native'
+import React, { useEffect, useRef } from 'react'
+import { View, Text, Pressable, Animated, Easing, StyleSheet, ScrollView, Linking, type ViewStyle } from 'react-native'
 import { BookOpen, Target, Stamp, Lightbulb, MessageCircle, Play, Pause, RotateCcw, X } from 'lucide-react-native'
 import { AudioElement } from './AudioElement'
 import { GlassFill } from './GlassFill'
 import { ids, tid, tidWith } from '../lib/testid'
 import { radius, space, typeStyles, type, hit, shadow } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
+import { sourceLabel } from '../lib/sourceLabel'
 import type { BucketStatus, RevealFact } from '../state/captureStore'
 
 /** The five dock affordances. The four research buckets play audio (green lane); `conversation` navigates (blue). */
@@ -92,8 +92,9 @@ function BucketIcon({
     : status === 'active'
       ? surface.text // full-ink = "answered / readable" (green stays the audio colour)
       : surface.textTertiary // loading/empty/unavailable = muted
-  const ringOpacity = reduceMotion ? 0.4 : pulse.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.6] })
-  const ringScale = reduceMotion ? 1 : pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.15] })
+  // Loading = a green arc SPINNING around the icon's border (a classic loading ring), not a pulse: a bright accent
+  // HEAD on a faint full track, rotated 0→360° by the shared driver. Reduce-motion → a static faint accent ring.
+  const spin = pulse.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
 
   return (
     <Pressable
@@ -104,15 +105,20 @@ function BucketIcon({
       style={({ pressed }) => [styles.iconWrap, { opacity: pressed ? 0.7 : 1 }]}
     >
       <View style={styles.iconCircleWrap}>
-        {status === 'loading' ? (
-          <Animated.View
-            aria-hidden
-            style={[styles.ring, { borderColor: surface.accent, opacity: ringOpacity, transform: [{ scale: ringScale }] }]}
-          />
-        ) : null}
         <View style={[styles.iconCircle, { backgroundColor: surface.sunken, borderColor: isConv ? surface.accentSecondary : surface.border }]}>
           <Glyph size={22} color={glyphColor} strokeWidth={2} />
         </View>
+        {status === 'loading' ? (
+          <Animated.View
+            aria-hidden
+            style={[
+              styles.ring,
+              reduceMotion
+                ? { borderColor: surface.accent, opacity: 0.5 }
+                : { borderColor: surface.border, borderTopColor: surface.accent, transform: [{ rotate: spin }] },
+            ]}
+          />
+        ) : null}
         {status === 'active' && dkey === 'facts' && count ? (
           <View style={[styles.badge, { backgroundColor: surface.accent }]}>
             <Text style={[typeStyles.caption, { color: surface.onAccent }]}>{count}</Text>
@@ -153,11 +159,10 @@ export function BucketDock({
       pulse.setValue(0)
       return
     }
+    // A single continuous 0→1 ramp (Animated.loop resets to 0 each iteration) → a constant-speed 0→360° spin (360°
+    // == 0°, so the reset is invisible). Linear easing keeps the arc travelling at an even pace, like a spinner.
     const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: false }),
-        Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: false }),
-      ]),
+      Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: false }),
     )
     loop.start()
     return () => loop.stop()
@@ -180,26 +185,23 @@ export function BucketDock({
   )
 }
 
-/** One verified fact, rendered as its own chip with a tappable SOURCE PROOF (verbatim quote + link). */
-function FactChip({ fact, surface }: { fact: RevealFact; surface: Surface }): React.ReactElement {
-  const [open, setOpen] = useState(false)
+/** One verified fact: the fact text, and directly under it its OWN source — the webpage TITLE (a prettified site
+ *  name when the page has no title), a tappable link that opens the page. No box, no toggle, no quote; a hairline
+ *  separates facts (IMDb-trivia list). No source link when there is no usable URL. */
+function FactRow({ fact, surface, first }: { fact: RevealFact; surface: Surface; first: boolean }): React.ReactElement {
+  const label = sourceLabel(fact.sourceUrl, fact.sourceTitle) // '' for empty / voxi: / grounding-redirect URLs
   return (
-    <View {...tid(ids.reveal.fact)} style={[styles.factChip, { backgroundColor: surface.sunken, borderColor: surface.border }]}>
+    <View {...tid(ids.reveal.fact)} style={[styles.factRow, first ? null : { borderTopWidth: 1, borderTopColor: surface.border }]}>
       <Text style={[typeStyles.body, { color: surface.text }]}>{fact.text}</Text>
-      {fact.sourceUrl ? (
-        <>
-          <Pressable {...tid(ids.reveal.factSource, `Source: ${fact.sourceTitle || fact.sourceUrl}`)} accessibilityRole="button" onPress={() => setOpen((o) => !o)} style={styles.sourceBtn}>
-            <Text style={[typeStyles.footnote, { color: surface.accentSecondary }]}>{open ? 'Hide source' : 'Source'}</Text>
-          </Pressable>
-          {open ? (
-            <View style={styles.proof}>
-              <Text style={[typeStyles.footnote, { color: surface.textMuted, fontStyle: 'italic' }]}>“{fact.quote}”</Text>
-              <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(fact.sourceUrl).catch(() => {})}>
-                <Text style={[typeStyles.footnote, { color: surface.accentSecondary }]}>{fact.sourceTitle || fact.sourceUrl}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </>
+      {label ? (
+        <Pressable
+          {...tid(ids.reveal.factSource, `Source: ${label}, opens in browser`)}
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(fact.sourceUrl).catch(() => {})}
+          style={styles.factSourceRow}
+        >
+          <Text style={[typeStyles.footnote, { color: surface.accentSecondary }]} numberOfLines={1}>{label}</Text>
+        </Pressable>
       ) : null}
     </View>
   )
@@ -209,14 +211,11 @@ export type AudioState = 'idle' | 'loading' | 'ready' | 'failed'
 
 /** The morph CARD: a scrim-backed overlay that rises + scales in from the dock (single-node transform+opacity on
  *  the JS driver — not an expensive per-node shared-element morph, adversarial 7b; reduce-motion → cross-fade).
- *  Holds the full-question eyebrow, the grounded body (or the fact chips), a source proof, the per-bucket audio
- *  control, and a LABELED tab strip to switch buckets (never a swipe). */
+ *  Holds the full-question eyebrow, the grounded body (or the fact rows), a deduped Sources list, the per-bucket
+ *  audio control, and a LABELED tab strip to switch buckets (never a swipe). */
 export function BucketCard({
   bucket,
   body,
-  sourceUrl,
-  sourceTitle,
-  quote,
   facts,
   audioUrl,
   audioState,
@@ -230,9 +229,6 @@ export function BucketCard({
 }: {
   bucket: Exclude<DockKey, 'conversation'>
   body: string
-  sourceUrl?: string
-  sourceTitle?: string
-  quote?: string
   facts?: RevealFact[]
   audioUrl: string | null
   audioState: AudioState
@@ -281,20 +277,14 @@ export function BucketCard({
 
         <ScrollView style={styles.cardScroll} contentContainerStyle={{ paddingBottom: space.md }} showsVerticalScrollIndicator={false}>
           {bucket === 'facts' && facts && facts.length ? (
-            <View {...tid(ids.reveal.facts)} style={{ gap: space.sm }}>
+            <View {...tid(ids.reveal.facts)}>
               {facts.map((f, i) => (
-                <FactChip key={`${f.sourceUrl}:${i}`} fact={f} surface={surface} />
+                <FactRow key={`${f.sourceUrl}:${i}`} fact={f} surface={surface} first={i === 0} />
               ))}
             </View>
           ) : body ? (
-            <>
-              <Text {...(bucket === 'what' ? tid(ids.reveal.whatItIs) : {})} style={[typeStyles.body, { color: surface.text, lineHeight: 24 }]}>{body}</Text>
-              {sourceUrl ? (
-                <Pressable {...tid(ids.reveal.factSource, `Source: ${sourceTitle || sourceUrl}`)} accessibilityRole="link" onPress={() => void Linking.openURL(sourceUrl).catch(() => {})} style={styles.sourceBtn}>
-                  <Text style={[typeStyles.footnote, { color: surface.accentSecondary }]}>{quote ? `“${quote}” — ${sourceTitle || sourceUrl}` : sourceTitle || sourceUrl}</Text>
-                </Pressable>
-              ) : null}
-            </>
+            // Prose buckets (what / purpose / maker) show ONLY the grounded text — no source row, no quote.
+            <Text {...(bucket === 'what' ? tid(ids.reveal.whatItIs) : {})} style={[typeStyles.body, { color: surface.text, lineHeight: 24 }]}>{body}</Text>
           ) : (
             // Honest empty — an ANSWER, not a broken icon (design review 3a).
             <Text style={[typeStyles.body, { color: surface.textMuted, fontStyle: 'italic' }]}>
@@ -346,10 +336,12 @@ const styles = StyleSheet.create({
   card: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.xl, maxHeight: '80%' },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   closeBtn: { width: hit.min, height: hit.min, alignItems: 'flex-end', justifyContent: 'center' },
-  cardScroll: { marginTop: space.sm },
-  sourceBtn: { minHeight: hit.min, justifyContent: 'center', alignSelf: 'flex-start', marginTop: space.xs },
-  proof: { marginTop: space.xs, gap: space.xs },
-  factChip: { borderWidth: 1, borderRadius: radius.md, padding: space.md },
+  // flexShrink:1 (NOT flex:1 — the card is maxHeight:'80%' with no explicit height) so short content lays out fully
+  // and the card hugs it, but on overflow only the ScrollView shrinks+scrolls — the pinned audio pill + tab strip
+  // never fall below the screen edge (RN's default flexShrink is 0; docs/REVEAL-CARD-CLEANUP-PLAN.md §2a).
+  cardScroll: { marginTop: space.sm, flexShrink: 1 },
+  factRow: { paddingVertical: space.sm, gap: space.xs }, // divider list (IMDb-trivia): fact text + its own source link
+  factSourceRow: { alignSelf: 'flex-start', minHeight: hit.min, justifyContent: 'center' }, // per-fact source link
   playBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.sm, marginTop: space.md },
   tabs: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.lg, flexWrap: 'wrap' },
   tab: { borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 32, alignItems: 'center', justifyContent: 'center' },

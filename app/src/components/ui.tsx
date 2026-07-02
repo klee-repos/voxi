@@ -39,10 +39,9 @@ export function Screen({
   /** Full-bleed screens (camera/processing/reveal hero) set `padded={false}` to render edge-to-edge. */
   padded?: boolean
   /**
-   * Which edges get safe-area inset padding (defaults to all). Full-bleed screens whose content already handles
-   * the bottom inset itself (the reveal photo + info sheet, which runs the photo to the physical edge and pads the
-   * sheet up by `insets.bottom`) pass `['top','left','right']` so the bottom is NOT padded twice — otherwise the
-   * safe-area strip clips the ScrollView above the home indicator and the photo shows through beneath the sheet.
+   * Which edges get safe-area inset padding (defaults to all). Full-bleed screens that handle the bottom inset
+   * themselves pass `['top','left','right']` so the bottom is NOT padded twice — otherwise the safe-area strip
+   * clips content above the home indicator and the photo shows through beneath the sheet.
    */
   edges?: readonly Edge[]
   /**
@@ -190,9 +189,9 @@ export function Button({
   )
 }
 
-// NavClose (the old top-left chevron / top-right X primitive) was retired: its behavior is now absorbed by the
-// universal <AppHeader/> (leading="back" | onClose), which de-overloads nav.close (modal X only) from nav.back
-// (the back chevron) and applies the safe-area inset consistently. See docs/UNIVERSAL-HEADER-PLAN.md.
+// No NavClose primitive: the top-left chevron / top-right X behavior lives in the universal <AppHeader/>
+// (leading="back" | onClose), which keeps nav.close (modal X) distinct from nav.back (the back chevron) and
+// applies the safe-area inset consistently. See docs/UNIVERSAL-HEADER-PLAN.md.
 
 export function PressableTile({
   id,
