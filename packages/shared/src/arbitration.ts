@@ -21,6 +21,10 @@ export interface Candidate {
   aka?: string[]
   /** coarse object category (e.g. "camera") — carried for class-level reveal enrichment, never for display/arbitration. */
   category?: string
+  /** a brand/logo the VLM READ off the object (distilled from the clean make, corroborated by OCR) — a grounded
+   *  OBSERVATION, not a guessed identity. Routes brand-entity research + is citable as an `observation` (§13.1/§13.3).
+   *  Display/routing only; NEVER read by arbitration (mirrors the displayTitle/category convention). */
+  observedBrand?: string
 }
 
 export interface Thresholds {

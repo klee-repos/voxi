@@ -16,15 +16,29 @@ import { renderPrompt } from '../prompts'
 
 export interface NarrationInput {
   label: string
+  /** the SPECIFIC human identity to narrate about — the clean displayTitle ("Sub Pop Mug"), not the arbiter's raw
+   *  make+model concat (§4.B / D-2). Defaults to `label` when absent so the narrator never gets a blank subject. */
+  subject?: string
   band: ConfidenceBand
   evidence: IdEvidence[]
   unsupportedFields: string[]
   candidates: string[]
 }
 
-/** The cascade consumes this: the approved (gate-passed) clause texts, in order, + how many were dropped. */
+/** The three narrative buckets a reveal is normalized into (ANALYSIS-UX). `what_is_it` becomes the `whatItIs`
+ *  description + the `what` audio; `purpose`/`maker` stream as their own `section` events + per-bucket audio. The
+ *  "curious facts" bucket is NOT here — it comes from the researcher's `fact` events, not the narrator. */
+export type NarrativeBucket = 'what_is_it' | 'purpose' | 'maker'
+
+/** A gate-approved narration clause, retaining its bucket tag + evidence ref so the cascade can (a) group by
+ *  bucket and (b) resolve a section's source proof from the clause's cited evidence. */
+export interface NarrationClause extends Clause {
+  bucket: NarrativeBucket
+}
+
+/** The cascade consumes this: the approved (gate-passed) clauses, in order, + how many were dropped. */
 export interface Narration {
-  clauses: string[]
+  clauses: NarrationClause[]
   dropped: number
 }
 
@@ -41,10 +55,13 @@ const NARRATION_SCHEMA = {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          claimType: { type: 'string', enum: ['spec', 'provenance', 'date', 'causal', 'superlative', 'comparative', 'flavor'] },
+          claimType: { type: 'string', enum: ['spec', 'provenance', 'date', 'causal', 'superlative', 'comparative', 'observation', 'flavor'] },
           evidenceRef: { type: 'string' },
+          // Which of the four reveal questions this clause answers (ANALYSIS-UX). `what_is_it` = identity/what/detail;
+          // `purpose` = what it's FOR; `maker` = WHO made it. (Curious facts come from research, not the narrator.)
+          bucket: { type: 'string', enum: ['what_is_it', 'purpose', 'maker'] },
         },
-        required: ['text', 'claimType'],
+        required: ['text', 'claimType', 'bucket'],
       },
     },
   },
@@ -74,10 +91,17 @@ export function narrationEvidence(input: NarrationInput): Evidence[] {
   return evidence
 }
 
-/** Apply the REAL honesty gate to drafted clauses (pure — the testable core; no Gemini). Render approved-only. */
-export function gateNarration(input: NarrationInput, clauses: Clause[], judge?: EntailmentJudge): Narration {
-  const verdict = validateClaims(clauses, narrationEvidence(input), { judge, detectNamedClaim: smugglesFalsifiable, failClosed: false })
-  return { clauses: verdict.approved.map((c) => c.text), dropped: verdict.rejected.length }
+/** Apply the REAL honesty gate to drafted clauses (pure — the testable core; no Gemini). Render approved-only.
+ *  Clauses without a `bucket` (older drafts / bare-Clause callers) default to `what_is_it` — the identity bucket —
+ *  so a missing tag never drops a clause; the gate is unchanged (it ignores the extra field). */
+export function gateNarration(
+  input: NarrationInput,
+  clauses: Array<Clause & { bucket?: NarrativeBucket }>,
+  judge?: EntailmentJudge,
+): Narration {
+  const tagged: NarrationClause[] = clauses.map((c) => ({ ...c, bucket: c.bucket ?? 'what_is_it' }))
+  const verdict = validateClaims(tagged, narrationEvidence(input), { judge, detectNamedClaim: smugglesFalsifiable, failClosed: false })
+  return { clauses: verdict.approved as NarrationClause[], dropped: verdict.rejected.length }
 }
 
 export class LiveNarrator implements Narrator {
@@ -101,15 +125,16 @@ export class LiveNarrator implements Narrator {
     })
 
     const user = renderPrompt('narration.user.md', {
-      label: input.label,
+      // Narrate about the SPECIFIC identity (the clean displayTitle) — never a blank/raw concat (§4.B / D-2).
+      label: input.subject || input.label,
       band: input.band,
       evidence,
       noExternal: evidence.length === 1 && evidence[0]!.ref === 'id',
     })
 
-    let clauses: Clause[]
+    let clauses: Array<Clause & { bucket?: NarrativeBucket }>
     try {
-      const out = await geminiJSON<{ clauses: Clause[] }>(system, user, NARRATION_SCHEMA, 0.7)
+      const out = await geminiJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
       clauses = out.clauses ?? []
     } catch {
       return { clauses: [], dropped: 0 } // narration is best-effort; a failure just means no narration, never a crash

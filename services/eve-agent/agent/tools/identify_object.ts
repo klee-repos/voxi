@@ -68,6 +68,9 @@ export interface IdentifyResult {
   candidates: Candidate[]
   /** coarse VLM category (e.g. "camera") — the ONLY safe key for class-level enrichment on a hedged reveal. */
   category?: string
+  /** a brand/logo READ off the object (from the chosen candidate). Grounded observation → routes brand-entity
+   *  research + is citable as an `observation` (§13.1/§13.3). Absent when nothing brand-like was read. */
+  observedBrand?: string
   /** why the arbiter landed here (audit/debug; not user-facing copy). */
   reason: string
 }
@@ -89,6 +92,10 @@ export interface VisionStages {
 export interface VisionProvider {
   analyze(image: ImageRef): Promise<VisionStages>
 }
+
+/** First non-EMPTY string (guards the empty-string `name` an unbranded/model-less candidate produces — `??` would
+ *  let `''` through as the label, so the narrator/research would get a blank subject; §4.B / D-2). */
+const firstNonEmpty = (...xs: (string | undefined)[]): string | undefined => xs.find((x) => x && x.trim().length > 0)
 
 /** Granularity of a single candidate, from which fields it actually carries. */
 function granularityOf(c: Candidate | undefined): GranularityLevel {
@@ -125,6 +132,10 @@ export async function identify_object(
   // renders a card — CONFIDENT and PROBABLE — so a hedged reveal still shows ONE tidy title, with the uncertainty
   // carried by the confidence chip + the candidate list, never by cramming "X or Y" into the title.
   const vlmDisplayTitle = stages.vlm?.displayTitle
+  // The brand READ off the object is a property of the IMAGE (the VLM stage), NOT of whichever candidate the arbiter
+  // chose — a generic web winner ("coffee cup") carries no observedBrand, but the mug still bears its mark. Sourcing
+  // it from `stages.vlm` (not `chosen`) is what lets the brand lane fire even when the web/catalog stage wins.
+  const observedBrand = stages.vlm?.observedBrand
 
   // The single source of truth for band/route/candidates is the SHARED arbiter.
   const a = arbitrate({ catalog: stages.catalog, web: stages.web, vlm: stages.vlm }, thresholds)
@@ -164,6 +175,7 @@ export async function identify_object(
       route: 'confirm',
       candidates: a.candidates,
       category,
+      observedBrand,
       reason: a.reason,
     }
   }
@@ -171,7 +183,9 @@ export async function identify_object(
   // REVEAL (CONFIDENT) or a hedged single-candidate CONFIRM (PROBABLE).
   const chosen = a.chosen ?? a.candidates[0]
   return {
-    label: chosen?.name ?? 'an object',
+    // Guard the empty-string `name` (a model-less/unbranded candidate → name === '', which `??` would pass through);
+    // fall back to the clean displayTitle so the narrator/research never get a blank subject (§4.B / D-2).
+    label: firstNonEmpty(chosen?.name, chosen?.displayTitle, vlmDisplayTitle) ?? 'an object',
     // The clean human title: prefer the chosen candidate's, else the VLM's clean name of the primary object; the
     // cascade shows it over `label` on any reveal card, falling back to `label` only when neither is present.
     displayTitle: chosen?.displayTitle ?? vlmDisplayTitle,
@@ -182,6 +196,7 @@ export async function identify_object(
     route: a.route,
     candidates: a.candidates,
     category,
+    observedBrand,
     reason: a.reason,
   }
 }

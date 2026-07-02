@@ -177,8 +177,8 @@ Runnable here (no creds, RN-web build + BFF test mode + replayed tapes):
 
 1. `bun test` — unit/token tests.
 2. `bun e2e/web/run-auth.web.ts` — auth shell golden flow.
-3. `bun e2e/web/run-agent-pw.web.ts` — **agentic** sign-in→camera by perception,
-   asserted by `testID`.
+3. `bun run e2e:web:agentic` — **agentic** suite over the REAL screens: an `Agent` signs
+   in→camera (and captures/revisits/sweeps) by perception, asserted by `testID`.
 4. The `run-sc-*.web.ts` scenario runners (reveal/proc, threads, conversation,
    podcast, subs/a11y/safety) — cover the reskinned surfaces incl. the a11y &
    safety-refusal states.

@@ -15,7 +15,8 @@ import { identify_object, type VisionProvider, type ImageRef, type IdentifyResul
 import { safety_gate, type SafetyClassifier, type SafetyThresholds, DEFAULT_SAFETY_THRESHOLDS } from './tools/safety_gate'
 import type { Thresholds } from '../../../packages/shared/src/arbitration'
 import { DEFAULT_THRESHOLDS } from '../../../packages/shared/src/arbitration'
-import type { Narrator } from './providers/live-narrator'
+import type { Evidence } from '../../../packages/shared/src/confidence'
+import type { Narrator, NarrationClause, NarrativeBucket } from './providers/live-narrator'
 import type { Researcher, ResearchInput } from './providers/live-research'
 import type { DossierProvider } from './providers/live-dossier'
 import type { DossierInput } from './subagents/researcher'
@@ -89,28 +90,93 @@ export function buildResearchInput(result: IdentifyResult): ResearchInput | null
   return null
 }
 
+/** Common English words that are ALSO brands (Dove, Shell, Apple, …). A single such word can't disambiguate the
+ *  research entity (`sourceMatchesSubject(['dove'])` matches a Dove-chocolate page for a Dove-soap object), so the
+ *  brand lane refuses them and falls back to honest-empty maker (§13.3, adversarial #15). */
+const COMMON_WORD_BRANDS: ReadonlySet<string> = new Set([
+  'dove', 'shell', 'apple', 'galaxy', 'delta', 'puma', 'orange', 'sun', 'tide', 'amazon', 'gap', 'guess', 'monster',
+  'polo', 'coach', 'north', 'face', 'pink', 'boss', 'fossil', 'method', 'dawn', 'joy', 'off', 'raid',
+])
+
+/** A brand is DISTINCTIVE enough to research as an entity when it is multi-token ("Sub Pop", "Sonic Youth") OR a
+ *  single word that is not a common dictionary/homonym word (§13.3, adversarial #15). Conservative: an ambiguous
+ *  single-word brand is treated as non-distinctive → the maker stays honest-empty rather than risk wrong-entity facts. */
+export function isDistinctiveBrand(brand: string | undefined): boolean {
+  const toks = (brand ?? '').trim().split(/\s+/).filter(Boolean)
+  if (toks.length >= 2) return true
+  const single = (toks[0] ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  return single.length >= 3 && !COMMON_WORD_BRANDS.has(single)
+}
+
 /**
- * The honesty-safe DOSSIER keying for the async deep-research step (PROMPT-QUALITY §3.B4). CONFIDENT → 'item' scope
- * on the corroborated make + BASE model (the `subject` prefers the clean `displayTitle`); the source-subject match
- * keys on [make, model]. PROBABLE → 'class' scope on the category only, and the VLM's (unconfirmed) make/model are
- * passed as `disallowedSpecificTerms` so a class-level fact can never NAME the specific model. UNKNOWN → null.
+ * The honesty-safe DOSSIER keying for the async deep-research step (PROMPT-QUALITY §3.B4, §13.2/§13.3).
+ *  - CONFIDENT → 'item' scope on the corroborated make + BASE model (`subject` prefers the clean `displayTitle`).
+ *  - PROBABLE with a DISTINCTIVE observed brand → the BRAND LANE: research the brand ENTITY at item rigor
+ *    (subjectTerms=[brand], no disallowed), so "Sub Pop the label" grounds the maker/facts — but flagged `brandLane`
+ *    so facts stay about the brand, never asserting the object is a specific edition (adversarial #5).
+ *  - PROBABLE otherwise → 'class' scope on the category only, VLM make/model as `disallowedSpecificTerms`.
+ *  - UNKNOWN → null.
  */
 export function buildDossierInput(result: IdentifyResult): DossierInput | null {
-  if (result.confidence_band === 'CONFIDENT') {
-    const chosen = result.candidates[0]
-    const make = chosen?.make
-    const model = chosen?.model?.replace(/\(.*?\)/g, '').trim() || undefined
+  if (result.confidence_band === 'UNKNOWN') return null
+  const chosen = result.candidates[0]
+  const make = chosen?.make
+  const model = chosen?.model?.replace(/\(.*?\)/g, '').trim() || undefined
+  const brand = result.observedBrand
+  const category = result.category || result.label
+
+  // A CONFIDENT identity with a real MAKE (e.g. "Canon AE-1", "La Croix") → research THAT specific item.
+  if (result.confidence_band === 'CONFIDENT' && make) {
     const terms = [make, model].filter(Boolean) as string[]
-    const subject = result.displayTitle || [make, model].filter(Boolean).join(' ') || result.label
+    const subject = result.displayTitle || terms.join(' ') || result.label
     return { subject, scope: 'item', subjectTerms: terms.length ? terms : [result.label] }
   }
-  if (result.confidence_band === 'PROBABLE') {
-    const category = result.category || result.label
-    const chosen = result.candidates[0]
-    const disallowed = [chosen?.make, chosen?.model].filter(Boolean) as string[]
-    return { subject: category, scope: 'class', subjectTerms: [category], disallowedSpecificTerms: disallowed }
+
+  // Otherwise — a hedged reveal, OR a CONFIDENT-but-GENERIC web label ("coffee cup") with no make — if the object
+  // BEARS a distinctive brand we read off it, research the brand ENTITY, keyed on the brand REGARDLESS of the arbiter's
+  // band, so a generic web winner never buries the brand printed on the object (the East-Street-mug bug). Honest: we
+  // research the brand, never asserting the specimen's edition (the brand-lane extract prompt forbids that).
+  if (brand && isDistinctiveBrand(brand)) {
+    return { subject: brand, scope: 'item', subjectTerms: [brand], brandLane: true, objectType: category }
   }
-  return null
+
+  // No brand read → class scope on the category, with the (unconfirmed) VLM make/model disallowed.
+  const disallowed = [make, model].filter(Boolean) as string[]
+  return { subject: category, scope: 'class', subjectTerms: [category], disallowedSpecificTerms: disallowed }
+}
+
+/** The two narrative buckets that stream as their own `section` event (ANALYSIS-UX): `what_is_it` rides the
+ *  `token`s/`description_upgrade`, the facts bucket rides `fact` events, and these two get `section` events. */
+const SECTION_BUCKETS: readonly Extract<NarrativeBucket, 'purpose' | 'maker'>[] = ['purpose', 'maker']
+
+/**
+ * Build a `section` payload for one bucket from gate-approved narration clauses + the closed evidence. Source proof
+ * = the first clause citing a REAL evidence ref (never the band-as-evidence `'id'`, which is not a URL/quote — its
+ * "source" would render as a dead `voxi:cascade` link). Returns null when the narrator produced no clause for it.
+ */
+function sectionFor(
+  bucket: NarrativeBucket,
+  clauses: NarrationClause[],
+  evidence: Evidence[],
+): { text: string; sourceUrl: string; sourceTitle: string; quote: string } | null {
+  const group = clauses.filter((c) => c.bucket === bucket)
+  if (!group.length) return null
+  let sourceUrl = ''
+  let quote = ''
+  for (const c of group) {
+    // A source proof needs a REAL, tappable URL — never an internal `voxi:` sentinel (`voxi:cascade` = the
+    // band-as-evidence `id`; `voxi:observed` = an on-object mark). Those would render as a dead link on the client,
+    // so a section citing only them carries no source row (§13.4); the observation lives in the section BODY text.
+    if (c.evidenceRef) {
+      const ev = evidence.find((e) => e.ref === c.evidenceRef)
+      if (ev && ev.sourceUrl && !ev.sourceUrl.startsWith('voxi:')) {
+        sourceUrl = ev.sourceUrl
+        quote = ev.claim
+        break
+      }
+    }
+  }
+  return { text: group.map((c) => c.text).join(' '), sourceUrl, sourceTitle: '', quote }
 }
 
 /**
@@ -194,6 +260,10 @@ export async function* runIdentificationCascade(
   // Persona narration ("what it is / its use") — only on a reveal (CONFIDENT/PROBABLE); UNKNOWN hands off to the
   // interview instead. Every clause is already honesty-gated by the narrator; we stream it as `token` events. A
   // narrator failure is non-fatal — the reveal still stands.
+  // Which narrative sections we've streamed — so a bucket the narration never grounds gets an empty-marker section
+  // before `done` (a NEW reveal ALWAYS carries the full purpose/maker set → the client shows honest `empty`, while
+  // a pre-redesign durable reveal with NO section events stays distinguishable → its buckets hide, never false-empty).
+  const emittedSections = new Set<string>()
   if (deps.narrator && result.confidence_band !== 'UNKNOWN') {
     // Enrich the closed evidence with GROUNDED facts the narrator may cite (best-effort; a failure/timeout falls
     // back to web evidence only). CONFIDENT grounds the item, PROBABLE grounds only the class — never the model.
@@ -209,16 +279,27 @@ export async function* runIdentificationCascade(
     }
     const narration = await deps.narrator.narrate({
       label: result.label,
+      // Narrate about the SPECIFIC identity (the clean displayTitle), not the raw make+model concat (§4.B / D-2).
+      subject: result.displayTitle ?? result.label,
       band: result.confidence_band,
-      evidence,
+      evidence, // includes the observed-brand `obs` row (narrator MAY cite it as an `observation`, §13.1)
       unsupportedFields: result.unsupported_fields,
       candidates: result.candidates.map((c) => c.name),
     })
-    // PIN the narration synchronously, the instant it's produced — before streaming tokens and before the async
-    // deep-research phase below — so the BFF can voice it (POST /speech) the moment the reveal renders (not ~a
-    // minute later at end-of-stream). Only when there's something to say (dropped-to-empty never pins).
-    if (narration.clauses.length) deps.onNarration?.(narration.clauses)
-    for (const clause of narration.clauses) yield at({ type: 'token', text: clause })
+    // Stream ONLY the `what_is_it` clauses as `token`s (→ `whatItIs`) and PIN the what-only audio synchronously —
+    // so `/speech/what` voices exactly the What card's text, never the full what+purpose+maker composite
+    // (adversarial A). The `purpose`/`maker` clauses become their own progressive `section` events (from the FAST
+    // first pass, so their icons light early — later superseded by the richer dossier upgrade below).
+    const whatClauses = narration.clauses.filter((c) => c.bucket === 'what_is_it')
+    if (whatClauses.length) deps.onNarration?.(whatClauses.map((c) => c.text))
+    for (const c of whatClauses) yield at({ type: 'token', text: c.text })
+    for (const bucket of SECTION_BUCKETS) {
+      const sec = sectionFor(bucket, narration.clauses, evidence)
+      if (sec) {
+        emittedSections.add(bucket)
+        yield at({ type: 'section', bucket, text: sec.text, sourceUrl: sec.sourceUrl, sourceTitle: sec.sourceTitle, quote: sec.quote })
+      }
+    }
   }
 
   // ── Async deep research (PROMPT-QUALITY §3.B4): OFF the reveal path (the reveal already streamed above). Stream
@@ -236,17 +317,40 @@ export async function* runIdentificationCascade(
           } else if (ev.type === 'done' && ev.dossier && ev.dossier.evidence.length) {
             const upgraded = await deps.narrator.narrate({
               label: result.label,
+              subject: result.displayTitle ?? result.label,
               band: result.confidence_band,
-              evidence: ev.dossier.evidence,
+              // Merge the observed-brand `obs` row into the dossier evidence so the What card keeps its grounded
+              // "bears the <brand> mark" observation even after the richer dossier upgrade (§13.1).
+              evidence: [...result.evidence.filter((e) => e.sourceUrl.startsWith('voxi:observed')), ...ev.dossier.evidence],
               unsupportedFields: result.unsupported_fields,
               candidates: result.candidates.map((c) => c.name),
             })
-            if (upgraded.clauses.length) yield at({ type: 'description_upgrade', text: upgraded.clauses.join(' ') })
+            // The upgrade refines each bucket from the richer dossier evidence: `what_is_it` → the what-only
+            // `description_upgrade` (never the full composite — adversarial A/G), `purpose`/`maker` → `section`
+            // events that SUPERSEDE the first-pass ones (the client's appendSection is last-write-wins per bucket).
+            const whatUp = upgraded.clauses.filter((c) => c.bucket === 'what_is_it')
+            if (whatUp.length) yield at({ type: 'description_upgrade', text: whatUp.map((c) => c.text).join(' ') })
+            for (const bucket of SECTION_BUCKETS) {
+              const sec = sectionFor(bucket, upgraded.clauses, ev.dossier.evidence)
+              if (sec) {
+                emittedSections.add(bucket)
+                yield at({ type: 'section', bucket, text: sec.text, sourceUrl: sec.sourceUrl, sourceTitle: sec.sourceTitle, quote: sec.quote })
+              }
+            }
           }
         }
       } catch {
         /* best-effort: a research failure/timeout leaves the instant reveal exactly as it was streamed. */
       }
+    }
+  }
+
+  // Backstop: any narrative bucket the narration never grounded gets an empty-marker `section` (text:'') so the
+  // client resolves it to an honest `empty` icon rather than a perpetual spinner, and NEW reveals are always
+  // distinguishable from pre-redesign ones (which carry no `section` events → their buckets hide).
+  if (deps.narrator && result.confidence_band !== 'UNKNOWN') {
+    for (const bucket of SECTION_BUCKETS) {
+      if (!emittedSections.has(bucket)) yield at({ type: 'section', bucket, text: '', sourceUrl: '', sourceTitle: '', quote: '' })
     }
   }
 

@@ -13,9 +13,10 @@ import {
   parseEventLineTolerant,
   nextStartIndex,
   type StreamEvent,
+  type AudioBucket,
 } from '../../../packages/shared/src/events'
 
-export type { StreamEvent }
+export type { StreamEvent, AudioBucket }
 
 // ---- route I/O types (mirror services/voxi-api/src/app.ts) ----
 export interface SignedUploadUrl {
@@ -304,13 +305,15 @@ export class ApiClient {
   }
 
   /**
-   * POST /v1/threads/:id/speech — hear the reveal narration in Voxi's British voice. The text is SERVER-OWNED
-   * (the BFF voices the honesty-gated clauses it produced; the client sends no text). Returns a playable
-   * `data:audio/mpeg` URL, or `null` when there's nothing to speak / speech is unconfigured (404/502/503) so the
-   * caller can no-op gracefully — never a thrown error on the reveal's happy path.
+   * POST /v1/threads/:id/speech[/:bucket] — hear a reveal bucket in Voxi's British voice. The text is SERVER-OWNED
+   * (the BFF voices the honesty-gated clauses it produced; the client sends no text — only names WHICH bucket via a
+   * validated enum path segment). `bucket` omitted → the `what` narration (back-compat with the pre-redesign route).
+   * Returns a playable `data:audio/mpeg` URL, or `null` when there's nothing to speak / speech is unconfigured
+   * (400/404/502/503) so the caller can no-op gracefully — never a thrown error on the reveal's happy path.
    */
-  async speakNarration(threadId: string): Promise<string | null> {
-    const url = `${this.baseUrl}/v1/threads/${encodeURIComponent(threadId)}/speech`
+  async speakNarration(threadId: string, bucket?: AudioBucket): Promise<string | null> {
+    const seg = bucket && bucket !== 'what' ? `/${bucket}` : ''
+    const url = `${this.baseUrl}/v1/threads/${encodeURIComponent(threadId)}/speech${seg}`
     let res: Response
     try {
       res = await this.fetchImpl(url, { method: 'POST', headers: await this.authHeaders() })

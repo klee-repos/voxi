@@ -45,8 +45,13 @@ export class Agent {
     private planner: Planner,
   ) {}
 
-  async achieve(goal: string, opts?: { maxSteps?: number }): Promise<void> {
+  async achieve(goal: string, opts?: { maxSteps?: number; settleMs?: number }): Promise<void> {
     const maxSteps = opts?.maxSteps ?? 12
+    // Human-like pacing between perceived actions. A real user doesn't fire taps in the same millisecond; a small
+    // settle lets the app re-render / navigation land before the agent perceives again — so a screen it just
+    // triggered (e.g. a post-verify route change, or a re-rendered client after auth) is actually on screen when
+    // the next observation runs. Default 0 keeps every existing scenario byte-for-byte unchanged.
+    const settleMs = opts?.settleMs ?? 0
     const history: PlannedAction[] = []
 
     for (let step = 0; step < maxSteps; step++) {
@@ -66,6 +71,7 @@ export class Agent {
       if (action.kind === 'tap') await this.driver.tap(action.id)
       else if (action.kind === 'type') await this.driver.type(action.id, action.text ?? '')
       history.push(action)
+      if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs))
     }
 
     throw new Error(`agent did not reach goal "${goal}" within ${maxSteps} steps`)

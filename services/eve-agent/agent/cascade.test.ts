@@ -8,12 +8,15 @@
  * half; the live half (real Gemini + Cloud Vision through the same generator) is proven by spikes/live-bff-scan.ts.
  */
 import { test, expect, describe } from 'bun:test'
-import { runIdentificationCascade, buildResearchInput, type CascadeDeps } from './cascade'
+import { runIdentificationCascade, buildResearchInput, buildDossierInput, isDistinctiveBrand, type CascadeDeps } from './cascade'
 import type { VisionProvider, VisionStages, ImageRef, IdentifyResult } from './tools/identify_object'
 import type { SafetyClassifier, SafetyClassification } from './tools/safety_gate'
 import type { Candidate } from '../../../packages/shared/src/arbitration'
 import type { Researcher, ResearchInput } from './providers/live-research'
-import type { NarrationInput } from './providers/live-narrator'
+import type { NarrationInput, NarrationClause, NarrativeBucket } from './providers/live-narrator'
+
+/** Test helper: a gate-approved narration clause with a bucket tag (defaults to the identity bucket). */
+const clause = (text: string, bucket: NarrativeBucket = 'what_is_it'): NarrationClause => ({ text, claimType: 'flavor', bucket })
 import type { DossierProvider, ResearchEvent } from './providers/live-dossier'
 import type { DossierInput } from './subagents/researcher'
 import type { ResearchDossier, DossierFact } from '../../../packages/shared/src/dossier'
@@ -56,10 +59,14 @@ async function drain(deps: CascadeDeps, sessionId = 'sess_test'): Promise<Stream
   return out
 }
 
-/** A fake narrator that records whether it was called and returns fixed, already-"approved" clauses. */
+/** A fake narrator that records whether it was called and returns fixed, already-"approved" clauses. Strings are
+ *  normalized to identity (`what_is_it`) clauses; pass `NarrationClause` objects to exercise purpose/maker sections. */
 class FakeNarrator {
   called = false
-  constructor(private clauses: string[]) {}
+  private clauses: NarrationClause[]
+  constructor(clauses: Array<string | NarrationClause>) {
+    this.clauses = clauses.map((c) => (typeof c === 'string' ? clause(c) : c))
+  }
   async narrate() {
     this.called = true
     return { clauses: this.clauses, dropped: 0 }
@@ -132,7 +139,9 @@ describe('cascade — persona narration streams as token events AFTER the reveal
     const narrator = new FakeNarrator(['A 2008 Cannondale SuperSix EVO.', 'A featherweight climbing frame, and it knows it.'])
     const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
     expect(narrator.called).toBe(true)
-    expect(types(evs)).toEqual(['tool_start', 'tool_result', 'tool_start', 'tool_result', 'confidence_band', 'token', 'token', 'done'])
+    // what-only clauses stream as `token`s; the ungrounded purpose/maker buckets emit empty-marker `section`s
+    // (so their icons resolve to an honest `empty`, never a perpetual spinner) — then the deferred `done`.
+    expect(types(evs)).toEqual(['tool_start', 'tool_result', 'tool_start', 'tool_result', 'confidence_band', 'token', 'token', 'section', 'section', 'done'])
     const tokens = evs.filter((e) => e.type === 'token') as Extract<StreamEvent, { type: 'token' }>[]
     expect(tokens.map((t) => t.text)).toEqual(['A 2008 Cannondale SuperSix EVO.', 'A featherweight climbing frame, and it knows it.'])
     // narration comes strictly AFTER the reveal band
@@ -170,7 +179,7 @@ class RecordingNarrator {
   lastInput: NarrationInput | null = null
   async narrate(input: NarrationInput) {
     this.lastInput = input
-    return { clauses: ['A grounded reveal.'], dropped: 0 }
+    return { clauses: [clause('A grounded reveal.')], dropped: 0 }
   }
 }
 
@@ -318,6 +327,132 @@ describe('cascade — async deep research streams verified facts + a description
     const dossier = new FakeDossier([FACT], DOSSIER)
     await drain({ vision: new FakeVision({ vlm: { name: 'a gadget', make: 'Acme', source: 'vlm', confidence: 0.3 } }), safety: SAFE, narrator: new RecordingNarrator(), dossier })
     expect(dossier.called).toBe(false)
+  })
+})
+
+describe('cascade — normalized research buckets stream as `section` events (ANALYSIS-UX)', () => {
+  const catalog: Candidate = { name: '2008 Cannondale SuperSix EVO', make: 'Cannondale', model: 'SuperSix EVO', year: 2008, source: 'catalog', confidence: 0.95, cosine: 0.96 }
+  const vlm: Candidate = { name: 'Cannondale road bike', make: 'Cannondale', model: 'SuperSix EVO', source: 'vlm', confidence: 0.8 }
+  const sections = (evs: StreamEvent[]) => evs.filter((e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section')
+
+  test('first-pass purpose/maker clauses stream as SECTION events; only what_is_it stays in tokens; all before done', async () => {
+    const narrator = new FakeNarrator([clause('A carbon road bike.', 'what_is_it'), clause('Built for road racing.', 'purpose'), clause('Made by Cannondale.', 'maker')])
+    const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
+    const secs = sections(evs)
+    expect(secs.find((s) => s.bucket === 'purpose')?.text).toBe('Built for road racing.')
+    expect(secs.find((s) => s.bucket === 'maker')?.text).toBe('Made by Cannondale.')
+    const tokenText = evs.filter((e): e is Extract<StreamEvent, { type: 'token' }> => e.type === 'token').map((e) => e.text).join(' ')
+    expect(tokenText).toContain('A carbon road bike.')
+    expect(tokenText).not.toContain('Built for road racing.') // purpose/maker are NOT in the what tokens (no audio overlap)
+    const doneIdx = evs.findIndex((e) => e.type === 'done')
+    expect(secs.every((s) => s.index < doneIdx)).toBe(true)
+    expect(evs.map((e) => e.index)).toEqual(evs.map((_, i) => i)) // monotonic across phases
+  })
+
+  test('a bucket the narrator never grounds gets an EMPTY-marker section (honest empty, never perpetual loading)', async () => {
+    const narrator = new FakeNarrator([clause('A carbon road bike.', 'what_is_it')]) // no purpose/maker clause
+    const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
+    const secs = sections(evs)
+    expect(secs.find((s) => s.bucket === 'purpose')).toMatchObject({ text: '' })
+    expect(secs.find((s) => s.bucket === 'maker')).toMatchObject({ text: '' })
+  })
+
+  test('UNKNOWN → NO section events at all (the interview handles it, and legacy revisits stay distinguishable)', async () => {
+    const narrator = new FakeNarrator([clause('x')])
+    const evs = await drain({ vision: new FakeVision({ vlm: { name: 'a gadget', make: 'Acme', source: 'vlm', confidence: 0.3 } }), safety: SAFE, narrator })
+    expect(sections(evs).length).toBe(0)
+  })
+})
+
+describe('brand lane — a DISTINCTIVE observed brand routes item-rigor entity research; homonyms fall back (§13.2/§13.3)', () => {
+  const mk = (over: Partial<IdentifyResult>): IdentifyResult => ({
+    label: 'x', granularity_level: 'category', confidence_band: 'PROBABLE', evidence: [], unsupported_fields: [], route: 'confirm', candidates: [], reason: '', ...over,
+  })
+
+  test('isDistinctiveBrand: multi-token or uncommon-single-word yes; common dictionary word no', () => {
+    expect(isDistinctiveBrand('Sub Pop')).toBe(true)
+    expect(isDistinctiveBrand('Nintendo')).toBe(true)
+    expect(isDistinctiveBrand('Dove')).toBe(false) // homonym (soap vs chocolate) → not disambiguable
+    expect(isDistinctiveBrand('Apple')).toBe(false)
+    expect(isDistinctiveBrand(undefined)).toBe(false)
+  })
+
+  test('PROBABLE + distinctive observed brand → item scope on [brand], brandLane, no disallowed', () => {
+    const di = buildDossierInput(mk({ observedBrand: 'Sub Pop', category: 'mug' }))
+    expect(di).toEqual({ subject: 'Sub Pop', scope: 'item', subjectTerms: ['Sub Pop'], brandLane: true, objectType: 'mug' })
+  })
+
+  test('PROBABLE + a COMMON-word brand → class-scope suppression (honest-empty maker), NOT the brand lane', () => {
+    const di = buildDossierInput(mk({ observedBrand: 'Dove', category: 'soap', candidates: [{ name: 'Dove', make: 'Dove', source: 'vlm', confidence: 0.6 }] }))
+    expect(di?.scope).toBe('class')
+    expect(di?.brandLane).toBeUndefined()
+    expect(di?.subject).toBe('soap')
+  })
+
+  test('PROBABLE + no observed brand → today’s class-scope path (unchanged)', () => {
+    const di = buildDossierInput(mk({ category: 'watch', candidates: [{ name: 'A', make: 'A', model: 'B', source: 'vlm', confidence: 0.6 }] }))
+    expect(di?.scope).toBe('class')
+    expect(di?.subjectTerms).toEqual(['watch'])
+  })
+
+  test('CONFIDENT-but-GENERIC web label ("coffee cup", no make) + a distinctive observed brand → BRAND LANE, not class (the East-Street-mug bug)', () => {
+    const di = buildDossierInput(mk({ confidence_band: 'CONFIDENT', label: 'coffee cup', observedBrand: 'East Street Records', category: 'mug', candidates: [{ name: 'coffee cup', source: 'web', confidence: 0.85 }] }))
+    expect(di).toEqual({ subject: 'East Street Records', scope: 'item', subjectTerms: ['East Street Records'], brandLane: true, objectType: 'mug' })
+  })
+
+  test('CONFIDENT with a real MAKE → researches THAT specific item, NOT the brand lane (Canon AE-1 stays specific)', () => {
+    const di = buildDossierInput(mk({ confidence_band: 'CONFIDENT', label: 'Canon AE-1', displayTitle: 'Canon AE-1', observedBrand: 'Canon', candidates: [{ name: 'Canon AE-1', make: 'Canon', model: 'AE-1', source: 'vlm', confidence: 0.9 }] }))
+    expect(di?.scope).toBe('item')
+    expect(di?.brandLane).toBeUndefined()
+    expect(di?.subjectTerms).toEqual(['Canon', 'AE-1'])
+  })
+})
+
+describe('cascade — observed brand threads to the narrator; empty name falls back to displayTitle; no dead voxi: link', () => {
+  // A model-less branded object (a Sub Pop mug): make read, no model → PROBABLE. Its brand is a grounded OBSERVATION.
+  const obsEv = { ref: 'obs1', sourceUrl: 'voxi:observed', claim: 'Sub Pop' }
+  const brandedVlm: Candidate = { name: '', make: undefined, model: undefined, source: 'vlm', confidence: 0.65, category: 'mug', displayTitle: 'Sub Pop Mug', observedBrand: 'Sub Pop' }
+
+  test('the observed evidence + the SPECIFIC subject reach the narrator, and the empty name falls back (D-2)', async () => {
+    const narrator = new RecordingNarrator()
+    const evs = await drain({ vision: new FakeVision({ vlm: brandedVlm, evidence: [obsEv] }), safety: SAFE, narrator })
+    expect(band(evs)!.band).toBe('PROBABLE')
+    expect(narrator.lastInput?.label).toBe('Sub Pop Mug') // empty `name` → displayTitle (not '')
+    expect(narrator.lastInput?.subject).toBe('Sub Pop Mug') // narrate about the specific identity
+    expect(narrator.lastInput?.evidence.some((e) => e.ref === 'obs1' && e.sourceUrl === 'voxi:observed')).toBe(true)
+  })
+
+  test('a section citing ONLY an observed ref carries NO source URL (never a dead voxi: link, §13.4)', async () => {
+    const narrator = new FakeNarrator([{ text: 'Merch from Sub Pop.', claimType: 'observation', bucket: 'maker', evidenceRef: 'obs1' } as NarrationClause])
+    const evs = await drain({ vision: new FakeVision({ vlm: brandedVlm, evidence: [obsEv] }), safety: SAFE, narrator })
+    const secs = evs.filter((e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section')
+    const maker = secs.find((s) => s.bucket === 'maker')
+    expect(maker?.text).toBe('Merch from Sub Pop.')
+    expect(maker?.sourceUrl).toBe('') // voxi:observed suppressed → no dead link
+    // NOTHING streamed to the client ever carries a voxi: source URL (id OR observed)
+    for (const e of evs) if (e.type === 'section' || e.type === 'fact') expect(e.sourceUrl.startsWith('voxi:')).toBe(false)
+  })
+
+  test('the observed brand survives even when the WEB stage WINS arbitration (brand is read off the OBJECT, not the winner)', async () => {
+    // The East-Street-mug bug: a generic web label ("coffee cup", conf 0.85) wins CONFIDENT, but the mug bears a brand
+    // the VLM read. observedBrand + obs evidence must still flow → the dossier runs the BRAND LANE, not generic class.
+    const vlm: Candidate = { name: 'Ceramic Mug', make: 'East Street Records', source: 'vlm', confidence: 0.2, category: 'mug', displayTitle: 'East Street Records Mug', observedBrand: 'East Street Records' }
+    const web: Candidate = { name: 'coffee cup', source: 'web', confidence: 0.85, aka: ['coffee cup', 'mug'] }
+    const dossier = new FakeDossier([], null)
+    const evs = await drain({ vision: new FakeVision({ vlm, web, evidence: [obsEv] }), safety: SAFE, narrator: new RecordingNarrator(), dossier })
+    expect(band(evs)!.band).toBe('CONFIDENT') // the web winner
+    expect(dossier.lastInput?.brandLane).toBe(true) // …but research keyed on the OBSERVED brand, not "coffee cup"
+    expect(dossier.lastInput?.subject).toBe('East Street Records')
+  })
+
+  test('NEGATIVE CONTROL: an anonymous object emits NO observed evidence, and an ungrounded maker never appears (§13.6)', async () => {
+    const anon: Candidate = { name: 'Ceramic Mug', source: 'vlm', confidence: 0.6, category: 'mug', displayTitle: 'Ceramic Mug' }
+    const narrator = new RecordingNarrator()
+    const evs = await drain({ vision: new FakeVision({ vlm: anon }), safety: SAFE, narrator })
+    // no brand read off it → no citable observed evidence reaches the narrator (nothing to over-claim a maker from)
+    expect((narrator.lastInput?.evidence ?? []).some((e) => e.sourceUrl.startsWith('voxi:observed'))).toBe(false)
+    const secs = evs.filter((e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section')
+    expect(secs.find((s) => s.bucket === 'maker')?.text).toBe('') // maker honest-empty, never fabricated
   })
 })
 

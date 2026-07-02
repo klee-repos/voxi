@@ -13,10 +13,13 @@
 import type { VisionProvider, VisionStages, ImageRef, IdEvidence, IdentifyResult } from '../tools/identify_object'
 import type { Candidate } from '../../../../packages/shared/src/arbitration'
 import { loadImageBytes, geminiIdentify, visionWebDetect, type WebDetect } from '../lib/gcp-vision'
+import { OBSERVED_SOURCE_PREFIX } from '../../../../packages/shared/src/confidence'
 import type { EmbeddingProvider } from '../lib/embedding'
 import type { Catalog } from '../../../../packages/db/catalog'
 
 const norm = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+/** Alphanumeric-only fold so "SUB POP" ≡ "Sub Pop" ≡ "SubPop" match as substrings (brand corroboration). */
+const foldAlnum = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
 
 /** Filler / non-answer words a clean human title must never carry (the VLM sometimes prefixes a hedge). */
 const TITLE_FILLER =
@@ -36,6 +39,44 @@ export function cleanDisplayTitle(s?: string): string | undefined {
     .replace(/^[\s,–—-]+|[\s,–—-]+$/g, '')
     .trim()
   return cleaned.length >= 2 ? cleaned : undefined
+}
+
+/**
+ * Clean an identity FIELD (make/model): return undefined ONLY when the value WHOLLY reduces to a non-answer
+ * ("unbranded"/"unspecified"/"N/A"), otherwise return the ORIGINAL unchanged (§13.3, adversarial #9). Unlike
+ * cleanDisplayTitle this must NEVER strip a filler token EMBEDDED in a real name — "Unknown Mortal Orchestra",
+ * "No Name" (the grocery brand), "Various Artists" are real identities, not hedges. Fixes D-6 (filler leaking into
+ * make/model → label/subject/catalog-id) without mangling brand-primary names.
+ */
+export function cleanField(s?: string): string | undefined {
+  if (!s) return undefined
+  const stripped = s.replace(TITLE_FILLER, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s,–—-]+|[\s,–—-]+$/g, '').trim()
+  return stripped.length > 0 ? s.trim() : undefined // anything real survives → keep original; wholly-filler → absent
+}
+
+/** Sensitive / non-brand strings that must NEVER become citable observed evidence (PII/junk — §13.3, adversarial
+ *  #8): emails, digit runs (phone/card/ID/DOB/serial), and punctuation/mark-only spans (©/®/™). */
+function looksSensitiveOrJunk(s: string): boolean {
+  const t = (s ?? '').trim()
+  if (t.length < 2) return true
+  if (/@/.test(t)) return true
+  if (/\d{3,}/.test(t)) return true
+  if (!/[a-z0-9]/i.test(t)) return true
+  return false
+}
+
+/**
+ * The distilled OBSERVED BRAND (§13.3, adversarial #8/#17/#19/#22). Derived from the CLEAN structured `make` — NOT
+ * reconstructed from a raw OCR array (the real Sub Pop capture is ['S','U','B','P','O','P'], whose naive join is
+ * garbage). It becomes observed evidence ONLY when (a) it survives the PII/junk guard and (b) it is corroborated in
+ * what was actually READ/seen on the CHOSEN object (`readOff` = its OCR + distinguishing-features + display title),
+ * which binds it to the primary object so a background logo never becomes "observed". `distinguishing_features` are
+ * used only for corroboration here, never emitted as citable evidence (they carry VLM inference, not a literal read).
+ */
+export function observedBrandFrom(make: string | undefined, readOff: string): string | undefined {
+  const brand = cleanField(make)
+  if (!brand || looksSensitiveOrJunk(brand)) return undefined
+  return foldAlnum(readOff).includes(foldAlnum(brand)) ? brand : undefined
 }
 
 /**
@@ -120,19 +161,34 @@ export class LiveVisionProvider implements VisionProvider {
     const { b64, mime } = image.bytes ?? (await loadImageBytes(image.uri))
     const [vlm, web] = await Promise.all([geminiIdentify(b64, mime), visionWebDetect(b64)])
 
+    // Strip non-answer filler from the identity fields (D-6) so "unbranded"/"unspecified"/"N/A" never pollute the
+    // name/label/subject/catalog-id — but only when the field is WHOLLY filler (cleanField keeps real names).
+    const make = cleanField(vlm.make)
+    const model = cleanField(vlm.model)
+    const year = cleanField(vlm.year_or_range)
+    // The brand READ off the object (distilled from the clean make, corroborated by the on-object text) — a grounded
+    // observation that unblocks the brand-primary class without asserting an unconfirmed make/model (§13.1/§13.3).
+    const readOff = [...(vlm.ocr_text ?? []), ...(vlm.distinguishing_features ?? []), vlm.display_title].filter(Boolean).join(' ')
+    const observedBrand = observedBrandFrom(vlm.make, readOff)
+
     const vlmCandidate: Candidate = {
-      name: [vlm.year_or_range, vlm.make, vlm.model].filter(Boolean).join(' ').trim(),
-      make: vlm.make || undefined,
-      model: vlm.model || undefined,
+      name: [year, make, model].filter(Boolean).join(' ').trim(),
+      make,
+      model,
       year: parseYear(vlm.year_or_range),
       source: 'vlm',
       confidence: vlm.fine_confidence ?? 0.5,
       category: vlm.category || undefined, // coarse class label — feeds PROBABLE class-level reveal enrichment
       displayTitle: cleanDisplayTitle(vlm.display_title), // clean human title (filler stripped) — display only
+      observedBrand, // a read-off-the-object brand → routes brand research + citable as an `observation`
     }
 
     const stages: VisionStages = { vlm: vlmCandidate }
     const evidence: IdEvidence[] = []
+    // The observed brand becomes ONE closed evidence row the narrator may cite as an `observation` — its claim is the
+    // clean brand string, its "source" the observed sentinel (never a URL; the honesty gate lets it ground ONLY a
+    // restatement of the mark, never a provenance/date claim). Exactly one row, PII-scrubbed (§13.1/§13.3).
+    if (observedBrand) evidence.push({ ref: 'obs1', sourceUrl: OBSERVED_SOURCE_PREFIX, claim: observedBrand })
 
     // Remember the structured VLM identity for this image so the post-ID upsert can key on make/model (only
     // relevant when a catalog is wired; harmless otherwise).

@@ -4,8 +4,44 @@
  * RANGE, and web verified_confidence reflects bestGuess↔entity AGREEMENT, not a raw unbounded relevance score.
  */
 import { test, expect, describe } from 'bun:test'
-import { parseYear, webConfidence, cleanDisplayTitle } from './live-vision'
+import { parseYear, webConfidence, cleanDisplayTitle, cleanField, observedBrandFrom } from './live-vision'
 import type { WebDetect } from '../lib/gcp-vision'
+
+describe('cleanField — nulls a WHOLLY-filler identity field, never mangles a real name (D-6 / §13.3)', () => {
+  test('a value that IS the non-answer becomes undefined (so it never pollutes label/subject/catalog-id)', () => {
+    expect(cleanField('unbranded')).toBeUndefined()
+    expect(cleanField('unspecified')).toBeUndefined()
+    expect(cleanField('N/A')).toBeUndefined()
+    expect(cleanField('')).toBeUndefined()
+    expect(cleanField(undefined)).toBeUndefined()
+  })
+  test('a REAL brand containing a filler token survives UNCHANGED (adversarial #9 — the over-strip bug)', () => {
+    expect(cleanField('Unknown Mortal Orchestra')).toBe('Unknown Mortal Orchestra')
+    expect(cleanField('Various Artists')).toBe('Various Artists')
+    expect(cleanField('Sub Pop')).toBe('Sub Pop')
+    expect(cleanField('Canon')).toBe('Canon')
+  })
+})
+
+describe('observedBrandFrom — a clean, corroborated, PII-safe brand read off the CHOSEN object (§13.3)', () => {
+  test('derives the brand from the clean make when it is actually read off the object', () => {
+    // the real Sub Pop capture: OCR is single letters, but distinguishing_features + display carry the contiguous mark
+    expect(observedBrandFrom('Sub Pop', "S U B P O P Stylized text 'SUB POP' Sub Pop Logo")).toBe('Sub Pop')
+    expect(observedBrandFrom('Canon', 'Canon EOS printed on the body')).toBe('Canon')
+  })
+  test('NOT corroborated on the object → no observed brand (binds to the primary object, not a background logo)', () => {
+    expect(observedBrandFrom('Sub Pop', 'a plain white ceramic mug with tea')).toBeUndefined()
+  })
+  test('a wholly-filler make yields no observed brand', () => {
+    expect(observedBrandFrom('unbranded', 'a plain mug')).toBeUndefined()
+    expect(observedBrandFrom(undefined, 'anything')).toBeUndefined()
+  })
+  test('a PII/junk span never becomes citable observed evidence (adversarial #8)', () => {
+    expect(observedBrandFrom('555 1234', '555 1234 printed here')).toBeUndefined() // digit run
+    expect(observedBrandFrom('a@b.com', 'a@b.com on the label')).toBeUndefined() // email
+    expect(observedBrandFrom('®', '®')).toBeUndefined() // mark only
+  })
+})
 
 describe('cleanDisplayTitle — strips filler / non-answer words from the reveal title', () => {
   test('a hedge prefix is removed, the real object survives', () => {

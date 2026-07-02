@@ -49,6 +49,24 @@ function scanOf(photoUrl: string): Scan {
     : 'probable'
 }
 
+/**
+ * Pull a `?scan=<object>` out of the request's Referer. The REAL camera screen (converge full-app entry) has no
+ * camera on web, so it POSTs a signed-URL photoUrl carrying NO `obj:` marker — every such capture would default
+ * to PROBABLE. To let an agentic test steer the band/refusal through a genuine shutter tap, the harness reads the
+ * seeded object off the page URL (which fetches carry as their Referer) and rewrites the photoUrl below. Returns
+ * null when the Referer has no valid scan, so the mock-shell + data-URI paths are entirely unaffected.
+ */
+function scanFromReferer(referer: string | null): Scan | null {
+  if (!referer) return null
+  let v: string | null = null
+  try {
+    v = new URL(referer).searchParams.get('scan')
+  } catch {
+    return null
+  }
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** The seeded eve NDJSON stream. Real event shapes (events.ts taxonomy); deterministic per object. */
@@ -83,8 +101,11 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
     yield JSON.stringify({ type: 'fact', index: 2, text: "The SuperSix EVO is Cannondale's flagship lightweight road racing frame.", sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
     yield JSON.stringify({ type: 'fact', index: 3, text: 'Its frame is built from carbon fibre.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the frame is built from carbon fibre' })
     yield JSON.stringify({ type: 'fact', index: 4, text: 'The EVO marks the evolution of the SuperSix platform, introduced in 2011.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the EVO evolution of the SuperSix was introduced in 2011' })
-    yield JSON.stringify({ type: 'description_upgrade', index: 5, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer, built light for the climbs and named for its evolution of the SuperSix platform." })
-    yield JSON.stringify({ type: 'done', index: 6, sessionId })
+    // Normalized research buckets — each SPECIFIC to THIS exact model (never the generic "what a bicycle is").
+    yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame — stiff enough to sprint on, tuned to smooth rough tarmac.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm that made its name on oversized aluminium frames before going all-in on this carbon platform.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the SuperSix EVO is Cannondale’s flagship' })
+    yield JSON.stringify({ type: 'description_upgrade', index: 7, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer, built light for the climbs and named for its evolution of the SuperSix platform." })
+    yield JSON.stringify({ type: 'done', index: 8, sessionId })
     return
   }
   if (scan === 'unknown') {
@@ -101,7 +122,11 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
   yield JSON.stringify({ type: 'fact', index: 2, text: 'A racing bicycle prioritises low weight and aerodynamic efficiency.', sourceUrl: csrc, sourceTitle: 'Racing bicycle', quote: 'a racing bicycle prioritises low weight and aerodynamic efficiency' })
   yield JSON.stringify({ type: 'fact', index: 3, text: 'Modern racing frames are commonly made from carbon fibre composite.', sourceUrl: csrc, sourceTitle: 'Racing bicycle', quote: 'modern racing frames are commonly made from carbon fibre composite' })
   yield JSON.stringify({ type: 'fact', index: 4, text: 'The UCI sets a minimum weight limit for road racing bicycles.', sourceUrl: csrc, sourceTitle: 'Racing bicycle', quote: 'the UCI sets a minimum weight limit for road racing bicycles' })
-  yield JSON.stringify({ type: 'done', index: 5, sessionId })
+  // Class-scope buckets: a grounded "what it's for" (the KIND of object), but `maker` is an EMPTY-marker — at
+  // PROBABLE/class scope Voxi will not name a manufacturer, so that icon shows an honest `empty`, never a guess.
+  yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'A racing bicycle is built for speed — low weight and aerodynamic efficiency.', sourceUrl: csrc, sourceTitle: 'Racing bicycle', quote: 'a racing bicycle prioritises low weight and aerodynamic efficiency' })
+  yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: '', sourceUrl: '', sourceTitle: '', quote: '' })
+  yield JSON.stringify({ type: 'done', index: 7, sessionId })
 }
 
 // ---------------------------------------------------------------------------
@@ -709,22 +734,26 @@ export function createWebHarness(
         }
         // Recover the seeded object from the sessionId so the stream is deterministic + replayable.
         const scan = (/_([a-z]+)_[a-z0-9]+$/.exec(sessionId)?.[1] as Scan) ?? 'probable'
-        // Capture the narration server-side (same idempotent NarrationStore the prod client uses) so the spoken
-        // reveal voices exactly what the app rendered as whatItIs (ANALYSIS-VOICE-PLAN A11/B1).
+        // Capture the per-BUCKET narration server-side (same idempotent NarrationStore the prod client uses), tapped
+        // off the stream as it passes, so /speech/:bucket voices exactly what each reveal bucket showed (ANALYSIS-UX).
         const captured: string[] = []
+        const factTexts: string[] = []
         for await (const line of eveStreamFor(scan, sessionId)) {
           try {
-            const ev = JSON.parse(line) as { type?: string; text?: string }
+            const ev = JSON.parse(line) as { type?: string; text?: string; bucket?: string }
             if (ev.type === 'token' && typeof ev.text === 'string') captured.push(ev.text)
+            if (ev.type === 'section' && ev.text && (ev.bucket === 'purpose' || ev.bucket === 'maker')) narrations.capture(sessionId, ev.bucket, ev.text)
+            if (ev.type === 'fact' && typeof ev.text === 'string') factTexts.push(ev.text)
+            if (ev.type === 'done' && factTexts.length) narrations.capture(sessionId, 'facts', factTexts.join(' '))
           } catch {
             /* non-JSON line — pass through */
           }
           yield line
         }
-        narrations.capture(sessionId, captured)
+        narrations.capture(sessionId, 'what', captured.join(' '))
       },
-      async narrationText(sessionId, userId) {
-        return narrations.get(sessionId, userId)
+      async narrationText(sessionId, userId, bucket) {
+        return narrations.get(sessionId, userId, bucket ?? 'what')
       },
     },
     deletion: {
@@ -768,7 +797,29 @@ export function createWebHarness(
       const url = new URL(req.url)
       if (url.pathname === '/') return new Response(HTML, { headers: { 'content-type': 'text/html' } })
       if (url.pathname.startsWith('/api/')) {
-        const stripped = new Request(url.origin + url.pathname.slice('/api'.length) + url.search, req)
+        let forward = req
+        // Band-steering for the REAL camera: a shutter tap POSTs a signed-URL photoUrl (no `obj:` marker); if the
+        // page was opened with `?scan=<object>` (carried on the Referer), seed that object so a genuine capture can
+        // reach any band/refusal. Untouched for the mock shell + data-URI captures (they already carry `obj:`/bytes).
+        if (url.pathname === '/api/v1/threads' && req.method === 'POST' && (req.headers.get('content-type') ?? '').includes('application/json')) {
+          const scan = scanFromReferer(req.headers.get('referer'))
+          if (scan) {
+            const raw = await req.text()
+            let body: { photoUrl?: unknown } | null = null
+            try {
+              body = JSON.parse(raw) as { photoUrl?: unknown }
+            } catch {
+              body = null
+            }
+            if (body && typeof body.photoUrl === 'string' && !/obj:/.test(body.photoUrl)) {
+              body.photoUrl = `obj:${scan}`
+              forward = new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) })
+            } else {
+              forward = new Request(req.url, { method: 'POST', headers: req.headers, body: raw })
+            }
+          }
+        }
+        const stripped = new Request(url.origin + url.pathname.slice('/api'.length) + url.search, forward)
         const res = await app.fetch(stripped)
         // Mirror a successful podcast gate into the status service so the next poll can transition.
         if (url.pathname === '/api/v1/podcast' && res.status === 200) {

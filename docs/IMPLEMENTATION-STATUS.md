@@ -45,10 +45,10 @@ restart-403 that would have broken the whole feature).
   unreachable, message idempotency, UNKNOWN-never-persisted, refund-once-across-restart). Selector lint +
   testid-coverage GREEN. **20/20 web E2E + converge runners GREEN**, incl. the new **`collection-persistence-rnw`**
   (a real capture over the real BFF → the real collection shows a thumbnail `<img>` the browser **decodes**
-  (`naturalWidth>0`) + the identified label, **survives a full page reload**, and revisits), **`run-agent-collection`**
-  (an autonomous Agent perceives its way through sign-in → capture → collection; the durable content is pinned
-  deterministically), and **`run-sc-durable-revisit`** (a real `evict()` restart → the owner replays the reveal,
-  a non-owner is 404'd). voice-bot pytest GREEN.
+  (`naturalWidth>0`) + the identified label, **survives a full page reload**, and revisits), **`agentic-collection`**
+  (an autonomous Agent perceives its way through the REAL sign-in → real shutter capture → revisit from the real
+  collection; the durable content is pinned deterministically), and **`run-sc-durable-revisit`** (a real `evict()`
+  restart → the owner replays the reveal, a non-owner is 404'd). voice-bot pytest GREEN.
 
 ## Reveal narration overhaul + spoken British voice — DONE + VERIFIED (2026-07-01)
 The post-capture analysis is now **specific + valuable + grounded**, and the reveal **speaks itself** in Voxi's
@@ -123,10 +123,12 @@ True, reproduced results this round (every line below was actually executed, not
   **appstore 10** (direct StoreKit 2 entitlement verification — the RevenueCat replacement);
   `services/voxi-podcast-worker` render 10 (honesty + defamation
   gate, idempotency, fail-closed); `e2e/framework` agent 4. No `.skip/.only/.todo` anywhere.
-- **Web E2E — 11 runners, all GREEN** (real Chromium → real DOM testIDs → real `voxi-api` `createApp` BFF):
-  `run-auth` (auth-01, id-03, sub-01) · `run-agent-pw` (agentic over PlaywrightDriver) ·
+- **Web E2E — all runners GREEN** (real Chromium → real DOM testIDs → real `voxi-api` `createApp` BFF):
+  `run-auth` (auth-01, id-03, sub-01) ·
   `run-coverage` (settings/`/me`, signOut, deleteAccount cascade, offline banner) ·
-  `run-explore-mcp` (14/14 agentic over the agent-browser daemon — CLI present here, NOT skipped) ·
+  the **agentic suite over the REAL screens** (`bun run e2e:web:agentic` — `agentic-auth`/`agentic-collection`/
+  `reveal-agentic`/`agentic-sweep`, plus `agentic-explore-ab` running the same planners over the agent-browser
+  backend as a `Driver`; the mock-shell `run-agent-pw`/`run-agent-collection`/`run-explore-mcp` were retired) ·
   `run-sc-auth-extra` (17 checks: auth-02 persisted session, auth-03 protected-route redirect + 401, proc-05 real network-drop reconnect via `?startIndex=`, owner-scoped) ·
   `run-sc-conversation` (conv-02/06 durable thread + owner-scoped replay) ·
   `run-sc-kb` (kb-03 TL-gate differential, kb-04 auto-hide) · `run-sc-podcast` (pod-01/03/04, cached replay no double-decrement) ·
@@ -258,7 +260,7 @@ to force green or a hardcoded-state assertion in place of real UI/BFF/DB state.
 | Repo + monorepo scaffold | ✅ real | dirs, README, root workspace |
 | `docs/PLAN.md`, `design-notes.md`, `TEST-PLAN.md` | ✅ real | plan v2.1; full test matrix |
 | E2E framework (`e2e/`) | ✅ **real + runs green here** | testid registry, Driver/Scenario model, **PlaywrightDriver (deterministic web)**, **Agent planner (agentic)**, vendor record/replay, selector lint, Maestro flow. Two end-to-end runs GREEN in this sandbox against the real BFF (below). |
-| agent-browser (agentic web backend) | ✅ **real + runs green here** | v0.31.1; `AgentBrowser` driver rewritten to drive the daemon in-process, and `e2e/web/run-explore-mcp.web.ts` (explore-01 agentic sweep: perceive→navigate→deterministic testid assertions over the real BFF) runs **14/14 GREEN, ~4.6s, no hang**. Root cause of the old hang isolated + fixed: agent-browser's detached daemon **inherits the spawning process's open fds**, so an in-process `Bun.serve` *listening socket* was inherited and held open, blocking the launch handshake (redirecting stdout didn't help — the socket, not stdout, was the held fd). Fix: run the harness in its **own process** (`e2e/web/explore-harness-server.ts`) so the agent-browser-driving process holds no listening socket; pre-start the daemon once via `open`; issue each command with a hard per-command timeout (fail-closed, never hang); use `--json` mode for exact reads. If the CLI/Chrome is unavailable the runner **SKIPS cleanly (exit 0)**. The `Agent` planner over PlaywrightDriver (`run-agent-pw.web.ts`) remains the CI-portable agentic path. |
+| agent-browser (agentic web backend) | ✅ **real + runs green here** | v0.31.1. Now wrapped as a `Driver` (`e2e/framework/drivers/agent-browser-driver.ts`) so the SAME `Agent`+`Planner` that drive the Playwright agentic runners drive it too, against the **REAL screens** — `e2e/web/converge/agentic-explore-ab.web.ts` signs in + captures a PROBABLE reveal by perception, GREEN. The app bundle is served from a **separate process** (`e2e/web/converge/app-harness-server.ts`) because agent-browser's detached daemon **inherits the spawning process's open fds**: an in-process `Bun.serve` *listening socket* would be inherited + held, blocking the launch handshake (redirecting stdout didn't help — the socket, not stdout, was the held fd). Pre-start the daemon once via `open`; hard per-command timeout (fail-closed, never hang); `--json` reads. If the CLI/Chrome is unavailable the runner **SKIPS cleanly (exit 0)**; the Playwright agentic runners remain the CI-portable path. |
 | `packages/shared` (confidence gate, arbitration) | ✅ **real + tested** | `confidence.ts` (claim-structured honesty gate + auditor + entailment), `arbitration.ts` (cascade). Zod/NDJSON event schemas next. |
 | `services/voxi-api` (BFF) | ✅ **real + tested + E2E** | `app.ts` Hono routes (auth/sign/threads/stream/podcast/interview/tips/reports/me/account), `metering.ts`, `visibility.ts`, `signing.ts`, `intake-pipeline.ts`. Driven by the real web E2E AND 27 unit/integration tests. `testVerifier` fail-closes unless `VOXI_TEST_MODE=1`; real `clerkVerifier` seam. |
 | `packages/db` (Postgres+pgvector migrations) | ✅ **real + tested** | `catalog.ts` runs real SQL on in-process PGlite; 4 tests + drives identify/agent tests (ACL + cosine ranking). |

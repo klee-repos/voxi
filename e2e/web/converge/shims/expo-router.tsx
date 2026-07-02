@@ -63,8 +63,24 @@ export function Redirect(): null {
 
 const norm = (h: string): string => String(h).split('?')[0] ?? String(h)
 
-/** Minimal real router for the flow harness: swaps the rendered screen on navigation. */
-export function NavHost({ routes, initial }: { routes: Record<string, React.ComponentType>; initial: string }): React.ReactElement {
+/**
+ * Minimal real router for the flow harness: swaps the rendered screen on navigation.
+ *
+ * `wrap` lets a persistent chrome component (e.g. the real DrawerHost) sit INSIDE the router context while staying
+ * mounted across navigations. This matters: under real expo-router the drawer and the screens share one global
+ * router, so a drawer row navigates. If DrawerHost were mounted OUTSIDE NavHost, its `useRouter()` would fall back
+ * to the no-op recording router and drawer rows would only record (never navigate). Wrapping here fixes that while
+ * keeping the drawer's open/closed state across screen swaps (Wrap is stable; only its child screen changes).
+ */
+export function NavHost({
+  routes,
+  initial,
+  wrap: Wrap,
+}: {
+  routes: Record<string, React.ComponentType>
+  initial: string
+  wrap?: React.ComponentType<{ children: React.ReactNode }>
+}): React.ReactElement {
   const [stack, setStack] = useState<string[]>([initial])
   const cur = stack[stack.length - 1] ?? initial
   const router = useMemo<Router>(
@@ -94,9 +110,10 @@ export function NavHost({ routes, initial }: { routes: Record<string, React.Comp
     [stack.length],
   )
   const Comp = routes[cur] ?? routes['*']
+  const body = Comp ? <Comp /> : null
   return (
     <NavCtx.Provider value={router}>
-      <PathCtx.Provider value={cur}>{Comp ? <Comp /> : null}</PathCtx.Provider>
+      <PathCtx.Provider value={cur}>{Wrap ? <Wrap>{body}</Wrap> : body}</PathCtx.Provider>
     </NavCtx.Provider>
   )
 }

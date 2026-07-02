@@ -70,12 +70,19 @@ export class FirecrawlGeminiDraft implements DossierDraftSource {
   constructor(private web: WebResearchProvider, private docChars = 9000, private maxDocs = 6) {}
 
   async draft(input: DossierInput): Promise<ProposedDossier> {
-    const docs = await this.web.search(input.subject, { limit: this.maxDocs })
+    // In the brand lane, ONE search LEADS with the brand ENTITY's identity + history (so the maker/facts ground on
+    // the label's STORY — who they are, when founded, notable works — not a merch-store listing) and names the object
+    // type only as trailing context for purpose. Leading with "merchandise"/the object type pulled the storefront and
+    // starved the maker bucket (§13.2/§13.5 — a measured before/after regression). Retriever ranking follows order.
+    const query = input.brandLane
+      ? `${input.subject} — brand or record label: history, founding, notable works and artists, and its ${input.objectType ?? 'merchandise'}`
+      : input.subject
+    const docs = await this.web.search(query, { limit: this.maxDocs })
     if (!docs.length) return { facts: [], sources: [] }
     const context = docs
       .map((d) => `SOURCE ${d.url} (${d.title}):\n${d.markdown.slice(0, this.docChars)}`)
       .join('\n\n---\n\n')
-    const system = renderPrompt('research-extract.system.md', { item: input.scope === 'item' })
+    const system = renderPrompt('research-extract.system.md', { item: input.scope === 'item', brandLane: !!input.brandLane })
     const user = `Subject: ${input.subject}.\n\nSOURCES:\n${context}`
     const out = await geminiJSON<{ facts?: ProposedFact[] }>(system, user, EXTRACT_SCHEMA, 0.2)
     const sources: FetchedSource[] = docs.map((d) => ({ url: d.url, title: d.title, text: d.markdown }))
@@ -91,7 +98,11 @@ export class GeminiGroundingDraft implements DossierDraftSource {
   constructor(private timeoutMs = 8000) {}
 
   async draft(input: DossierInput): Promise<ProposedDossier> {
-    const subject = input.scope === 'item' ? `the ${input.subject}` : `the category of object: ${input.subject}`
+    const subject = input.brandLane
+      ? `the brand "${input.subject}" — the company or label behind this ${input.objectType ?? 'object'} (who they are, what they are known for, and why they make merchandise like this)`
+      : input.scope === 'item'
+        ? `the ${input.subject}`
+        : `the category of object: ${input.subject}`
     const system = renderPrompt('research.system.md', { item: input.scope === 'item' })
     const user = renderPrompt('research.user.md', { subject })
     const { grounding } = await geminiGrounded(system, user, { timeoutMs: this.timeoutMs, temperature: 0.2 })

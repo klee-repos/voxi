@@ -29,10 +29,11 @@ export const ids = {
     permissionDeniedBanner: 'camera.permissionDeniedBanner',
     openSettings: 'camera.openSettings',
     retakeHint: 'camera.retakeHint',
-    recent: 'camera.recent', // "Recently catalogued" carousel container (inside the tray)
-    recentItem: 'camera.recentItem', // a single recent-thread card
-    recentToggle: 'camera.recentToggle', // icon button that opens the Recently-catalogued tray
-    recentClose: 'camera.recentClose', // scrim behind the Recently tray (tap to close)
+    recent: 'camera.recent', // "Recently catalogued" carousel container (inside the floating RecentCard)
+    recentItem: 'camera.recentItem', // a single recent-capture tile (shared CatalogTile, carousel variant)
+    recentItemPhoto: 'camera.recentItemPhoto', // the persisted capture thumbnail on a recent tile (parity with threads.itemPhoto)
+    recentToggle: 'camera.recentToggle', // icon button that opens the Recently-catalogued floating card
+    recentClose: 'camera.recentClose', // light tap-away scrim behind the RecentCard (tap to close)
   },
   processing: {
     screen: 'processing.screen',
@@ -64,6 +65,17 @@ export const ids = {
     facts: 'reveal.facts', // "Curious facts" container — grows as async research verifies each fact
     fact: 'reveal.fact', // one verified fact chip (multiple; appears progressively)
     factSource: 'reveal.factSource', // per-fact source-proof affordance (tap → sourceTitle + quote + link)
+    // Research-bucket DOCK (ANALYSIS-UX redesign): four green research icons + a blue conversation icon. Each
+    // research icon carries bucket.state: loading|active|empty|unavailable. Tap an active icon → it morphs into
+    // `reveal.bucketCard` (the grounded content + per-bucket audio via reveal.playNarration/narrationAudio).
+    buckets: 'reveal.buckets', // the dock row container
+    bucketWhat: 'reveal.bucketWhat', // "What it is" — active on band-settle
+    bucketPurpose: 'reveal.bucketPurpose', // "What it's for"
+    bucketWho: 'reveal.bucketWho', // "Who made it" (maker)
+    bucketFacts: 'reveal.bucketFacts', // "Curious facts" — carries a count badge
+    bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
+    bucketCardScrim: 'reveal.bucketCardScrim', // tap-to-close scrim behind the morph card
+    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation (co-locates reveal.askVoxi)
   },
   podcast: {
     player: 'podcast.player',

@@ -35,6 +35,22 @@ export const StreamEvent = z.discriminatedUnion('type', [
   }),
   // The richer, dossier-grounded description replacing the instant first-pass narration (visual; §3.C).
   z.object({ type: z.literal('description_upgrade'), index: z.number().int(), text: z.string() }),
+  // A normalized research SECTION — one grounded bucket of the reveal beyond the identity (ANALYSIS-UX §5.A). Voxi
+  // answers four fixed questions about any object; `what_is_it` rides `whatItIs`/`description_upgrade`, `facts` ride
+  // the `fact` events, and the two remaining narrative buckets — `purpose` (what it's for) and `maker` (who made it)
+  // — stream as their own `section` event carrying the grounded text + optional source proof. `bucket` is a FREE
+  // STRING (never a z.enum): a server that adds a 5th bucket must NOT crash shipped clients that know `section` but
+  // not the new value (the tolerant reader skips unknown TYPES, not unknown enum values within a known type). The
+  // enum lives only on the `/speech/:bucket` route param. Each carries its own monotonic `index` past the reveal.
+  z.object({
+    type: z.literal('section'),
+    index: z.number().int(),
+    bucket: z.string(),
+    text: z.string(),
+    sourceUrl: z.string().default(''),
+    sourceTitle: z.string().default(''),
+    quote: z.string().default(''),
+  }),
 ])
 
 export type StreamEvent = z.infer<typeof StreamEvent>
@@ -42,6 +58,7 @@ export type StreamEvent = z.infer<typeof StreamEvent>
 /** The closed set of known event `type` discriminators (the tolerant reader's allow-list). */
 export const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
   'token', 'tool_start', 'tool_result', 'confidence_band', 'partial_id', 'error', 'done', 'fact', 'description_upgrade',
+  'section',
 ])
 
 /** Parse one NDJSON line; throws on a malformed/unknown event (the client must never see an untyped event). */
@@ -65,4 +82,16 @@ export function parseEventLineTolerant(line: string): StreamEvent | null {
 /** Resume helper: given the last index the client saw, the startIndex to request on reconnect. */
 export function nextStartIndex(lastSeenIndex: number | null): number {
   return lastSeenIndex === null ? 0 : lastSeenIndex + 1
+}
+
+/**
+ * The four normalized reveal buckets that `/speech/:bucket` can voice (ANALYSIS-UX §5.C). This IS an enum — it
+ * validates a client-supplied ROUTE PARAM (reject unknown → 400), unlike the `section` event's free-string `bucket`
+ * (which must stay open for forward-compat). `what` → the what-only narration; `facts` → the joined verified facts;
+ * `purpose`/`maker` → their section texts. Text is always server-owned; the client only names which bucket.
+ */
+export const AUDIO_BUCKETS = ['what', 'purpose', 'maker', 'facts'] as const
+export type AudioBucket = (typeof AUDIO_BUCKETS)[number]
+export function isAudioBucket(x: unknown): x is AudioBucket {
+  return typeof x === 'string' && (AUDIO_BUCKETS as readonly string[]).includes(x)
 }

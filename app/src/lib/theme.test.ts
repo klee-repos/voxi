@@ -8,7 +8,7 @@
  * sub-AA exception (white on the primary green, per design.md).
  */
 import { test, expect, describe } from 'bun:test'
-import { dark, parchment, bands, speakers, onColorInk, type, radius, scrim, shadow } from './theme'
+import { dark, parchment, bands, speakers, onColorInk, type, radius, scrim, shadow, glass } from './theme'
 
 // ---- WCAG relative luminance + contrast ----
 function luminance(hex: string): number {
@@ -126,5 +126,42 @@ describe('theme tokens — decorative-only + drawer/depth tokens', () => {
     expect(scrim).toMatch(/^rgba\(/)
     expect(shadow.shadowOpacity).toBeLessThanOrEqual(0.1)
     expect(shadow.shadowOffset).toEqual({ width: 0, height: 2 })
+  })
+})
+
+// ---- Liquid Glass material (GlassFill) — the tint ALPHA is contrast-load-bearing ----
+// Composite an `rgba(r,g,b,a)` string over an opaque hex backdrop → the resulting opaque hex (source-over).
+function compositeOver(rgba: string, bgHex: string): string {
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/.exec(rgba)
+  if (!m) throw new Error(`not an rgba() string: ${rgba}`)
+  const a = Number(m[4])
+  const bg = (i: number) => parseInt(bgHex.replace('#', '').slice(i, i + 2), 16)
+  const hx = (n: number) => Math.round(n).toString(16).padStart(2, '0')
+  const mix = (fg: number, back: number) => fg * a + back * (1 - a)
+  return `#${hx(mix(Number(m[1]), bg(0)))}${hx(mix(Number(m[2]), bg(2)))}${hx(mix(Number(m[3]), bg(4)))}`
+}
+
+describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.md §10)', () => {
+  // The dock is DARK glass with LIGHT text (mist100) over the full-bleed photo. Worst case for light text = the tint
+  // composited over the BRIGHTEST backdrop (a white photo region) → lightest composite → lowest contrast. Guard that
+  // light text still clears AA there, so a future alpha drop (glass too see-through → washes toward gray) fails CI.
+  // Small muted captions are SUPPLEMENTARY (icon glyph + a11y label carry meaning); a translucent material can't keep
+  // muted text AA over the brightest photo region without going opaque (see theme.ts `glass`).
+  test('light text ≥ 4.5:1 over glass.tint / glass.tintStrong composited on white', () => {
+    expect(contrast(dark.text, compositeOver(glass.tint, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(dark.text, compositeOver(glass.tintStrong, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // A DARK, warm, translucent frost (Control-Center style): dark so light text is legible + so a photo shows through
+  // DIMMED (a LIGHT tint here is exactly the gray-wash bug); warm so it stays on-brand; translucent so it's glass.
+  test('glass.tint is a dark, warm, translucent frost', () => {
+    const m = /rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\)/.exec(glass.tint)
+    expect(m).not.toBeNull()
+    const [r, g, b, a] = [Number(m![1]), Number(m![2]), Number(m![3]), Number(m![4])]
+    expect(a).toBeGreaterThan(0.4) // opaque-enough for light-text AA over a bright photo
+    expect(a).toBeLessThan(0.92) // still translucent — the photo shows through
+    expect(r).toBeLessThan(64) // DARK (a light tint here washes the photo to gray — the reported bug)
+    expect(r).toBeGreaterThanOrEqual(g) // warm bias: red ≥ green ≥ blue
+    expect(g).toBeGreaterThanOrEqual(b)
   })
 })

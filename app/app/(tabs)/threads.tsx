@@ -12,18 +12,19 @@
  */
 import React, { useMemo } from 'react'
 import { View, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
-import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
-import { Screen, Title, Body, Muted, Button, PressableTile } from '../../src/components/ui'
+import { Screen, Title, Body, Muted, Button } from '../../src/components/ui'
 import { AppHeader } from '../../src/components/AppHeader'
 import { OfflineBanner } from '../../src/components/Banners'
+import { CatalogTile } from '../../src/components/CatalogTile'
 import { ids, tid } from '../../src/lib/testid'
-import { radius, space } from '../../src/lib/theme'
+import { space } from '../../src/lib/theme'
 import { useTheme } from '../../src/lib/themeProvider'
 import { useApi } from '../../src/lib/api'
 import { useOffline, isOfflineError } from '../../src/lib/useOffline'
-import { useCaptureStore } from '../../src/state/captureStore'
+import { useRevisitThread } from '../../src/lib/useRevisitThread'
+import { threadsKey } from '../../src/lib/queryKeys'
 import type { ThreadSummary } from '../../src/lib/apiClient'
 
 /** Date buckets for the "chat history" grouping (newest first). */
@@ -63,11 +64,10 @@ export default function Threads(): React.ReactElement {
   const router = useRouter()
   const api = useApi()
   const { surface } = useTheme()
-  const setThread = useCaptureStore((s) => s.setThread)
-  const startCapture = useCaptureStore((s) => s.startCapture)
+  const openThread = useRevisitThread()
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ['threads'],
+    queryKey: threadsKey,
     queryFn: () => api.listThreads(),
   })
 
@@ -82,15 +82,9 @@ export default function Threads(): React.ReactElement {
   // destination you came from. Same header across all four states (loading/error/empty/populated).
   const backHeader = <AppHeader leading="back" onLeadingPress={() => router.navigate('/(tabs)/camera')} />
 
-  function openThread(item: ThreadSummary): void {
-    // Revisit → resume the durable eve session behind this thread. Route through /processing, which STREAMS the
-    // thread (the BFF REPLAYS the persisted reveal — deterministic, no re-run/re-bill) then hands off to /reveal
-    // or /interview. startCapture() resets any prior scan's state AND seeds the durable photo so the image shows
-    // immediately (the content is re-derived by the replayed stream), instead of a blank card.
-    startCapture(item.photoUrl ?? null)
-    setThread(item.threadId)
-    router.push('/processing')
-  }
+  // Revisit → resume the durable eve session behind this thread (shared with the camera-home recent carousel via
+  // useRevisitThread): /processing STREAMS the thread, the BFF REPLAYS the persisted reveal (no re-run/re-bill),
+  // and the photo is seeded so the image shows immediately instead of a blank card.
 
   // ---- loading: first fetch with nothing cached ----
   if (isLoading) {
@@ -160,25 +154,7 @@ export default function Threads(): React.ReactElement {
             <Muted style={styles.groupLabel}>{g.label}</Muted>
             <View style={styles.grid}>
               {g.items.map((item) => (
-                <PressableTile
-                  key={item.threadId}
-                  id={ids.threads.item}
-                  onPress={() => openThread(item)}
-                  style={[styles.tile, { backgroundColor: surface.card, borderColor: surface.border, overflow: 'hidden' }]}
-                >
-                  {/* durable capture thumbnail — the persisted photo, loaded via its signed URL. */}
-                  {item.photoUrl ? (
-                    <Image {...tid(ids.threads.itemPhoto)} source={{ uri: item.photoUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                  ) : null}
-                  {item.photoUrl ? <View style={[StyleSheet.absoluteFill, styles.scrim]} pointerEvents="none" /> : null}
-                  {/* the identified label (falls back to the auto-title until the reveal settles). */}
-                  <Body numberOfLines={2} style={item.photoUrl ? styles.tileTextOnPhoto : undefined}>
-                    {item.revealTitle || item.title}
-                  </Body>
-                  <Muted style={[{ marginTop: space.xs }, item.photoUrl ? styles.tileTextOnPhoto : undefined]}>
-                    {new Date(item.createdAt).toLocaleDateString()}
-                  </Muted>
-                </PressableTile>
+                <CatalogTile key={item.threadId} variant="grid" item={item} onPress={() => openThread(item)} />
               ))}
             </View>
           </View>
@@ -198,15 +174,5 @@ export default function Threads(): React.ReactElement {
 const styles = StyleSheet.create({
   empty: { maxWidth: 420 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  tile: {
-    minHeight: 120,
-    width: '47%',
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: space.md,
-    justifyContent: 'flex-end',
-  },
-  scrim: { backgroundColor: 'rgba(20,18,14,0.42)' }, // legibility under the identified label
-  tileTextOnPhoto: { color: '#FFFFFF' },
   groupLabel: { textTransform: 'uppercase', letterSpacing: 1, marginBottom: space.sm, marginTop: space.md },
 })

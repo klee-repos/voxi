@@ -66,12 +66,31 @@ export class PlaywrightDriver implements Driver {
 
   async a11yTree(): Promise<A11yNode> {
     const nodes = await this.page.evaluate(() => {
+      // Perceivable = actually on screen AND not occluded. A pre-rendered surface a user can't see — a closed
+      // react-native-web drawer/modal that lives in the DOM behind the active screen (in the viewport, but covered
+      // by a full-bleed screen on top) — must NOT be perceived by the agent, or it will "tap" a control the
+      // on-screen content intercepts. So beyond checkVisibility (display/visibility) we require the element to be
+      // the topmost hit at its own centre — the same "receives pointer events" test a real tap has to pass.
+      const inViewport = (el: Element) => {
+        const r = el.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) return false
+        return r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth
+      }
+      const unoccluded = (el: Element) => {
+        const r = el.getBoundingClientRect()
+        const cx = Math.min(Math.max(r.left + r.width / 2, 1), window.innerWidth - 1)
+        const cy = Math.min(Math.max(r.top + r.height / 2, 1), window.innerHeight - 1)
+        const top = document.elementFromPoint(cx, cy) // ignores pointer-events:none overlays (e.g. decorative scrims)
+        return !!top && (el.contains(top) || top.contains(el))
+      }
       const isVisible = (el: Element) =>
         // only elements actually rendered on screen — hidden screens (display:none) are excluded,
         // so the agent perceives the same thing a user does.
-        typeof (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility === 'function'
+        (typeof (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility === 'function'
           ? (el as HTMLElement & { checkVisibility: () => boolean }).checkVisibility()
-          : el.getClientRects().length > 0
+          : el.getClientRects().length > 0) &&
+        inViewport(el) &&
+        unoccluded(el)
       return Array.from(document.querySelectorAll('[data-testid]'))
         .filter(isVisible)
         .map((el) => ({

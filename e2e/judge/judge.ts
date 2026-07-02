@@ -29,7 +29,7 @@ const SCHEMA = {
   required: ['score', 'reasons'],
 }
 
-export type RubricKey = 'title' | 'description' | 'facts'
+export type RubricKey = 'title' | 'description' | 'facts' | 'what' | 'purpose' | 'maker'
 
 const RUBRICS: Record<RubricKey, string> = {
   title:
@@ -43,8 +43,25 @@ const RUBRICS: Record<RubricKey, string> = {
     'the category), AND keeps Voxi\'s dry-witty voice. Penalise generic category filler heavily. Score 0..1.',
   facts:
     'You are grading a set of "curious facts" about a specific object. A great set (1.0) is 3+ genuinely interesting, ' +
-    'specific, checkable facts about THIS object (records, provenance, design, history) — not generic or obvious, and ' +
-    'mutually distinct. Score 0..1.',
+    'specific, checkable facts about THIS object OR its brand/maker (records, provenance, design, history) — not generic ' +
+    'or obvious, and mutually distinct. An empty set is 0. Score 0..1.',
+  // The four reveal BUCKETS (ANALYSIS-UX). Each is graded on being SPECIFIC to this exact object/brand, not the
+  // generic category. An honest EMPTY bucket ("nothing I can prove") is scored ~0.5 — NOT penalised as hard as
+  // generic category filler, because honesty is the product's spine (a fabricated answer must never beat an honest gap).
+  what:
+    'You are grading the "WHAT IT IS" answer Voxi shows for a photographed object. A great answer (1.0) names THIS exact ' +
+    'object/brand and the detail that sets it apart (e.g. "bears the Sub Pop stamp — the Seattle grunge label\'s mark"), ' +
+    'SPECIFIC and grounded, not "a logo is a graphic mark" category filler. An honest empty ("nothing grounded") ≈ 0.5. Score 0..1.',
+  purpose:
+    'You are grading the "WHAT IT\'S FOR / PURPOSE" answer Voxi shows. A great answer (1.0) is what THIS specific object ' +
+    'is for or what it commemorates/promotes (e.g. band merchandise that promotes a label), SPECIFIC and grounded — not ' +
+    '"a mug holds hot drinks" category truism. An honest empty ("nothing grounded to add") ≈ 0.5. Score 0..1.',
+  maker:
+    'You are grading the "WHO MADE IT / MAKER" answer Voxi shows. A great answer (1.0) identifies the specific brand/maker ' +
+    'ENTITY and a grounded detail about it (e.g. "Sub Pop, the Seattle label that signed Nirvana"). It must state the ' +
+    'RELATIONSHIP the evidence supports (branded by / merch from / released by) and must NOT over-claim manufacture ' +
+    '("made by X") of a merch/branded item unless a real manufacturer is named — penalise an unsupported "made by". An ' +
+    'honest empty ("the maker keeps their counsel") ≈ 0.5; a generic/wrong maker is 0. Score 0..1.',
 }
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n))
@@ -94,6 +111,17 @@ export async function judge(rubric: RubricKey, sample: string): Promise<RubricSc
     console.log('  ⚠ ANTHROPIC_API_KEY not set — using a GEMINI judge (self-preference caveat; set an Anthropic key for the independent judge).')
   }
   return judgeGemini(rubric, sample)
+}
+
+/**
+ * The INDEPENDENT judge with NO silent Gemini fallback (§13.5, adversarial #3) — for the acceptance/proof run. A
+ * proof-of-improvement graded by Gemini-judges-Gemini is worthless, and a mid-run Claude error silently swapping
+ * judges confounds the before/after delta. So this THROWS when the funded Claude judge is unavailable, rather than
+ * quietly degrading — the harness aborts and says why instead of printing a self-preferential number.
+ */
+export async function judgeIndependent(rubric: RubricKey, sample: string): Promise<RubricScore> {
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY required for the independent proof judge (no Gemini fallback in the acceptance run)')
+  return judgeClaude(rubric, sample)
 }
 
 /** The judge can run when EITHER an Anthropic key or gcloud auth is available (gcloud is the fallback judge). */

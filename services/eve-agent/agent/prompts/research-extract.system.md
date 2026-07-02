@@ -11,5 +11,6 @@ Rules:
 - COPY THE QUOTE AS ONE CONTIGUOUS SPAN, exactly as it appears in a SINGLE place. A complete prose sentence from the body is the most reliable source and copies cleanly; a single spec-table / infobox row copied exactly (its label and value together) also works. NEVER stitch together text from different cells, rows, or sentences, and never merge two separate facts into one quote — that breaks the verbatim check.
 - Prefer defining, non-obvious facts (design, history, records, provenance) over generic category description.
 - {{#item}}Facts may name this specific make/model.{{/item}}{{^item}}Facts must stay at the CATEGORY level — never name a specific make, model, or year.{{/item}}
+{{#brandLane}}- The subject is a BRAND / MAKER ENTITY (a company or label), not the photographed object. Return facts about that ENTITY — who they are, their history, what they are known for, why they make or sell merchandise of this kind. NEVER assert that the photographed object is a specific edition, first run, limited release, numbered piece, or dated variant — you cannot know which one this is; a fact about a particular product edition is forbidden.{{/brandLane}}
 - If the sources do not support 3 facts, return only what they do support. Never invent a fact or a quote.
 No preamble. Return JSON only.

@@ -216,5 +216,29 @@ export const shadow = {
   elevation: 2,
 } as const
 
+/**
+ * Liquid Glass material (Apple, "Adopting Liquid Glass") — a DARK, warm "Control Center" frost. The reveal dock
+ * floats over a full-bleed photo, so the material is DARK with LIGHT text: the photo shows through dimmed + blurred
+ * (never washed to a flat gray, which is what a light tint does over a photo), and near-white text stays legible over
+ * ANY photo. Same treatment the reveal's own `loadingPill` already uses over the photo. Consumed by both `GlassFill`
+ * variants (web backdrop-filter / native GlassView+BlurView) so the material can't drift between platforms.
+ *
+ * The `tint` ALPHA is contrast-load-bearing: `theme.test.ts` composites the LIGHT text (`dark.text`, mist100) over the
+ * tint on WHITE (the worst case — a bright photo behind the dark glass yields the lightest composite → lowest contrast
+ * for light text) and asserts ≥ AA (4.5:1). At 0.68 → 5.6:1 (pass); drop it toward ~0.6 and the guard fails on purpose.
+ * Small muted captions are SUPPLEMENTARY (the icon glyph + full a11y label are the real signifier) — a translucent
+ * material can't keep muted text AA over the brightest photo region (Apple uses adaptive vibrancy; RNW has no
+ * equivalent). When the native blur module isn't linked (no prebuild), the tint alone degrades to a clean dark scrim
+ * panel — dim, legible, intentional — never the gray a light tint collapses to.
+ */
+export const glass = {
+  tint: 'rgba(20,17,13,0.68)', // dock over the photo — dark warm frost; AA-guaranteed for LIGHT text (mist100)
+  tintStrong: 'rgba(20,17,13,0.84)', // morph card — denser (a "thick" modal material over the scrim)
+  border: 'rgba(255,255,255,0.22)', // light specular rim (the Liquid-Glass edge catching light on a dark material)
+  blur: 30, // px — web backdrop-filter blur radius
+  saturate: 1.4, // web backdrop-filter saturation boost (photo colour still "pops" through the dark frost)
+  intensity: 45, // native BlurView intensity (0–100)
+} as const
+
 export const theme = { dark, parchment, bands, speakers, type, space, radius, hit, motion, orbGradient, scrim, shadow }
 export type Theme = typeof theme

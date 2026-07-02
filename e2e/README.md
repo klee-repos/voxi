@@ -46,6 +46,26 @@ across variations (different objects, permission-denied, offline, low-confidence
 deterministic scenarios** from the paths it found (saved to `scenarios/_generated/` for human review — never
 auto-merged). Loop-until-dry: keep exploring until N rounds surface no new uncovered screen/state.
 
+### Agentic runners — real screens, real clicks (`bun run e2e:web:agentic`)
+
+The agentic suite drives the **real Expo screens** (react-native-web via the converge harness, real Zustand
+store, real ApiClient → real BFF) — an autonomous `Agent` navigates by perceiving the live testID/a11y tree and
+tapping like a person; every outcome is pinned by a deterministic `testID` read. All live under `web/converge/`
+and share one sign-in (`agentic-shared.ts`):
+
+- **`agentic-auth`** — signs in through the real welcome + first-run UI to the real camera.
+- **`agentic-collection`** — real shutter capture → revisit from the real collection (revisit replays, is not
+  re-billed; identification durable server-side).
+- **`reveal-agentic`** — the real reveal dock (open buckets → per-bucket spoken reveal, facts, Ask-Voxi) + the
+  real refusal surface.
+- **`agentic-sweep`** — one agent walks auth → both confidence bands → empty collection → settings privacy.
+- **`agentic-explore-ab`** — the SAME planners over the **agent-browser** native backend (wrapped as a `Driver`,
+  `drivers/agent-browser-driver.ts`); skips cleanly if the CLI/Chrome is absent. Wired as `e2e:web:explore-mcp`.
+
+Perception matches what a user sees: `PlaywrightDriver.a11yTree()` excludes off-screen **and occluded** testIDs
+(a closed RNW drawer behind the active screen is not "visible"), and `Agent.achieve({ settleMs })` paces taps
+like a human so a triggered navigation/re-render lands before the next perception.
+
 ## Determinism controls (so runs are reproducible)
 
 - **Vendor record/replay (`fixtures/`):** a `VendorTape` records real responses from Gemini/Cloud Vision/

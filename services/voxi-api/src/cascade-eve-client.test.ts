@@ -30,7 +30,19 @@ class FakeSafety implements SafetyClassifier {
 }
 class FakeNarrator {
   async narrate(_i: NarrationInput) {
-    return { clauses: ['A first-pass line.'], dropped: 0 }
+    return { clauses: [{ text: 'A first-pass line.', claimType: 'flavor' as const, bucket: 'what_is_it' as const }], dropped: 0 }
+  }
+}
+/** Emits a what + a purpose clause so the per-bucket audio-capture tap can be exercised end to end. */
+class FakeNarratorBuckets {
+  async narrate(_i: NarrationInput) {
+    return {
+      clauses: [
+        { text: 'A first-pass line.', claimType: 'flavor' as const, bucket: 'what_is_it' as const },
+        { text: 'For diving deep.', claimType: 'flavor' as const, bucket: 'purpose' as const },
+      ],
+      dropped: 0,
+    }
   }
 }
 /** Streams a verified fact, then the terminal dossier — exactly what the live dossier provider yields. */
@@ -91,6 +103,22 @@ describe('CascadeEveClient — the assembled BFF stream wires deep research', ()
     expect(idx('confidence_band')).toBeLessThan(idx('fact'))
     expect(idx('fact')).toBeLessThan(idx('description_upgrade'))
     expect(idx('description_upgrade')).toBeLessThan(idx('done'))
+  })
+
+  test('per-bucket audio text is captured OFF THE STREAM (what + purpose + facts), so /speech has it on first view', async () => {
+    const client = new CascadeEveClient(undefined, {
+      vision: new FakeVision({ catalog: CATALOG, vlm: VLM }),
+      safety: new FakeSafety(),
+      narrator: new FakeNarratorBuckets(),
+      dossier: new FakeDossier([FACT], DOSSIER),
+    })
+    const { sessionId } = await client.createSession({ userId: 'A', photoUrl: PHOTO })
+    for await (const _line of client.stream(sessionId, 'A')) void _line // drain
+    expect(await client.narrationText(sessionId, 'A', 'what')).toContain('A first-pass line.')
+    expect(await client.narrationText(sessionId, 'A', 'purpose')).toContain('For diving deep.')
+    expect(await client.narrationText(sessionId, 'A', 'facts')).toContain('Submariner')
+    // owner-scoped: a non-owner reads null for every bucket
+    expect(await client.narrationText(sessionId, 'B', 'what')).toBeNull()
   })
 
   test('the default client (no overrides) constructs a real dossier provider — the wire is present in production', () => {

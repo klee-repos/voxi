@@ -1,7 +1,0 @@
-agentic collection revisit (autonomous nav; deterministic assertions):
-  (the capture settled on a reveal)
-  PASS the reopened past item shows its reveal card again
-  PASS the reveal was reached via a genuine REVISIT (data-resumes=true — never set on a fresh capture)
-  PASS the revisited reveal carries a non-empty title (the item was not a blank shell)
-  PASS the collection durably kept the generated content (label + CONFIDENT band) on the past item
-AGENTIC COLLECTION-REVISIT E2E GREEN

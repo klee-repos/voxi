@@ -66,47 +66,63 @@ function ConvergeRoot(): React.ReactElement {
       const reader = s.body!.getReader()
       const dec = new TextDecoder()
       let buf = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        let i: number
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i)
-          buf = buf.slice(i + 1)
-          if (!line) continue
-          const e = JSON.parse(line) as {
-            type: string
-            text?: string
-            band?: ConfidenceBand
-            title?: string
-            candidates?: string[]
-            code?: string
-            message?: string
-            sourceUrl?: string
-            sourceTitle?: string
-            quote?: string
-          }
-          if (e.type === 'token' && e.text) store.getState().appendText(e.text)
-          // async deep research: verified facts (with provenance) + a richer description arrive AFTER the band.
-          if (e.type === 'fact' && e.text) {
-            store.getState().appendFact({ text: e.text, sourceUrl: e.sourceUrl ?? '', sourceTitle: e.sourceTitle ?? '', quote: e.quote ?? '' })
-          }
-          if (e.type === 'description_upgrade' && e.text) store.getState().upgradeDescription(e.text)
-          if (e.type === 'confidence_band' && e.band) {
-            store.getState().setBand(e.band, e.title ?? '', e.candidates ?? [])
-          }
-          if (e.type === 'error') {
-            // refusal → the distinct refusal surface; any other error → failure. captureStore.setError forces
-            // outcome='failure', so for a refusal we set the message first, then pin outcome back to 'refusal'.
-            if (e.code === 'safety_refusal') {
-              if (e.message) store.getState().setError(e.message)
-              store.getState().setOutcome('refusal')
-            } else {
-              store.getState().setError(e.message ?? 'The Guide lost the thread.')
+      let settled = false
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          let i: number
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i)
+            buf = buf.slice(i + 1)
+            if (!line) continue
+            const e = JSON.parse(line) as {
+              type: string
+              index?: number
+              text?: string
+              band?: ConfidenceBand
+              title?: string
+              candidates?: string[]
+              code?: string
+              message?: string
+              bucket?: string
+              sourceUrl?: string
+              sourceTitle?: string
+              quote?: string
+            }
+            if (typeof e.index === 'number') store.getState().setLastSeenIndex(e.index)
+            if (e.type === 'token' && e.text) store.getState().appendText(e.text)
+            // async deep research: verified facts (with provenance) + a richer description arrive AFTER the band.
+            if (e.type === 'fact' && e.text) {
+              store.getState().appendFact({ text: e.text, sourceUrl: e.sourceUrl ?? '', sourceTitle: e.sourceTitle ?? '', quote: e.quote ?? '' })
+            }
+            // normalized research buckets (purpose/maker) — empty text is the honest "nothing groundable" marker.
+            if (e.type === 'section' && (e.bucket === 'purpose' || e.bucket === 'maker')) {
+              store.getState().appendSection(e.bucket, { text: e.text ?? '', sourceUrl: e.sourceUrl ?? '', sourceTitle: e.sourceTitle ?? '', quote: e.quote ?? '' })
+            }
+            if (e.type === 'description_upgrade' && e.text) store.getState().upgradeDescription(e.text)
+            if (e.type === 'confidence_band' && e.band) {
+              settled = true
+              store.getState().setBand(e.band, e.title ?? '', e.candidates ?? [])
+            }
+            // the async research stream reached its terminal `done` → still-loading buckets settle to `empty`.
+            if (e.type === 'done') store.getState().setResearchComplete()
+            if (e.type === 'error') {
+              // refusal → the distinct refusal surface; any other error → failure. captureStore.setError forces
+              // outcome='failure', so for a refusal we set the message first, then pin outcome back to 'refusal'.
+              if (e.code === 'safety_refusal') {
+                if (e.message) store.getState().setError(e.message)
+                store.getState().setOutcome('refusal')
+              } else {
+                store.getState().setError(e.message ?? 'The Guide lost the thread.')
+              }
             }
           }
         }
+      } catch {
+        // A stream drop AFTER the band settled → loading buckets flip to `unavailable` (retriable), never `empty`.
+        if (settled) store.getState().setResearchError()
       }
       if (!cancelled) setReady(true)
     })()

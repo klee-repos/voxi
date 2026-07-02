@@ -24,7 +24,7 @@ Mirrors IMPLEMENTATION-STATUS "Verified runs" — each command below is **proven
 | unit + contract | `bun test` | 50+ tests: honesty gate (RT-1), arbitration, metering idempotency, visibility ACL, CSAM→redact intake ordering, NDJSON contract, vendor record/replay, … |
 | selector lint | `bun run lint:selectors` | no coordinate taps / unstable selectors in committed scenarios |
 | web E2E (golden) | `bun e2e/web/run-auth.web.ts` | auth-01, id-03 (PROBABLE), sub-01 (scan cap→paywall) vs real BFF |
-| web E2E (agentic) | `bun e2e/web/run-agent-pw.web.ts` | agent navigates by perception, outcome pinned deterministically |
+| web E2E (agentic) | `bun run e2e:web:agentic` | an agent drives the REAL screens by perception (real sign-in, shutter, drawer nav), every outcome pinned deterministically |
 | web E2E (coverage) | `bun e2e/web/run-coverage.web.ts` | settings/signout/delete-cascade + offline banner |
 
 Vendor calls are **replayed** (`VOXI_E2E_MODE=replay`), DB is seeded, clock/ids frozen via `VOXI_TEST_MODE=1`

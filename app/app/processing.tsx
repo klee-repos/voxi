@@ -49,9 +49,13 @@ export default function Processing(): React.ReactElement {
   const setBand = useCaptureStore((s) => s.setBand)
   const appendText = useCaptureStore((s) => s.appendText)
   const appendFact = useCaptureStore((s) => s.appendFact)
+  const appendSection = useCaptureStore((s) => s.appendSection)
   const upgradeDescription = useCaptureStore((s) => s.upgradeDescription)
   const setLoadingLine = useCaptureStore((s) => s.setLoadingLine)
   const setError = useCaptureStore((s) => s.setError)
+  const setResearchComplete = useCaptureStore((s) => s.setResearchComplete)
+  const setResearchError = useCaptureStore((s) => s.setResearchError)
+  const setLastSeenIndex = useCaptureStore((s) => s.setLastSeenIndex)
 
   const [orb, setOrb] = useState<OrbState>('thinking')
   const [line, setLine] = useState(FIRST)
@@ -90,6 +94,9 @@ export default function Processing(): React.ReactElement {
     setFailed(null)
     setOffline(false)
     setSettled(null)
+    // Fresh run (initial scan OR an `unavailable`-retry re-entry): clear the terminal research flags so a resumed
+    // stream re-drives the buckets loading→active/empty rather than staying stuck on a prior drop's `unavailable`.
+    useCaptureStore.setState({ researchError: false, researchComplete: false })
     partialTitleRef.current = null
     setLine(FIRST)
     setLoadingLine(FIRST)
@@ -121,6 +128,7 @@ export default function Processing(): React.ReactElement {
 
     try {
       for await (const ev of api.streamThread(threadId, { signal: ac.signal })) {
+        setLastSeenIndex(ev.index) // the `?startIndex=` resume seed for the reveal's unavailable-retry
         if (ev.type === 'token') {
           ui(() => setOrb('speaking'))
           appendText(ev.text)
@@ -128,6 +136,12 @@ export default function Processing(): React.ReactElement {
           // Async deep research: a VERIFIED fact (with its provenance) — append to the store as it lands; reveal.tsx
           // renders each as its own chip progressively. Arrives AFTER we've already navigated to /reveal.
           appendFact({ text: ev.text, sourceUrl: ev.sourceUrl, sourceTitle: ev.sourceTitle, quote: ev.quote })
+        } else if (ev.type === 'section') {
+          // A normalized research bucket (purpose/maker). Empty text = the honest "researched, nothing groundable"
+          // marker → the icon resolves to `empty`, never a perpetual spinner. appendSection is last-write-wins.
+          if (ev.bucket === 'purpose' || ev.bucket === 'maker') {
+            appendSection(ev.bucket, { text: ev.text, sourceUrl: ev.sourceUrl, sourceTitle: ev.sourceTitle, quote: ev.quote })
+          }
         } else if (ev.type === 'description_upgrade') {
           upgradeDescription(ev.text)
         } else if (ev.type === 'partial_id') {
@@ -152,16 +166,27 @@ export default function Processing(): React.ReactElement {
             break // UNKNOWN hands off to the interview — no async research to keep streaming for
           }
         } else if (ev.type === 'error') {
+          // A terminal error AFTER the band settled is a swallowed phase-2 research failure (the cascade never emits
+          // one, but be defensive): resolve loading buckets to `empty`, keep the reveal. A PRE-band error is the
+          // real phase-1 hard-failure / refusal → the existing error path (drives the refund + failure screen).
+          if (navigated) { setResearchComplete(); return }
           ui(() => { setOrb('uncertain'); setFailed(ev.message || ev.code) })
           haptics.error()
           setError(ev.message || ev.code)
           return
         } else if (ev.type === 'done') {
+          // The async research stream ended — a still-loading bucket may now settle to `empty` (never perpetual).
+          // MUST be an unguarded store write: `ui()` is a no-op post-navigation, so the reveal would spin forever.
+          setResearchComplete()
           break
         }
       }
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return
+      // A network drop / stream error. POST-band (already on the reveal): flip loading buckets to `unavailable`
+      // (retriable) via an UNGUARDED store write — NOT `empty` (that would falsely claim the object has nothing to
+      // know). PRE-band: the existing hard-failure display (a genuine identification failure, not a research gap).
+      if (navigated) { setResearchError(); return }
       ui(() => { setOrb('uncertain'); setOffline(true); setFailed(e instanceof Error ? e.message : 'stream_failed') })
       haptics.error()
       return

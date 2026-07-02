@@ -48,10 +48,17 @@ export interface ProposedDossier {
 export interface DossierInput {
   subject: string
   scope: 'item' | 'class'
-  /** the confirmed subject terms a source must be about — [make, model] at item scope, [category] at class scope. */
+  /** the confirmed subject terms a source must be about — [make, model] at item scope, [category] at class scope,
+   *  [brand] in the brand lane. */
   subjectTerms: string[]
   /** at CLASS scope: the VLM's (unconfirmed) make/model tokens a class-level fact must NOT name. */
   disallowedSpecificTerms?: string[]
+  /** BRAND LANE (§13.2, adversarial #5): research a DISTINCTIVE observed brand as an ENTITY (item rigor on [brand]),
+   *  but facts must be about the brand itself, never asserting the photographed object is a specific edition/first-run.
+   *  Selects the brand-lane extract prompt variant + widens the search query with the object type. */
+  brandLane?: boolean
+  /** the coarse object type (e.g. "mug") — used only to widen the brand-lane search query ("Sub Pop … mug"). */
+  objectType?: string
   provenance?: { model: string; generatedAt: number; toolCalls: number }
 }
 

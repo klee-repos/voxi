@@ -32,4 +32,11 @@ export const Sparkles = Stub
 export const Settings = Stub
 export const Plus = Stub
 export const Search = Stub
+// ANALYSIS-UX reveal dock glyphs (what/purpose/maker/facts + conversation + retry)
+export const BookOpen = Stub
+export const Target = Stub
+export const Stamp = Stub
+export const Lightbulb = Stub
+export const MessageCircle = Stub
+export const RotateCcw = Stub
 export default Stub

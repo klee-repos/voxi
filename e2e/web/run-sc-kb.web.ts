@@ -11,7 +11,7 @@
  *   kb-03  add-a-tip status: TL0 → "a moderator will review"; TL2+ → "live now" (server-side trust gate)
  *   kb-04  report a tip → auto-hide on first report (banner reflects the BFF's autoHidden disposition)
  *
- * Structure mirrors e2e/web/run-auth.web.ts / run-agent-pw.web.ts: boot the harness via createWebHarness +
+ * Structure mirrors e2e/web/run-auth.web.ts: boot the harness via createWebHarness +
  * Bun.serve, drive via PlaywrightDriver, deterministic checks only, write a durable result file, set
  * process.exitCode, fail-closed on exceptions. Run: `bun e2e/web/run-sc-kb.web.ts`.
  */

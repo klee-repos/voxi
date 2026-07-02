@@ -18,7 +18,7 @@ import { LiveResearcher } from '../../eve-agent/agent/providers/live-research'
 import { dossierProviderFromEnv, type DossierProvider } from '../../eve-agent/agent/providers/live-dossier'
 import { NarrationStore } from './narration-store'
 import { loadImageBytes } from '../../eve-agent/agent/lib/gcp-vision'
-import { parseEventLine } from '../../../packages/shared/src/events'
+import { parseEventLine, isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
 import type { StreamEvent } from '../../../packages/shared/src/events'
 
 export class CascadeEveClient implements EveClient {
@@ -56,9 +56,10 @@ export class CascadeEveClient implements EveClient {
     return { sessionId, continuationToken: `ct_${sessionId}` }
   }
 
-  /** SERVER-OWNED narration for the spoken reveal — owner-scoped (the sessionId encodes the owner). */
-  async narrationText(sessionId: string, userId: string): Promise<string | null> {
-    return this.narrations.get(sessionId, userId)
+  /** SERVER-OWNED narration for a spoken reveal BUCKET — owner-scoped (the sessionId encodes the owner). `what` is
+   *  the default (back-compat with the pre-redesign `/speech` route); `purpose`/`maker`/`facts` are the other buckets. */
+  async narrationText(sessionId: string, userId: string, bucket: AudioBucket = 'what'): Promise<string | null> {
+    return this.narrations.get(sessionId, userId, bucket)
   }
 
   /** Deletion cascade hook: drop every stored photo AND narration for this user's sessions. Returns photos purged. */
@@ -102,7 +103,9 @@ export class CascadeEveClient implements EveClient {
       // for ~a minute). The app requests POST /v1/threads/:id/speech the moment the reveal renders; capturing only
       // at end-of-stream (the safety net above) left it 404ing `no_narration` for that whole window. Pin-once, so a
       // reconnect's re-run can't clobber the exact clauses the app rendered + spoke on the first drain.
-      onNarration: (clauses) => this.narrations.capture(sessionId, clauses),
+      // The `what` bucket audio = the what-only first-pass clauses (cascade passes only `what_is_it` clauses here),
+      // pinned synchronously so /speech/what has text the instant the reveal renders — never the full composite.
+      onNarration: (clauses) => this.narrations.capture(sessionId, 'what', clauses.join(' ')),
       // The deep-research pass: after the instant reveal it streams verified `fact` chips + a grounded
       // `description_upgrade` that replaces the thin first-pass narration on the same open stream (§3.B4). Best-effort
       // in the cascade — any research failure/timeout leaves the instant reveal exactly as it was.
@@ -112,19 +115,26 @@ export class CascadeEveClient implements EveClient {
     })
 
     let band: Extract<StreamEvent, { type: 'confidence_band' }> | undefined
-    const captured: string[] = [] // full narration for this run, tapped BEFORE the startIndex filter (A11)
+    const captured: string[] = [] // what-only narration for this run, tapped BEFORE the startIndex filter (A11)
+    const factTexts: string[] = [] // accumulated verified fact texts → the `facts` bucket audio (stable at `done`)
     for await (const ev of events) {
       if (ev.type === 'confidence_band') band = ev
       if (ev.type === 'token') captured.push(ev.text)
+      // Tap the per-bucket audio text off the stream AS IT PASSES (adversarial P1-2) — so /speech/:bucket has text
+      // the instant that bucket's icon flips active, not ~a minute later at end-of-stream. purpose/maker ← their
+      // `section` text (empty-marker sections carry no text → capture() no-ops); facts ← the joined fact texts.
+      if (ev.type === 'section' && ev.text && isAudioBucket(ev.bucket)) this.narrations.capture(sessionId, ev.bucket, ev.text)
+      if (ev.type === 'fact') factTexts.push(ev.text)
+      if (ev.type === 'done' && factTexts.length) this.narrations.capture(sessionId, 'facts', factTexts.join(' '))
       if (ev.index < startIndex) continue // ?startIndex= reconnection: replay only from the last acked index
       // Re-validate against the shared contract so the app never receives an off-contract line.
       yield JSON.stringify(parseEventLine(JSON.stringify(ev)))
     }
-    // Safety net: pin the narration at end-of-stream too. The PRIMARY capture is the synchronous `onNarration`
-    // callback below, which fires the instant the narrator produces its clauses — BEFORE the ~minute-long async
-    // deep-research phase and before the app can request POST /speech. capture() is pin-once, so this is a no-op
-    // once onNarration has fired; it still covers a reconnect (startIndex>0) that re-runs with no onNarration hit.
-    this.narrations.capture(sessionId, captured)
+    // Safety net: pin the `what` narration at end-of-stream too. The PRIMARY capture is the synchronous
+    // `onNarration` callback above (fires the instant the narrator produces its what-only clauses, before the
+    // ~minute-long async deep-research phase). capture() is pin-once, so this is a no-op once onNarration has
+    // fired; it still covers a reconnect (startIndex>0) that re-runs with no onNarration hit.
+    this.narrations.capture(sessionId, 'what', captured.join(' '))
 
     // AFTER the reveal: grow the moat. Upsert the accepted id as a PRIVATE catalog item (guarded end-to-end in
     // the provider). Only runs with a catalog + the bytes we loaded above; UNKNOWN/refusals are never upserted.

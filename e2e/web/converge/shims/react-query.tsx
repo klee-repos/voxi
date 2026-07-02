@@ -11,16 +11,36 @@
  * This is the SAME substitution Metro performs (resolve the import to the real package) reduced to the methods
  * the screen actually calls; it renders the real screen's loading → populated/empty/error states off the real
  * BFF response, and does NOT edit threads.tsx. The query lifecycle here is faithful: mount fires the queryFn,
- * a thrown error sets isError/error, refetch re-runs it — which is all the screen's state matrix branches on.
+ * a thrown error sets isError/error, refetch re-runs it — AND `useQueryClient().invalidateQueries({ queryKey })`
+ * re-runs every active query whose key matches (a module-level registry mirrors TanStack's cache invalidation),
+ * which is how a new capture appears in Recently catalogued / the Collection without a remount.
  */
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
+
+// Active-query registry (key → set of refetchers), so invalidateQueries can re-run matching mounted queries —
+// the faithful analogue of TanStack invalidating a cache entry and refetching its active observers.
+const registry = new Map<string, Set<() => void>>()
+const keyOf = (queryKey: unknown[]): string => JSON.stringify(queryKey)
+function invalidate(queryKey: unknown[]): Promise<void> {
+  registry.get(keyOf(queryKey))?.forEach((refetch) => refetch())
+  return Promise.resolve()
+}
 
 export class QueryClient {
   // The real client caches; the screen never reads the cache directly, so an empty marker object suffices.
   constructor(_opts?: unknown) {}
+  invalidateQueries(opts: { queryKey: unknown[] }): Promise<void> {
+    return invalidate(opts.queryKey)
+  }
 }
 
 const Ctx = createContext<QueryClient | null>(null)
+const defaultClient = new QueryClient()
+
+/** Mirrors TanStack's `useQueryClient` — returns the provided client (or a default); both hit the shared registry. */
+export function useQueryClient(): QueryClient {
+  return useContext(Ctx) ?? defaultClient
+}
 
 export function QueryClientProvider({
   client,
@@ -42,6 +62,7 @@ export interface UseQueryResult<T> {
 }
 
 export function useQuery<T>({
+  queryKey,
   queryFn,
 }: {
   queryKey: unknown[]
@@ -54,6 +75,7 @@ export function useQuery<T>({
   const mounted = useRef(true)
   const fnRef = useRef(queryFn)
   fnRef.current = queryFn
+  const k = keyOf(queryKey)
 
   async function run(first: boolean): Promise<void> {
     setIsFetching(true)
@@ -77,11 +99,20 @@ export function useQuery<T>({
   useEffect(() => {
     mounted.current = true
     void run(true)
+    // Register this active query so invalidateQueries({ queryKey: k }) can re-run it (TanStack cache-observer parity).
+    const refetch = (): void => void run(false)
+    let set = registry.get(k)
+    if (!set) {
+      set = new Set()
+      registry.set(k, set)
+    }
+    set.add(refetch)
     return () => {
       mounted.current = false
+      set!.delete(refetch)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [k])
 
   return { data, isLoading, isError: error !== undefined, error, isFetching, refetch: () => run(false) }
 }

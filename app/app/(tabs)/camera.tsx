@@ -1,7 +1,7 @@
 /**
  * Camera capture — the steady-state home (Shazam layout, design.md cream). A FULL-BLEED viewfinder fills the
  * screen; the controls float as an overlay: a top-left hamburger + `voxi` wordmark (`AppHeader`), a bottom bar
- * with the "Recently catalogued" tray toggle (`camera.recentToggle`, a Lucide icon → slide-up `Tray`) on the
+ * with the "Recently catalogued" toggle (`camera.recentToggle`, a Lucide icon → the floating `RecentCard`) on the
  * left and ONE central flat-green capture orb (`CaptureOrb`, Lucide aperture, carries `camera.shutter`), and a
  * short instruction line above it (`camera.retakeHint`). On web (no camera) the cream canvas + a faint reticle
  * IS the branded home.
@@ -14,12 +14,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { View, StyleSheet, Platform, Pressable, useWindowDimensions } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Images } from 'lucide-react-native'
 import { Screen, Title, Body, Muted, Button } from '../../src/components/ui'
 import { AppHeader } from '../../src/components/AppHeader'
 import { CaptureOrb } from '../../src/components/CaptureOrb'
-import { Tray } from '../../src/components/Tray'
+import { RecentCard } from '../../src/components/RecentCard'
 import { Orb } from '../../src/components/Orb'
 import { OfflineBanner } from '../../src/components/Banners'
 import { ids, tid } from '../../src/lib/testid'
@@ -28,6 +28,8 @@ import { useTheme } from '../../src/lib/themeProvider'
 import { useApi } from '../../src/lib/api'
 import { ApiError } from '../../src/lib/apiClient'
 import { useCaptureStore } from '../../src/state/captureStore'
+import { useRevisitThread } from '../../src/lib/useRevisitThread'
+import { threadsKey } from '../../src/lib/queryKeys'
 import { createCameraPermission, type CameraPermissionStatus } from '../../src/lib/cameraPermission'
 import { CameraView, type CameraViewHandle } from '../../src/components/CameraView'
 import { toDataUri } from '../../src/lib/photo'
@@ -44,7 +46,8 @@ export default function Camera(): React.ReactElement {
   const startCapture = useCaptureStore((s) => s.startCapture)
   const setThread = useCaptureStore((s) => s.setThread)
   const setError = useCaptureStore((s) => s.setError)
-  const reset = useCaptureStore((s) => s.reset)
+  // Revisiting a recent capture resumes its durable thread (photo seeded) — shared 1:1 with the Collection grid.
+  const revisit = useRevisitThread()
 
   const perm = useMemo(() => createCameraPermission(), [])
   const [permission, setPermission] = useState<CameraPermissionStatus>(() => perm.getStatus())
@@ -55,7 +58,8 @@ export default function Camera(): React.ReactElement {
   const mounted = useRef(true)
   const cameraRef = useRef<CameraViewHandle>(null)
 
-  const recent = useQuery({ queryKey: ['threads'], queryFn: () => api.listThreads() })
+  const queryClient = useQueryClient()
+  const recent = useQuery({ queryKey: threadsKey, queryFn: () => api.listThreads() })
   const threads = recent.data?.threads ?? []
 
   useEffect(() => {
@@ -71,13 +75,6 @@ export default function Camera(): React.ReactElement {
       mounted.current = false
     }
   }, [perm])
-
-  function openThread(threadId: string): void {
-    setTrayOpen(false)
-    reset()
-    setThread(threadId)
-    router.push('/processing')
-  }
 
   async function onShutter(): Promise<void> {
     if (busy) return
@@ -100,6 +97,10 @@ export default function Camera(): React.ReactElement {
       }
       startCapture(displayUri)
       const { threadId } = await api.createThread({ photoUrl })
+      // A new thread now exists server-side — invalidate the collection so Recently catalogued + the Collection
+      // refetch and show it. Without this the persistent (never-remounted) camera tab keeps the stale cached list
+      // and the newest capture never appears.
+      void queryClient.invalidateQueries({ queryKey: threadsKey })
       setThread(threadId)
       router.push('/processing')
     } catch (e) {
@@ -177,9 +178,12 @@ export default function Camera(): React.ReactElement {
         <AppHeader leading="menu" showWordmark onMedia={onFeed} />
         <OfflineBanner visible={offline} />
         <View style={styles.spacer} pointerEvents="none" />
-        <Muted {...tid(ids.camera.retakeHint)} style={[styles.hint, { color: overTint }]}>
-          {instruction}
-        </Muted>
+        {/* Hide the capture hint while the RecentCard is open — it would sit behind the floating card + scrim. */}
+        {!trayOpen ? (
+          <Muted {...tid(ids.camera.retakeHint)} style={[styles.hint, { color: overTint }]}>
+            {instruction}
+          </Muted>
+        ) : null}
         <View style={[styles.bottomBar, { paddingBottom: space.xl + insets.bottom }]} pointerEvents="box-none">
           <View style={styles.side}>
             <Pressable
@@ -197,14 +201,14 @@ export default function Camera(): React.ReactElement {
         </View>
       </View>
 
-      <Tray
+      <RecentCard
         open={trayOpen}
         onClose={() => setTrayOpen(false)}
         threads={threads}
         isLoading={recent.isLoading}
         isError={recent.isError}
         onRetry={() => void recent.refetch()}
-        onOpen={openThread}
+        onOpen={revisit}
         onSeeAll={() => {
           setTrayOpen(false)
           router.navigate('/(tabs)/threads')

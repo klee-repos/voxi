@@ -6,11 +6,12 @@
  * idempotently, and cascade account deletion. The eve backend is reached via an injected client (never
  * exposed publicly); in tests it's a fake. No business state is trusted from the client.
  */
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { bearerFrom, type Verifier } from './auth'
 import { mintSignedUrl, mintPhotoUrl, verifyPhotoUrl } from './signing'
 import { threadOwnerVerdict } from './acl'
 import type { StreamEvent } from '../../../packages/shared/src/events'
+import { isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
 import { gatePodcastGeneration, charge, type Store, type Meter } from './metering'
 import { verifyAndApplyTransaction, applyNotification, planForUser, type AppleJwsVerifier, type EntitlementStore } from './appstore'
 import {
@@ -33,7 +34,7 @@ export interface EveClient {
    * rendered as `whatItIs`). Owner-scoped: returns null for a non-owner or a session with no captured narration.
    * `/v1/threads/:id/speech` voices this — the client never supplies the text (the BFF never trusts the client).
    */
-  narrationText?(sessionId: string, userId: string): Promise<string | null>
+  narrationText?(sessionId: string, userId: string, bucket?: AudioBucket): Promise<string | null>
 }
 
 /** Single-voice TTS seam for the spoken reveal (ElevenLabs "George" in prod, a deterministic fake in tests). */
@@ -278,15 +279,41 @@ async function* replayReveal(events: readonly StreamEvent[], startIndex: number)
  */
 export function buildItemContext(reveal: RevealRecord): string {
   const facts = reveal.events.filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+  // The two narrative research buckets, so "tell me more" is grounded in exactly what the reveal's icons showed.
+  const section = (bucket: string): string | null => {
+    const secs = reveal.events.filter(
+      (e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section' && e.bucket === bucket && !!e.text,
+    )
+    return secs.length ? secs[secs.length - 1]!.text : null
+  }
+  const purpose = section('purpose')
+  const maker = section('maker')
   return [
     `OBJECT: ${reveal.title} (confidence: ${reveal.band}).`,
     reveal.narration ? `WHAT IT IS: ${reveal.narration}` : '',
+    purpose ? `WHAT IT'S FOR: ${purpose}` : '',
+    maker ? `WHO MADE IT: ${maker}` : '',
     facts.length ? 'GROUNDED FACTS you may cite (fact — source):' : '',
     ...facts.map((f) => `  • ${f.text} — ${f.sourceUrl}`),
     'GROUNDING: only assert a falsifiable claim (spec/date/provenance/superlative) if it is grounded above, or you verify it with a fresh web_search/web_crawl and cite the source. If you cannot ground it, say so in persona. The confidence band still rules — do not promote a hedged identity to certain.',
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** Server-owned per-bucket text for `/speech/:bucket` on a DURABLE reveal (owner-scoped): `what` → the pinned
+ *  narration, `facts` → the joined verified facts, `purpose`/`maker` → the last non-empty `section` of that bucket. */
+export function speechBucketText(reveal: RevealRecord | null, userId: string, bucket: AudioBucket): string | null {
+  if (!reveal || reveal.ownerUserId !== userId) return null
+  if (bucket === 'what') return reveal.narration || null
+  if (bucket === 'facts') {
+    const facts = reveal.events.filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+    return facts.length ? facts.map((f) => f.text).join(' ') : null
+  }
+  const secs = reveal.events.filter(
+    (e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section' && e.bucket === bucket && !!e.text,
+  )
+  return secs.length ? secs[secs.length - 1]!.text : null
 }
 
 /**
@@ -523,21 +550,25 @@ export function createApp(deps: Deps): Hono {
     )
   })
 
-  // Speak the reveal narration in Voxi's British voice (ANALYSIS-VOICE-PLAN B). The text is SERVER-OWNED — read
-  // from the eve client, never supplied by the client — so the BFF can't be coerced into voicing arbitrary text.
-  // Fail-closed order (mirrors the belt-and-suspenders in GET /v1/threads/:id): auth → ownership ACL → speech
-  // configured? → server-owned narration present? → (cache hit ? bytes : synth+cache) → audio/mpeg.
-  app.post('/v1/threads/:id/speech', async (c) => {
+  // Speak a reveal BUCKET in Voxi's British voice (ANALYSIS-VOICE-PLAN B + ANALYSIS-UX §5.C). The text is
+  // SERVER-OWNED — read from the eve client / durable reveal, never supplied by the client — so the BFF can't be
+  // coerced into voicing arbitrary text; the client only names WHICH bucket via a validated enum path segment.
+  // `/speech` (no bucket) == `/speech/what` (back-compat). Fail-closed order: auth → bucket valid? → ownership ACL
+  // → speech configured? → server-owned text present? → (cache hit ? bytes : synth+cache) → audio/mpeg.
+  const speechHandler = async (c: Context) => {
     const userId = uid(c)
     const id = c.req.param('id')
+    const bucketParam = c.req.param('bucket')
+    if (bucketParam !== undefined && !isAudioBucket(bucketParam)) return c.json({ error: 'invalid_bucket' }, 400)
+    const bucket: AudioBucket = isAudioBucket(bucketParam) ? bucketParam : 'what'
     // Soft map check (belt) — a known-but-non-owned session is forbidden; the strict layers below are owner-scoped.
     if (deps.sessionOwner.get(id) && deps.sessionOwner.get(id) !== userId) return c.json({ error: 'forbidden' }, 403)
     if (!deps.speech) return c.json({ error: 'speech_unconfigured' }, 503) // loud, never a fake success
-    // Server-owned narration: the live eve client (same process) OR the DURABLE reveal (survives a restart, so a
-    // revisited capture can still be spoken). Both owner-scoped — the client can never inject text to voice.
+    // Server-owned text: the live eve client (same process) OR the DURABLE reveal (survives a restart, so a
+    // revisited capture is still speakable). Both owner-scoped — the client can never inject text to voice.
     const durableReveal = deps.reveals ? await deps.reveals.get(id) : null
-    const durableNarration = durableReveal && durableReveal.ownerUserId === userId ? durableReveal.narration : null
-    const text = (await deps.eve.narrationText?.(id, userId)) || durableNarration || null
+    const durableText = speechBucketText(durableReveal, userId, bucket)
+    const text = (await deps.eve.narrationText?.(id, userId, bucket)) || durableText || null
     if (!text) return c.json({ error: 'no_narration' }, 404)
     const key = await sha256hex(text)
     let bytes = (await deps.speech.cache?.get(key)) ?? null
@@ -551,7 +582,9 @@ export function createApp(deps: Deps): Hono {
       await deps.speech.cache?.put(key, bytes).catch(() => {}) // caching is best-effort; never fail the response
     }
     return c.body(bytes, 200, { 'content-type': 'audio/mpeg' })
-  })
+  }
+  app.post('/v1/threads/:id/speech', speechHandler)
+  app.post('/v1/threads/:id/speech/:bucket', speechHandler)
 
   // The grounded conversation context for "tell me more" (PROMPT-QUALITY §3.E). Owner-scoped: built ONLY from the
   // caller's own DURABLE reveal (title + narration + the cited facts), so the voice/text agent is seeded with the

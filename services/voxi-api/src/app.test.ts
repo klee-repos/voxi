@@ -4,7 +4,7 @@
  * idempotent podcast gate, account deletion cascade.
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
-import { createApp, type Deps } from './app'
+import { createApp, speechBucketText, buildItemContext, type Deps, type RevealRecord } from './app'
 import { testVerifier } from './auth'
 import { authorizeRead } from './signing'
 import { memoryStore } from './metering'
@@ -139,6 +139,38 @@ describe('BFF', () => {
 })
 
 // ---------------------------------------------------------------------------
+// speechBucketText + buildItemContext — the durable per-bucket text derivation (ANALYSIS-UX §5.C/§E). Owner-scoped;
+// derives each bucket from the persisted reveal events so a revisited capture is speakable + groundable.
+// ---------------------------------------------------------------------------
+describe('durable per-bucket text (speechBucketText + buildItemContext folds sections)', () => {
+  const reveal: RevealRecord = {
+    threadId: 't1', ownerUserId: 'A', band: 'CONFIDENT', title: 'Canon AE-1', candidates: [],
+    narration: 'A 35mm SLR.', createdAt: 0,
+    events: [
+      { type: 'confidence_band', index: 0, band: 'CONFIDENT', title: 'Canon AE-1', candidates: [] },
+      { type: 'section', index: 1, bucket: 'purpose', text: 'For enthusiast photographers.', sourceUrl: '', sourceTitle: '', quote: '' },
+      { type: 'section', index: 2, bucket: 'maker', text: '', sourceUrl: '', sourceTitle: '', quote: '' }, // empty-marker
+      { type: 'fact', index: 3, text: 'It sold over a million units.', sourceUrl: 'https://ex/1', sourceTitle: 'ex', quote: 'over a million' },
+      { type: 'done', index: 4, sessionId: 't1' },
+    ],
+  }
+  test('speechBucketText resolves what/purpose/facts, and returns null for an empty-marker maker + a non-owner', () => {
+    expect(speechBucketText(reveal, 'A', 'what')).toBe('A 35mm SLR.')
+    expect(speechBucketText(reveal, 'A', 'purpose')).toBe('For enthusiast photographers.')
+    expect(speechBucketText(reveal, 'A', 'facts')).toContain('a million units')
+    expect(speechBucketText(reveal, 'A', 'maker')).toBeNull() // empty-marker section → nothing to voice
+    expect(speechBucketText(reveal, 'B', 'what')).toBeNull() // non-owner
+    expect(speechBucketText(null, 'A', 'what')).toBeNull()
+  })
+  test('buildItemContext folds the purpose section (and omits an empty maker) into the grounded chat context', () => {
+    const ctx = buildItemContext(reveal)
+    expect(ctx).toContain("WHAT IT'S FOR: For enthusiast photographers.")
+    expect(ctx).not.toContain('WHO MADE IT:') // empty-marker maker is not surfaced
+    expect(ctx).toContain('It sold over a million units.')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // POST /v1/threads/:id/speech — the spoken reveal (ANALYSIS-VOICE-PLAN B).
 // The narration text is SERVER-OWNED (read from eve.narrationText), never client-supplied. Fail-closed order:
 // auth → ownership ACL → speech configured? → server-owned narration present? → cache-or-synth → audio/mpeg.
@@ -205,5 +237,20 @@ describe('BFF — spoken reveal /v1/threads/:id/speech', () => {
     expect((await post(app, 'A')).status).toBe(200)
     expect((await post(app, 'A')).status).toBe(200)
     expect(synth()).toBe(1) // second play served from the content-hash cache — no second vendor call
+  })
+  // ── /speech/:bucket — the per-bucket audio route (ANALYSIS-UX §5.C). The bucket is an enum ROUTE PARAM (never
+  //    client text); `/speech` == `/speech/what` (back-compat). ──
+  const postBucket = (app: ReturnType<typeof createApp>, bucket: string, u?: string) =>
+    app.request(`/v1/threads/${SID}/speech/${bucket}`, { method: 'POST', headers: u ? auth(u) : {} })
+  test('/speech/what is accepted (back-compat with the no-bucket route)', async () => {
+    expect((await postBucket(buildSpeech().app, 'what', 'A')).status).toBe(200)
+  })
+  test('400 on an unknown bucket — the route never voices an unrecognized segment', async () => {
+    const res = await postBucket(buildSpeech().app, 'wharrgarbl', 'A')
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_bucket')
+  })
+  test('403 owner ACL applies to a bucket route too (no per-bucket leak)', async () => {
+    expect((await postBucket(buildSpeech().app, 'facts', 'B')).status).toBe(403)
   })
 })

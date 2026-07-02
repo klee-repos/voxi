@@ -1,0 +1,12 @@
+{
+  "subpop": {
+    "by": "claude",
+    "band": "PROBABLE",
+    "scores": {
+      "what": 0.2,
+      "purpose": 0.5,
+      "maker": 0.5,
+      "facts": 0
+    }
+  }
+}
