@@ -9,9 +9,13 @@
  */
 import type { TtsProvider, Script } from './render'
 
-const VOICE: Record<'arlo' | 'mave', string> = {
-  arlo: '19STyYD15bswVz51nqLf', // Voxi's voice
-  mave: 'Xb7hH8MSUJpSbSDYk0k2',
+/** The two Deep Dive hosts' ElevenLabs voices. Injected (not hardcoded) so a future user-chosen pair can
+ *  override the default — the same seam the reveal narrator uses for its single voice (`LiveNarrationTts`). */
+export type PodcastVoices = Record<'arlo' | 'mave', string>
+
+export const DEFAULT_PODCAST_VOICES: PodcastVoices = {
+  arlo: '6u6JbqKdaQy89ENzLSju',
+  mave: 'Q1QcmfZPmFDVUWmzASdy',
 }
 
 function concat(buffers: Uint8Array[]): Uint8Array {
@@ -43,10 +47,14 @@ export function mergeTurns(clauses: { speaker: 'arlo' | 'mave'; text: string }[]
 }
 
 export class ElevenLabsTts implements TtsProvider {
-  constructor(private apiKey = process.env.ELEVENLABS_API_KEY ?? '') {}
+  constructor(
+    private apiKey = process.env.ELEVENLABS_API_KEY ?? '',
+    private voices: PodcastVoices = DEFAULT_PODCAST_VOICES,
+    private fetchImpl: typeof fetch = fetch, // injectable so the vendor call is assertable without creds
+  ) {}
 
   private async ttsMp3(text: string, voiceId: string): Promise<Uint8Array> {
-    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+    const r = await this.fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': this.apiKey, 'content-type': 'application/json' },
       body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.2 } }),
@@ -60,7 +68,7 @@ export class ElevenLabsTts implements TtsProvider {
     const turns = mergeTurns(script.clauses)
     const parts: Uint8Array[] = []
     for (const turn of turns) {
-      const mp3 = await this.ttsMp3(turn.text, VOICE[turn.speaker])
+      const mp3 = await this.ttsMp3(turn.text, this.voices[turn.speaker])
       parts.push(parts.length === 0 ? mp3 : stripId3(mp3)) // keep the first tag; strip the rest → one stream
     }
     const audio = concat(parts)

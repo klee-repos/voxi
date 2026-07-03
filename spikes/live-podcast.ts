@@ -113,7 +113,7 @@ if (outcome.kind === 'rendered' || outcome.kind === 'replayed') {
   const dur = outcome.asset.durationSec
   const bytes = episodePath ? (await Bun.file(episodePath).arrayBuffer()).byteLength : 0
   console.log(`✓ PASS — episode: ${episodePath}`)
-  console.log(`   duration ~${dur.toFixed(1)}s · ${(bytes / 1024).toFixed(0)} KB MP3 · two voices (George+Alice)`)
+  console.log(`   duration ~${dur.toFixed(1)}s · ${(bytes / 1024).toFixed(0)} KB MP3 · two distinct host voices`)
   process.exit(bytes > 40000 && dur > 8 ? 0 : 1)
 } else {
   console.log('✗ render did not produce an episode:', JSON.stringify(outcome).slice(0, 300))
