@@ -21,6 +21,7 @@ import { clerkVerifier } from '../../../services/voxi-api/src/auth'
 import { assertSigningKeyConfigured } from '../../../services/voxi-api/src/signing'
 import { CascadeEveClient } from '../../../services/voxi-api/src/cascade-eve-client'
 import { LiveNarrationTts } from '../../../services/voxi-api/src/live-tts'
+import { createPodcastBridge } from '../../../services/voxi-api/src/podcast-client'
 import { createCloudSqlStores } from '../../../services/voxi-api/src/cloudsql-stores'
 import { createPgStores } from '../../../services/voxi-api/src/pg-stores'
 import { warmGcpToken } from '../../../services/eve-agent/agent/lib/gcp-vision'
@@ -86,6 +87,18 @@ const elevenKey = process.env.ELEVENLABS_API_KEY
 const speech = elevenKey ? { tts: new LiveNarrationTts(elevenKey), cache: boundedAudioCache() } : undefined
 if (!speech) logger.warn('no_elevenlabs_key', { effect: 'spoken reveal disabled (POST /v1/threads/:id/speech → 503)' })
 
+// Deep Dive (podcast) render bridge. The BFF gates the credit then hands the render to the standalone worker
+// over HTTP; on poll it proxies the worker's honest status. Wired ONLY when both the worker URL and the shared
+// secret are present — absent either, `podcastEnqueue`/`podcastStatus` stay undefined and POST /v1/podcast 402s
+// loudly (never a fake success), matching the seams-not-stubs rule.
+const podcastWorkerUrl = process.env.PODCAST_WORKER_URL
+const podcastWorkerSecret = process.env.PODCAST_WORKER_SECRET
+const podcastBridge =
+  podcastWorkerUrl && podcastWorkerSecret
+    ? createPodcastBridge({ workerUrl: podcastWorkerUrl, secret: podcastWorkerSecret })
+    : undefined
+if (!podcastBridge) logger.warn('no_podcast_worker', { effect: 'Deep Dive render disabled (missing PODCAST_WORKER_URL/SECRET)' })
+
 const app = createApp({
   verifier: clerkVerifier(verifyToken as never),
   store: durable.store,
@@ -108,6 +121,9 @@ const app = createApp({
   messages: durable.messages,
   refunds: durable.refunds,
   speech,
+  // Deep Dive render: enqueue to the worker (once per fresh gate) + proxy its honest status on poll.
+  podcastEnqueue: podcastBridge?.enqueue,
+  podcastStatus: podcastBridge?.status,
   // v1 has no paywall: full access so the TestFlight loop is never entitlement-blocked. Real StoreKit 2
   // verification (appstore.ts) lands with billing; until then everyone is a voyager.
   planFor: async () => 'voyager',

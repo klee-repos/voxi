@@ -14,12 +14,27 @@ import { renderPodcast, memoryAssetStore, type PodcastJob } from './render'
 import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { buildProductionDeps } from './production-deps'
 import { audioRangeResponse } from './audio-range'
+import { warmGcpToken } from '../../eve-agent/agent/lib/gcp-vision'
 import { mkdirSync } from 'node:fs'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 
 initTelemetry({ service: 'voxi-podcast-worker', role: 'podcast' })
 
-const PORT = Number(process.env.PODCAST_WORKER_PORT ?? 8788)
+// Cloud Run injects PORT; honor it first so the container's listen port matches the platform contract. Falls
+// back to PODCAST_WORKER_PORT (local dev override) then the dev default.
+const PORT = Number(process.env.PODCAST_WORKER_PORT ?? process.env.PORT ?? 8788)
+
+// Research + script generation hit Vertex Gemini via the synchronous gcloudToken() accessor, which THROWS on
+// Cloud Run unless the token cache is warmed at boot (there is no gcloud CLI in the container — the token comes
+// from the metadata server). Warm it before serving and refresh on a timer; fail loud if the runtime SA can't
+// mint one (missing roles → better to know at deploy than on the first render).
+const ON_CLOUD_RUN = !!process.env.K_SERVICE
+if (ON_CLOUD_RUN) {
+  await warmGcpToken()
+  setInterval(() => {
+    warmGcpToken().catch((e) => logger.warn('gcp_token_refresh_failed', { err: String(e) }))
+  }, 30 * 60_000)
+}
 const SECRET = process.env.PODCAST_WORKER_SECRET ?? 'dev-podcast-secret'
 const PUBLIC_BASE = process.env.PODCAST_PUBLIC_BASE ?? `http://192.168.1.193:${PORT}`
 // Durable by default (COLLECTION-PERSISTENCE-PLAN A14): a rendered episode survives a restart and the deletion

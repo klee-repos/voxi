@@ -1,0 +1,14 @@
+# Build ONLY the voxi-podcast-worker image from the repo-root build context on an amd64 Cloud Build runner and
+# push it to Artifact Registry. Used by infra/deploy/voxi-podcast-worker-v1.sh.
+#   gcloud builds submit --config infra/deploy/cloudbuild.voxi-podcast-worker.yaml \
+#     --substitutions=_IMAGE=<region>-docker.pkg.dev/<proj>/voxi/voxi-podcast-worker,_SHA=<sha> .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'infra/docker/voxi-podcast-worker/Dockerfile', '-t', '${_IMAGE}:${_SHA}', '-t', '${_IMAGE}:latest', '.']
+images:
+  - '${_IMAGE}:${_SHA}'
+  - '${_IMAGE}:latest'
+options:
+  # bun install resolves the whole monorepo (incl. expo/react-native); needs headroom to avoid an OOM (exit 137).
+  machineType: E2_HIGHCPU_32
+timeout: 1800s

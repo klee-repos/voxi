@@ -138,13 +138,22 @@ gcloud secrets describe voxi-elevenlabs-key --project "$PROJECT" >/dev/null 2>&1
 # cleanly (the backend just logs sentry_disabled) instead of failing on a missing --set-secrets reference.
 gcloud secrets describe voxi-sentry-dsn --project "$PROJECT" >/dev/null 2>&1 \
   && SECRETS="${SECRETS},SENTRY_DSN=voxi-sentry-dsn:latest"
+# Deep Dive worker wiring — appended ONLY when the worker service + shared secret exist. A bare `gcloud run deploy`
+# REPLACES the full secret/env set, so this MUST be recomputed on every deploy or a later STEP=images redeploy
+# silently drops the wiring and Deep Dive 402s. A redeploy BEFORE the worker is stood up is still clean (Deep Dive
+# just stays disabled). See infra/deploy/voxi-podcast-worker-v1.sh.
+ENVVARS="GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production,SENTRY_RELEASE=${SHA}"
+gcloud secrets describe voxi-podcast-worker-secret --project "$PROJECT" >/dev/null 2>&1 \
+  && SECRETS="${SECRETS},PODCAST_WORKER_SECRET=voxi-podcast-worker-secret:latest"
+WORKER_URL="$(gcloud run services describe voxi-podcast-worker --project "$PROJECT" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+[ -n "$WORKER_URL" ] && ENVVARS="${ENVVARS},PODCAST_WORKER_URL=${WORKER_URL}"
 gcloud run deploy "$SVC" --project "$PROJECT" --region "$REGION" \
   --image "${IMAGE}:${SHA}" \
   --service-account "$SA_EMAIL" \
   --add-cloudsql-instances "$CONN" \
   --allow-unauthenticated \
   --set-secrets "$SECRETS" \
-  --set-env-vars "GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production,SENTRY_RELEASE=${SHA}" \
+  --set-env-vars "$ENVVARS" \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 5 --concurrency 40 --timeout 300
 
 BFF_URL="$(gcloud run services describe "$SVC" --project "$PROJECT" --region "$REGION" --format='value(status.url)')"
