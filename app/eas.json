@@ -29,7 +29,8 @@
         "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk",
         "EXPO_PUBLIC_TEST_MODE": "0",
-        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808"
+        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "production": {
@@ -41,7 +42,8 @@
         "EXPO_PUBLIC_API_BASE_URL": "https://voxi-api-y3mbetqp5a-uc.a.run.app",
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVzb2x2ZWQtZG92ZS05NS5jbGVyay5hY2NvdW50cy5kZXYk",
         "EXPO_PUBLIC_TEST_MODE": "0",
-        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808"
+        "EXPO_PUBLIC_SENTRY_DSN": "https://76726637e69ad0696e60aee303a4aee3@o4511667925549056.ingest.us.sentry.io/4511668171767808",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     }
   },
