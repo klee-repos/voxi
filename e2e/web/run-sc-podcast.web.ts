@@ -76,14 +76,16 @@ async function authedPage(scan: string): Promise<{ page: Page; d: PlaywrightDriv
     }
   })
   await page.goto(`${base}/?scan=${scan}`)
-  await d.waitFor(ids.welcome.emailInput)
-  await d.type(ids.welcome.emailInput, 'qa@voxi.test')
-  await d.tap(ids.welcome.eulaAccept)
-  await d.tap(ids.welcome.ageConfirm)
-  await d.tap(ids.welcome.continueBtn)
-  await d.waitFor(ids.welcome.otpInput)
-  await d.type(ids.welcome.otpInput, '424242')
-  await d.tap(ids.welcome.continueBtn)
+  // Landing → sign-up flow (post onboarding redesign; mirrors run-auth.web.ts). The old inline welcome form
+  // (welcome.emailInput + eula/age consent + otpInput) was split into a landing CTA → /sign-up email + code.
+  await d.waitFor(ids.welcome.getStarted)
+  await d.tap(ids.welcome.getStarted)
+  await d.waitFor(ids.auth.emailInput)
+  await d.type(ids.auth.emailInput, 'qa@voxi.test') // localpart → token test:qa, matching readMeRemaining
+  await d.tap(ids.auth.continue) // reveals the code field
+  await d.waitFor(ids.auth.codeInput)
+  await d.type(ids.auth.codeInput, '424242')
+  await d.tap(ids.auth.continue) // authenticates → camera
   return { page, d, gates }
 }
 

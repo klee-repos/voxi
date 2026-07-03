@@ -36,11 +36,12 @@ export const StreamEvent = z.discriminatedUnion('type', [
   // The richer, dossier-grounded description replacing the instant first-pass narration (visual; §3.C).
   z.object({ type: z.literal('description_upgrade'), index: z.number().int(), text: z.string() }),
   // A normalized research SECTION — one grounded bucket of the reveal beyond the identity (ANALYSIS-UX §5.A). Voxi
-  // answers four fixed questions about any object; `what_is_it` rides `whatItIs`/`description_upgrade`, `facts` ride
-  // the `fact` events, and the two remaining narrative buckets — `purpose` (what it's for) and `maker` (who made it)
-  // — stream as their own `section` event carrying the grounded text + optional source proof. `bucket` is a FREE
-  // STRING (never a z.enum): a server that adds a 5th bucket must NOT crash shipped clients that know `section` but
-  // not the new value (the tolerant reader skips unknown TYPES, not unknown enum values within a known type). The
+  // answers fixed questions about any object; `what_is_it` rides `whatItIs`/`description_upgrade`, `facts` ride the
+  // `fact` events, and the narrative buckets — `purpose` (what it's for), `maker` (who made it), and `made` (when it
+  // was made) — stream as their own `section` event carrying the grounded text + optional source proof. `bucket` is
+  // a FREE STRING (never a z.enum): a server that adds a bucket must NOT crash shipped clients that know `section`
+  // but not the new value (the tolerant reader skips unknown TYPES, not unknown enum values within a known type),
+  // and a bucket need not be voiceable — `made` streams as a section but is NOT in AUDIO_BUCKETS. The voiceable
   // enum lives only on the `/speech/:bucket` route param. Each carries its own monotonic `index` past the reveal.
   z.object({
     type: z.literal('section'),

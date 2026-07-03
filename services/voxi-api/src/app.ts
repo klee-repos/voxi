@@ -12,6 +12,7 @@ import { mintSignedUrl, mintPhotoUrl, verifyPhotoUrl } from './signing'
 import { threadOwnerVerdict } from './acl'
 import type { StreamEvent } from '../../../packages/shared/src/events'
 import { isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { gatePodcastGeneration, charge, type Store, type Meter } from './metering'
 import { logger } from '../../../packages/telemetry/src/index'
 import { verifyAndApplyTransaction, applyNotification, planForUser, type AppleJwsVerifier, type EntitlementStore } from './appstore'
@@ -229,8 +230,10 @@ export interface Deps {
   messages?: MessageStore
   refunds?: RefundStore
   podcastStatus?: PodcastStatusService
-  /** enqueue a gated podcast render to the worker (called once per fresh token; replays don't re-enqueue). */
-  podcastEnqueue?: (args: { token: string; catalogItemId: string; version: number; subject: string; userId: string }) => Promise<void>
+  /** enqueue a gated podcast render to the worker (called once per fresh token; replays don't re-enqueue). The
+   *  `context` is the server-owned reveal projection (identity + what/purpose/maker + grounded facts) so the Deep
+   *  Dive is built from everything the reveal already learned — never re-derived from a client-supplied subject. */
+  podcastEnqueue?: (args: { token: string; catalogItemId: string; version: number; subject: string; userId: string; context?: PodcastContext }) => Promise<void>
   contributions?: ContributionService
   interviews?: InterviewService
   /** plan label for the settings/subscription surface (free|explorer|voyager). */
@@ -313,11 +316,13 @@ export function buildItemContext(reveal: RevealRecord): string {
   }
   const purpose = section('purpose')
   const maker = section('maker')
+  const made = section('made')
   return [
     `OBJECT: ${reveal.title} (confidence: ${reveal.band}).`,
     reveal.narration ? `WHAT IT IS: ${reveal.narration}` : '',
     purpose ? `WHAT IT'S FOR: ${purpose}` : '',
     maker ? `WHO MADE IT: ${maker}` : '',
+    made ? `WHEN MADE: ${made}` : '',
     facts.length ? 'GROUNDED FACTS you may cite (fact — source):' : '',
     ...facts.map((f) => `  • ${f.text} — ${f.sourceUrl}`),
     'GROUNDING: only assert a falsifiable claim (spec/date/provenance/superlative) if it is grounded above, or you verify it with a fresh web_search/web_crawl and cite the source. If you cannot ground it, say so in persona. The confidence band still rules — do not promote a hedged identity to certain.',
@@ -339,6 +344,41 @@ export function speechBucketText(reveal: RevealRecord | null, userId: string, bu
     (e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section' && e.bucket === bucket && !!e.text,
   )
   return secs.length ? secs[secs.length - 1]!.text : null
+}
+
+/**
+ * The server-owned reveal projection threaded into a Deep Dive render (`PodcastContext`). Owner-scoped and built
+ * ONLY from the caller's DURABLE reveal — the identity + confidence band, the what/purpose/maker sections (with
+ * their grounding when the reveal captured a source), and the grounded `fact` events — so the two-voice interview
+ * is written from everything the reveal already learned, IN ADDITION to the worker's own deep-dive research.
+ * Returns null when there is no reveal or it isn't the caller's: this is defence in depth — the podcast route also
+ * ownership-checks the thread, but that check is a no-op when the id isn't a thread row, so (mirroring every other
+ * reveal reader: speechBucketText, the /context route) we re-check ownership here rather than trust a sibling gate.
+ */
+export function buildPodcastContext(reveal: RevealRecord | null, userId: string): PodcastContext | null {
+  if (!reveal || reveal.ownerUserId !== userId) return null
+  const lastSection = (bucket: string): { text: string; sourceUrl: string } | null => {
+    const secs = reveal.events.filter(
+      (e): e is Extract<StreamEvent, { type: 'section' }> => e.type === 'section' && e.bucket === bucket && !!e.text,
+    )
+    const s = secs[secs.length - 1]
+    return s ? { text: s.text, sourceUrl: s.sourceUrl } : null
+  }
+  const purpose = lastSection('purpose')
+  const maker = lastSection('maker')
+  const made = lastSection('made')
+  const priorFacts = reveal.events
+    .filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+    .map((f) => ({ text: f.text, sourceUrl: f.sourceUrl, sourceTitle: f.sourceTitle, quote: f.quote }))
+  return {
+    subject: reveal.title,
+    band: reveal.band,
+    ...(reveal.narration ? { whatItIs: reveal.narration } : {}),
+    ...(purpose ? { purpose: purpose.text, ...(purpose.sourceUrl ? { purposeSourceUrl: purpose.sourceUrl } : {}) } : {}),
+    ...(maker ? { maker: maker.text, ...(maker.sourceUrl ? { makerSourceUrl: maker.sourceUrl } : {}) } : {}),
+    ...(made ? { whenMade: made.text, ...(made.sourceUrl ? { whenMadeSourceUrl: made.sourceUrl } : {}) } : {}),
+    ...(priorFacts.length ? { priorFacts } : {}),
+  }
 }
 
 /**
@@ -712,12 +752,20 @@ export function createApp(deps: Deps): Hono {
         ?.upsert({ token: r.token, userId, catalogItemId: body.catalogItemId, version, status: 'composing', createdAt: now(), updatedAt: now() })
         .catch(() => {})
     }
+    // Build the server-owned reveal context (identity + what/purpose/maker + grounded facts) so the Deep Dive is
+    // written from everything the reveal already learned. Owner-scoped and NEVER client-trusted: the subject is the
+    // reveal's own title (not the client string), and the whole context is dropped when the reveal isn't the
+    // caller's. Absent a durable reveal (an older item / a non-thread global catalog id) we fall back to the client
+    // subject exactly as before, so nothing regresses.
+    const reveal = deps.reveals ? await deps.reveals.get(body.catalogItemId).catch(() => null) : null
+    const podcastContext = buildPodcastContext(reveal, userId)
+    const subject = podcastContext?.subject ?? body.subject ?? body.catalogItemId
     // Enqueue a render on a FRESH gate (credit spent), OR on an idempotent replay whose episode is NOT ready —
     // i.e. a retry of a failed render, or one the worker lost (a restart). The worker's CAS makes a genuinely
     // in-flight render a no-op, so a redundant enqueue is safe; a replay of a ready episode never re-renders.
     if (r.reason !== 'idempotent_replay' || !alreadyReady) {
       await deps
-        .podcastEnqueue?.({ token: r.token, catalogItemId: body.catalogItemId, version, subject: body.subject ?? body.catalogItemId, userId })
+        .podcastEnqueue?.({ token: r.token, catalogItemId: body.catalogItemId, version, subject, userId, ...(podcastContext ? { context: podcastContext } : {}) })
         .catch((e) =>
           logger.error('podcast_enqueue_failed', e instanceof Error ? e : new Error(String(e)), {
             token: r.token,

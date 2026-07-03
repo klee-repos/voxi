@@ -9,7 +9,8 @@
  * Headphones" (note the unescaped quotes in the 7th claim) — the exact bytes the user's device choked on.
  */
 import { describe, test, expect } from 'bun:test'
-import { parseClaims, recoverClaims } from './providers'
+import { parseClaims, recoverClaims, buildScriptUserPrompt } from './providers'
+import type { PodcastJob, Fact } from './render'
 
 const REAL_MALFORMED = `[
   { "claim": "The Sony MDR-7506 headphones were released in 1991 and have remained in production with virtually no changes since then." },
@@ -52,5 +53,30 @@ describe('research JSON parsing — tolerant to the real failure mode', () => {
   test('handles a ```json fenced wrapper around the array', () => {
     const fenced = '```json\n' + VALID + '\n```'
     expect(parseClaims(fenced)).toEqual(['A 35mm SLR camera.', 'Introduced in 1976.'])
+  })
+})
+
+describe('buildScriptUserPrompt — the reveal ORIENTATION actually reaches the model prompt (P4, non-tautological)', () => {
+  const facts: Fact[] = [{ claim: 'Launched in 1976.', sourceUrl: 'u1', confidence: 1 }]
+
+  test('a populated context renders the identity confidence + what/purpose/maker into the prompt', () => {
+    const job: PodcastJob = {
+      catalogItemId: 'c', version: 1, subject: '1976 Canon AE-1',
+      context: { band: 'CONFIDENT', whatItIs: 'A 35mm SLR film camera.', purpose: 'Taking photographs on film.', maker: 'Made by Canon.', whenMade: 'Produced from 1976 to 1984.' },
+    }
+    const prompt = buildScriptUserPrompt(job, facts)
+    expect(prompt).toContain('OBJECT: 1976 Canon AE-1')
+    expect(prompt).toContain('CONFIDENT confidence')
+    expect(prompt).toContain('WHAT IT IS: A 35mm SLR film camera.')
+    expect(prompt).toContain("WHAT IT'S FOR: Taking photographs on film.")
+    expect(prompt).toContain('WHO MADE IT: Made by Canon.')
+    expect(prompt).toContain('WHEN MADE: Produced from 1976 to 1984.')
+    expect(prompt).toContain('f1 → Launched in 1976.')
+  })
+
+  test('a no-context job is byte-identical to the original bare fact-list build (back-compat)', () => {
+    const bare: PodcastJob = { catalogItemId: 'c', version: 1, subject: 'a camera' }
+    const original = ['OBJECT: a camera', 'FACTS you may cite:', '  f1 → Launched in 1976.'].join('\n')
+    expect(buildScriptUserPrompt(bare, facts)).toBe(original)
   })
 })

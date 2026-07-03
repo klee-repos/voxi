@@ -95,6 +95,7 @@ export const ids = {
     bucketWhat: 'reveal.bucketWhat', // "What it is" — active on band-settle
     bucketPurpose: 'reveal.bucketPurpose', // "What it's for"
     bucketWho: 'reveal.bucketWho', // "Who made it" (maker)
+    whenMade: 'reveal.whenMade', // "when it was made" — a muted date line inside the Maker card (no dock slot)
     bucketFacts: 'reveal.bucketFacts', // "Curious facts" — carries a count badge
     deepDiveIcon: 'reveal.deepDiveIcon', // green Deep Dive (Sparkles) icon, after Facts in the dock row → /podcast; carries state: active|generating|ready (generating = a compose is in flight; ready = a durable episode exists)
     bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
@@ -137,6 +138,7 @@ export const ids = {
     composeElapsed: 'podcast.composeElapsed', // the live "how long" elapsed clock shown while composing
     progressHero: 'podcast.progressHero', // the large animated composing hero (orb + flat progress ring + orbiting disc)
     generate: 'podcast.generate', // the EXPLICIT "Generate a Deep Dive" CTA (idle state) — generation never auto-fires on mount
+    regenerate: 'podcast.regenerate', // ready-player header, LEFT of the close X → forces a FRESH deep dive (fresh version) for retesting
     stillComposing: 'podcast.stillComposing', // non-terminal "taking a while" state (poll budget exhausted, worker may still render) — never the "held it back" fail copy
   },
   conversation: {

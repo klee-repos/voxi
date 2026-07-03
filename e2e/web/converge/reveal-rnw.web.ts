@@ -218,6 +218,20 @@ await check('the section-title tab bar switches sections IN PLACE (tap "What it\
   }
   throw new Error('tab switch did not change the card to purpose in place; card.bucket=' + seen)
 })
+await check('the Maker card renders the grounded "when it was made" line beside the maker prose (reveal.whenMade), a muted date — no dock slot, no separate tab', async () => {
+  // Switch to the maker section IN PLACE, then assert the date line is present with the grounded date text. This is
+  // the deterministic render/nav proof for the new `made` bucket: the value is pinned by testID, the LLM decides nothing.
+  const makerTab = page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="maker"]`)
+  const tabDeadline = Date.now() + 8000
+  while (Date.now() < tabDeadline && (await makerTab.count()) === 0) await new Promise((r) => setTimeout(r, 150))
+  if ((await makerTab.count()) === 0) throw new Error('the maker card tab never appeared (maker did not ground to active)')
+  await makerTab.first().click()
+  // `made` is NOT a tab and NOT a dock slot — it must render only INSIDE the maker card.
+  if ((await page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="made"]`).count()) !== 0) throw new Error('`made` must not be a card tab')
+  await d.waitFor(ids.reveal.whenMade, { timeoutMs: 3000 })
+  const dateText = (await d.state(ids.reveal.whenMade)).text ?? ''
+  if (!/2008|2011/.test(dateText)) throw new Error('reveal.whenMade did not render the grounded date; text="' + dateText + '"')
+})
 await check('the Curious-facts card (reached via its card TAB — Facts is hidden from the dock): ≥3 fact rows, each with its OWN source link showing a title (never a raw URL)', async () => {
   // A card is open (Purpose) from the tab-switch test above. Facts has no dock icon (single flush row) — switch to
   // its TAB in place; it appears once facts grounds to active (CONFIDENT).

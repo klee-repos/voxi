@@ -97,9 +97,14 @@ export class FirecrawlGeminiDraft implements DossierDraftSource {
  * so a unit test pins the history-first lead (the only artifact that catches a wording regression at `bun test`).
  */
 export function brandLaneQuery(input: DossierInput): string {
-  return input.brandLane
-    ? `${input.subject} — company, brand, maker or label: history, founding, what they are best known for, and its ${input.objectType ?? 'merchandise'}`
-    : input.subject
+  if (input.brandLane)
+    return `${input.subject} — company, brand, maker or label: history, founding, what they are best known for, and its ${input.objectType ?? 'merchandise'}`
+  // Item (make+model) lane: LEAD with the subject (retrieval stays centered on it), then append a WHEN-IT-WAS-MADE
+  // angle + the corroborated year hint so the crawl reaches the model's production-date page (fills the `made`
+  // bucket). Class scope stays the bare subject — a category has no specimen production date to seek.
+  if (input.scope === 'item')
+    return `${input.subject}${input.year ? ` ${input.year}` : ''} — history and key facts, including when it was made: its production years, model years, or release date`
+  return input.subject
 }
 
 /** The grounding-path (Gemini Search) subject phrasing — same entity-first framing, same generalized noun. */
@@ -107,7 +112,7 @@ export function groundingSubject(input: DossierInput): string {
   return input.brandLane
     ? `the maker "${input.subject}" — the company, brand, maker or label behind this ${input.objectType ?? 'object'} (who they are, their history, what they are best known for, and why they make things like this)`
     : input.scope === 'item'
-      ? `the ${input.subject}`
+      ? `the ${input.subject}${input.year ? ` (${input.year})` : ''}, including when it was made — its production years or release date`
       : `the category of object: ${input.subject}`
 }
 

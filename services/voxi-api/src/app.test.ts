@@ -4,7 +4,9 @@
  * idempotent podcast gate, account deletion cascade.
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
-import { createApp, speechBucketText, buildItemContext, type Deps, type RevealRecord, type PodcastAssetStore, type PodcastAssetRecord } from './app'
+import { createApp, speechBucketText, buildItemContext, buildPodcastContext, type Deps, type RevealRecord, type RevealStore, type PodcastAssetStore, type PodcastAssetRecord } from './app'
+import type { StreamEvent } from '../../../packages/shared/src/events'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { testVerifier } from './auth'
 import { authorizeRead } from './signing'
 import { memoryStore } from './metering'
@@ -193,8 +195,9 @@ describe('durable per-bucket text (speechBucketText + buildItemContext folds sec
       { type: 'confidence_band', index: 0, band: 'CONFIDENT', title: 'Canon AE-1', candidates: [] },
       { type: 'section', index: 1, bucket: 'purpose', text: 'For enthusiast photographers.', sourceUrl: '', sourceTitle: '', quote: '' },
       { type: 'section', index: 2, bucket: 'maker', text: '', sourceUrl: '', sourceTitle: '', quote: '' }, // empty-marker
-      { type: 'fact', index: 3, text: 'It sold over a million units.', sourceUrl: 'https://ex/1', sourceTitle: 'ex', quote: 'over a million' },
-      { type: 'done', index: 4, sessionId: 't1' },
+      { type: 'section', index: 3, bucket: 'made', text: 'Produced from 1976 to 1984.', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_AE-1', sourceTitle: 'Canon AE-1', quote: 'produced from 1976 to 1984' },
+      { type: 'fact', index: 4, text: 'It sold over a million units.', sourceUrl: 'https://ex/1', sourceTitle: 'ex', quote: 'over a million' },
+      { type: 'done', index: 5, sessionId: 't1' },
     ],
   }
   test('speechBucketText resolves what/purpose/facts, and returns null for an empty-marker maker + a non-owner', () => {
@@ -205,11 +208,20 @@ describe('durable per-bucket text (speechBucketText + buildItemContext folds sec
     expect(speechBucketText(reveal, 'B', 'what')).toBeNull() // non-owner
     expect(speechBucketText(null, 'A', 'what')).toBeNull()
   })
-  test('buildItemContext folds the purpose section (and omits an empty maker) into the grounded chat context', () => {
+  test('buildItemContext folds the purpose + made sections (and omits an empty maker) into the grounded chat context', () => {
     const ctx = buildItemContext(reveal)
     expect(ctx).toContain("WHAT IT'S FOR: For enthusiast photographers.")
     expect(ctx).not.toContain('WHO MADE IT:') // empty-marker maker is not surfaced
+    expect(ctx).toContain('WHEN MADE: Produced from 1976 to 1984.') // the grounded date reaches the voice conversation too
     expect(ctx).toContain('It sold over a million units.')
+  })
+  test('buildPodcastContext projects the made section as whenMade + its provenance (parallel to maker)', () => {
+    const pc = buildPodcastContext(reveal, 'A')!
+    expect(pc.whenMade).toBe('Produced from 1976 to 1984.')
+    expect(pc.whenMadeSourceUrl).toBe('https://en.wikipedia.org/wiki/Canon_AE-1')
+    // a reveal with no `made` section omits both fields (back-compat with old persisted reveals)
+    const noMade: RevealRecord = { ...reveal, events: reveal.events.filter((e) => !(e.type === 'section' && e.bucket === 'made')) }
+    expect(buildPodcastContext(noMade, 'A')!.whenMade).toBeUndefined()
   })
 })
 
@@ -295,6 +307,11 @@ describe('BFF — spoken reveal /v1/threads/:id/speech', () => {
   })
   test('403 owner ACL applies to a bucket route too (no per-bucket leak)', async () => {
     expect((await postBucket(buildSpeech().app, 'facts', 'B')).status).toBe(403)
+  })
+  test('400 on /speech/made — `made` streams as a section but is deliberately NOT voiceable (not in AUDIO_BUCKETS)', async () => {
+    const res = await postBucket(buildSpeech().app, 'made', 'A')
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_bucket')
   })
 })
 
@@ -436,5 +453,80 @@ describe('BFF — delete + regenerate a cataloged item', () => {
     await drain(h.app, id, 'A') // the /stream refund tap would credit +1 here WITHOUT the latch
     expect(await scanRemaining(h.app, 'A')).toBe(before) // meter unchanged — neither charged nor spuriously credited
     await h.close()
+  })
+})
+
+// The Deep Dive is built from the SERVER-OWNED reveal — the subject is the reveal's title (never the client's) and
+// the identity + what/purpose/maker + grounded facts are threaded to the worker. Owner-scoped defence in depth.
+describe('BFF /v1/podcast — reveal CONTEXT threading (DEEPDIVE context completeness)', () => {
+  const revealA: RevealRecord = {
+    threadId: 'c1', ownerUserId: 'A', band: 'CONFIDENT', title: '1976 Canon AE-1', candidates: [],
+    events: [
+      { type: 'fact', index: 2, text: 'Launched in 1976.', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_AE-1', sourceTitle: 'Canon AE-1', quote: 'launched in 1976' } as StreamEvent,
+      { type: 'section', index: 4, bucket: 'purpose', text: 'For making photographs on 35mm film.', sourceUrl: '', sourceTitle: '', quote: '' } as StreamEvent,
+      { type: 'section', index: 5, bucket: 'maker', text: 'Made by Canon of Japan.', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_Inc', sourceTitle: 'Canon', quote: 'Canon' } as StreamEvent,
+    ],
+    narration: 'A 35mm SLR that put automation in reach.', createdAt: 0,
+  }
+  const revealStore = (rec: RevealRecord | null): RevealStore => ({ async put() { return { inserted: true } }, async get(id) { return rec && rec.threadId === id ? rec : null } })
+
+  function podcastDeps(reveals: RevealStore | undefined, threads?: Deps['threads']) {
+    const enqueued: Array<{ subject: string; context?: PodcastContext }> = []
+    const deps: Deps = {
+      verifier: testVerifier,
+      store: memoryStore({ A: { scan: 1, podcast: 5, voiceMin: 10 }, B: { scan: 1, podcast: 5, voiceMin: 10 } }),
+      eve: { async createSession({ userId }) { return { sessionId: `s_${userId}`, continuationToken: 'ct' } }, async *stream() {} },
+      deletion: { async cascade() { return { deleted: [] } } },
+      bucket: 'voxi-photos', sessionOwner: new Map(),
+      reveals, threads,
+      podcastEnqueue: async (a) => { enqueued.push({ subject: a.subject, context: a.context }) },
+    }
+    return { app: createApp(deps), enqueued }
+  }
+  const gen = (app: ReturnType<typeof createApp>, u: string, body: Record<string, unknown>) =>
+    app.request('/v1/podcast', { method: 'POST', headers: { ...auth(u), 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+  test('buildPodcastContext (pure): projects identity + sourced/sourceless sections + priorFacts; owner-scoped', () => {
+    const ctx = buildPodcastContext(revealA, 'A')!
+    expect(ctx.subject).toBe('1976 Canon AE-1')
+    expect(ctx.band).toBe('CONFIDENT')
+    expect(ctx.whatItIs).toContain('automation')
+    expect(ctx.maker).toBe('Made by Canon of Japan.')
+    expect(ctx.makerSourceUrl).toBe('https://en.wikipedia.org/wiki/Canon_Inc') // sourced → carried
+    expect(ctx.purpose).toBe('For making photographs on 35mm film.')
+    expect(ctx.purposeSourceUrl).toBeUndefined() // sourceless section carries no url (never a citeable ref)
+    expect(ctx.priorFacts?.[0]?.text).toBe('Launched in 1976.')
+    expect(buildPodcastContext(revealA, 'B')).toBeNull() // owner mismatch → null
+    expect(buildPodcastContext(null, 'A')).toBeNull()
+  })
+
+  test('the owner: enqueued subject is the reveal TITLE (client subject ignored) and context is threaded', async () => {
+    const { app, enqueued } = podcastDeps(revealStore(revealA))
+    const res = await gen(app, 'A', { catalogItemId: 'c1', version: 1, subject: 'CLIENT-SUPPLIED-WRONG' })
+    expect(res.status).toBe(200)
+    expect(enqueued).toHaveLength(1)
+    const e = enqueued[0]!
+    expect(e.subject).toBe('1976 Canon AE-1') // server-owned, NOT the client string
+    expect(e.context?.subject).toBe('1976 Canon AE-1')
+    expect(e.context?.priorFacts?.[0]?.text).toBe('Launched in 1976.')
+    expect(e.context?.makerSourceUrl).toBe('https://en.wikipedia.org/wiki/Canon_Inc')
+  })
+
+  test('P6 owner-guard: reveals wired but NO threads store — caller B cannot pull A\'s reveal into an episode', async () => {
+    // B posts A's threadId as catalogItemId; with no threads store the asThread ownership check is a no-op, so the
+    // buildPodcastContext owner guard is the one that must refuse. B gets NO context and falls back to the client subject.
+    const { app, enqueued } = podcastDeps(revealStore(revealA))
+    const res = await gen(app, 'B', { catalogItemId: 'c1', version: 1, subject: 'B-CLIENT' })
+    expect(res.status).toBe(200)
+    expect(enqueued[0]!.context).toBeUndefined() // A's reveal NOT leaked into B's episode
+    expect(enqueued[0]!.subject).toBe('B-CLIENT') // graceful fallback
+  })
+
+  test('fallback: no durable reveal → client subject, no context (older / global-catalog items)', async () => {
+    const { app, enqueued } = podcastDeps(revealStore(null))
+    const res = await gen(app, 'A', { catalogItemId: 'global-xyz', version: 1, subject: 'Some Object' })
+    expect(res.status).toBe(200)
+    expect(enqueued[0]!.subject).toBe('Some Object')
+    expect(enqueued[0]!.context).toBeUndefined()
   })
 })

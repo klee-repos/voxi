@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runIdentificationCascade } from '../../services/eve-agent/agent/cascade'
 import { LiveVisionProvider } from '../../services/eve-agent/agent/providers/live-vision'
+import type { VisionProvider, ImageRef, VisionStages } from '../../services/eve-agent/agent/tools/identify_object'
 import { LiveSafetyClassifier } from '../../services/eve-agent/agent/providers/live-safety'
 import { LiveNarrator } from '../../services/eve-agent/agent/providers/live-narrator'
 import { LiveResearcher } from '../../services/eve-agent/agent/providers/live-research'
@@ -50,6 +51,32 @@ interface Fixture {
   expectBrand?: string
   /** an anonymous object: assert NO fabricated maker (the honesty negative control) — a HARD gate. */
   negativeControl?: boolean
+  /** the FACTS bucket must name at least one of these (lowercase) — a HARD gate proving RESEARCHED maker/product
+   *  depth, distinct from the shallow observed-brand mark. This is the true tripwire for the empty-maker bug: the
+   *  buggy class-scope path yields generic category trivia (and actively strips the make/model from facts), while
+   *  the fix's maker lane yields product-specific facts. */
+  expectFacts?: string[]
+  /** simulate a user's OWN (non-web-indexed) photo: drop the reverse-image WEB stage so the reveal arbitrates to
+   *  PROBABLE (the real-world condition — a personal photo has no reverse-image match). This reproduces the AirPods
+   *  Max empty-maker bug that a web-indexed Wikipedia render (→ CONFIDENT) hides. Faithful, not a success-forcing stub. */
+  personalPhoto?: boolean
+  /** the "when it was made" (`made`) bucket MUST name a plausible production year/era — a HARD gate on a fixture
+   *  whose model has a well-known production date. Omit → reported, not gated. */
+  expectMade?: boolean
+  /** the `made` bucket MUST stay honest-empty — a HARD gate. Two hazards: (a) a class-scope / anonymous object has
+   *  no knowable production date; (b) a category/material whose only groundable date is its INVENTION/patent date
+   *  ("plywood was patented in 1865") must NOT be surfaced as THIS object's age. */
+  madeMustBeEmpty?: boolean
+}
+
+/** A user's own photo isn't reverse-image-findable → the web stage returns no corroborating entity. Wrap the live
+ *  provider and drop the web/catalog stages (keep the VLM + its observed-brand evidence), reproducing PROBABLE. */
+class PersonalPhotoVision implements VisionProvider {
+  private inner = new LiveVisionProvider()
+  async analyze(image: ImageRef): Promise<VisionStages> {
+    const s = await this.inner.analyze(image)
+    return { vlm: s.vlm, evidence: (s.evidence ?? []).filter((e) => e.sourceUrl.startsWith('voxi:')) }
+  }
 }
 
 // Real, fetchable Wikipedia lead images (probed). Tier A brands are derived from the display NAME (a logo, no OCR);
@@ -57,16 +84,19 @@ interface Fixture {
 const FIXTURES: Fixture[] = [
   // ── Tier A — logo-brand make+model products (the Xbox failure class) ──
   { id: 'xbox', subject: 'an Xbox Wireless Controller', wikiPage: 'Xbox_Wireless_Controller', tier: 'A', expectBrand: 'xbox' },
-  { id: 'iphone4', subject: 'an iPhone 4', wikiPage: 'IPhone_4', tier: 'A', expectBrand: 'apple' },
+  { id: 'iphone4', subject: 'an iPhone 4', wikiPage: 'IPhone_4', tier: 'A', expectBrand: 'apple', expectMade: true },
+  // A COMMON-word brand (Apple) on a PERSONAL photo → PROBABLE. The empty-maker bug: 'apple' ∈ COMMON_WORD_BRANDS so
+  // deriveMaker declines; the fix's deriveModelMaker maker-lane on [Apple, AirPods Max] must still name Apple.
+  { id: 'airpodsmax', subject: 'a pair of Apple AirPods Max', wikiPage: 'AirPods_Max', tier: 'A', expectBrand: 'apple', expectFacts: ['apple', 'airpods'], personalPhoto: true },
   { id: 'rubik', subject: "a Rubik's Cube", wikiPage: "Rubik's_Cube", tier: 'A', expectBrand: 'rubik' },
-  { id: 'nes', subject: 'a Nintendo Entertainment System', wikiPage: 'Nintendo_Entertainment_System', tier: 'A', expectBrand: 'nintendo' },
+  { id: 'nes', subject: 'a Nintendo Entertainment System', wikiPage: 'Nintendo_Entertainment_System', tier: 'A', expectBrand: 'nintendo', expectMade: true },
   { id: 'eames', subject: 'an Eames Lounge Chair', wikiPage: 'Eames_Lounge_Chair', tier: 'A', expectBrand: 'eames' },
   { id: 'aeron', subject: 'a Herman Miller Aeron chair', wikiPage: 'Aeron_chair', tier: 'A', expectBrand: 'herman miller' },
   { id: 'gameboy', subject: 'a Game Boy', wikiPage: 'Game_Boy', tier: 'A' }, // soft: leading token generic → may honest-empty or OCR "Nintendo"
   { id: 'swissarmy', subject: 'a Swiss Army knife', wikiPage: 'Swiss_Army_knife', tier: 'A' }, // soft: "Swiss" is an ambiguous leading token
   // ── Tier B — text/OCR-brand products ──
-  { id: 'canon', subject: 'a Canon AE-1', wikiPage: 'Canon_AE-1', tier: 'B', expectBrand: 'canon' },
-  { id: 'leica', subject: 'a Leica M3', wikiPage: 'Leica_M3', tier: 'B', expectBrand: 'leica' },
+  { id: 'canon', subject: 'a Canon AE-1', wikiPage: 'Canon_AE-1', tier: 'B', expectBrand: 'canon', expectMade: true },
+  { id: 'leica', subject: 'a Leica M3', wikiPage: 'Leica_M3', tier: 'B', expectBrand: 'leica', expectMade: true },
   { id: 'polaroid', subject: 'a Polaroid SX-70', wikiPage: 'Polaroid_SX-70', tier: 'B', expectBrand: 'polaroid' },
   { id: 'strat', subject: 'a Fender Stratocaster', wikiPage: 'Fender_Stratocaster', tier: 'B', expectBrand: 'fender' },
   { id: 'lespaul', subject: 'a Gibson Les Paul', wikiPage: 'Gibson_Les_Paul', tier: 'B', expectBrand: 'gibson' },
@@ -76,16 +106,18 @@ const FIXTURES: Fixture[] = [
   { id: 'subpop', subject: 'a Sub Pop mug', wikiPage: 'Sub_Pop', tier: 'B', expectBrand: 'sub pop' }, // OCR-brand regression tripwire
   // ── Tier C — unbranded honesty NEGATIVE controls (NO fabricated maker) ──
   { id: 'mug', subject: 'a plain mug', wikiPage: 'Mug', tier: 'C', negativeControl: true },
-  { id: 'plywood', subject: 'a plywood board', wikiPage: 'Plywood', tier: 'C', negativeControl: true },
-  { id: 'brick', subject: 'a brick', wikiPage: 'Brick', tier: 'C', negativeControl: true },
+  // plywood/brick/cinder block carry famous MATERIAL-INVENTION/patent dates — the exact "when made" honesty trap:
+  // the reveal must NOT surface the material's invention date as THIS anonymous specimen's production date.
+  { id: 'plywood', subject: 'a plywood board', wikiPage: 'Plywood', tier: 'C', negativeControl: true, madeMustBeEmpty: true },
+  { id: 'brick', subject: 'a brick', wikiPage: 'Brick', tier: 'C', negativeControl: true, madeMustBeEmpty: true },
   { id: 'spoon', subject: 'a wooden spoon', wikiPage: 'Wooden_spoon', tier: 'C', negativeControl: true },
   { id: 'officechair', subject: 'an office chair', wikiPage: 'Office_chair', tier: 'C', negativeControl: true },
-  { id: 'cuttingboard', subject: 'a cutting board', wikiPage: 'Cutting_board', tier: 'C', negativeControl: true },
+  { id: 'whisk', subject: 'a whisk', wikiPage: 'Whisk', tier: 'C', negativeControl: true }, // was 'cuttingboard' — the Cutting_board lead image is a MUNDIAL-branded chef's knife (not unbranded); Whisk's lead is plain unbranded metal whisks
   { id: 'clothespin', subject: 'a clothespin', wikiPage: 'Clothespin', tier: 'C', negativeControl: true },
-  { id: 'cinderblock', subject: 'a cinder block', wikiPage: 'Cinder_block', tier: 'C', negativeControl: true },
+  { id: 'cinderblock', subject: 'a cinder block', wikiPage: 'Cinder_block', tier: 'C', negativeControl: true, madeMustBeEmpty: true },
 ]
 
-interface Captured { band: string; title: string; what: string; purpose: string; maker: string; facts: string[] }
+interface Captured { band: string; title: string; what: string; purpose: string; maker: string; made: string; facts: string[] }
 
 async function wikiImage(page: string): Promise<string | null> {
   for (let i = 0; i < 4; i++) {
@@ -98,13 +130,13 @@ async function wikiImage(page: string): Promise<string | null> {
   return null
 }
 
-async function captureBuckets(imageUri: string): Promise<Captured> {
+async function captureBuckets(imageUri: string, personalPhoto = false): Promise<Captured> {
   const whatTokens: string[] = []
   const sections: Record<string, string> = {}
   const facts: string[] = []
   let band = '', title = '', upgrade = ''
   for await (const ev of runIdentificationCascade('proof', { uri: imageUri, userId: 'proof' }, {
-    vision: new LiveVisionProvider(),
+    vision: personalPhoto ? new PersonalPhotoVision() : new LiveVisionProvider(),
     safety: new LiveSafetyClassifier(),
     narrator: new LiveNarrator(),
     researcher: new LiveResearcher(),
@@ -116,8 +148,13 @@ async function captureBuckets(imageUri: string): Promise<Captured> {
     else if (ev.type === 'section') sections[ev.bucket] = ev.text
     else if (ev.type === 'fact') facts.push(ev.text)
   }
-  return { band, title, what: upgrade || whatTokens.join(' '), purpose: sections.purpose ?? '', maker: sections.maker ?? '', facts }
+  return { band, title, what: upgrade || whatTokens.join(' '), purpose: sections.purpose ?? '', maker: sections.maker ?? '', made: sections.made ?? '', facts }
 }
+
+/** A `made` bucket "names a date" when it carries a 4-digit year, a decade ("1980s"), or an era word — enough to
+ *  deterministically prove the reveal surfaced WHEN it was made (quality of the phrasing is the judge's, not ours). */
+const namesADate = (made: string): boolean =>
+  /\b(1[0-9]\d\d|20\d\d)\b/.test(made) || /\b\d{2,4}s\b/.test(made) || /\b(century|era|decade|antiquity|medieval|victorian|mid-century)\b/i.test(made)
 
 const sampleFor = (fx: Fixture, cap: Captured, b: RubricKey): string => {
   const body =
@@ -142,6 +179,7 @@ async function main(): Promise<void> {
   const next: typeof baseline = {}
   let brandFailures = 0
   let honestyFailures = 0
+  let madeFailures = 0
 
   const run = FIXTURES.filter((f) => TIERS.has(f.tier) && (ONLY.length === 0 || ONLY.includes(f.id)))
   console.log(`running ${run.length} fixtures: ${run.map((f) => f.id).join(', ')}\n`)
@@ -152,12 +190,13 @@ async function main(): Promise<void> {
     if (!url) { console.log('  (no image — skipped)\n'); continue }
     const { b64, mime } = await loadImageBytes(url)
     let cap: Captured
-    try { cap = await captureBuckets(`data:${mime};base64,${b64}`) }
+    try { cap = await captureBuckets(`data:${mime};base64,${b64}`, fx.personalPhoto) }
     catch (e) { console.log(`  ✗ cascade error: ${(e as Error).message}\n`); continue }
     console.log(`  band=${cap.band}  title="${cap.title}"`)
     console.log(`  what:    ${cap.what || '(empty)'}`)
     console.log(`  purpose: ${cap.purpose || '(empty)'}`)
     console.log(`  maker:   ${cap.maker || '(empty)'}`)
+    console.log(`  made:    ${cap.made || '(empty)'}`)
     console.log(`  facts (${cap.facts.length}): ${cap.facts.map((f) => `\n     • ${f}`).join('')}`)
 
     // ── DETERMINISTIC HARD GATES (the proof; the LLM never decides these) ──
@@ -170,6 +209,27 @@ async function main(): Promise<void> {
       else { brandFailures++; console.log(`  ✗ BRAND: maker/what does NOT name "${fx.expectBrand}" (the user's complaint — maker/what failed)`) }
     } else {
       console.log(`  · (soft) maker="${cap.maker || 'honest-empty'}" — reported, not gated`)
+    }
+    // Researched-depth gate (independent of the shallow observed-brand mark): the FACTS must carry product-specific
+    // research. This is the true tripwire for the empty-maker bug — the buggy class-scope path yields only generic
+    // category trivia (and strips the make/model), so it FAILS here even though the observation still names the brand.
+    if (fx.expectFacts) {
+      const factsHay = cap.facts.join(' ').toLowerCase()
+      const hit = fx.expectFacts.find((t) => factsHay.includes(t.toLowerCase()))
+      if (hit) console.log(`  ✓ depth: facts carry researched product content ("${hit}")`)
+      else { brandFailures++; console.log(`  ✗ DEPTH: facts name none of ${JSON.stringify(fx.expectFacts)} — generic trivia, the empty-maker bug (no researched maker info)`) }
+    }
+    // ── "WHEN IT WAS MADE" gates (the new `made` bucket; the LLM never decides these) ──
+    if (fx.madeMustBeEmpty) {
+      // The honesty spine for dates: an anonymous/class-scope object, or one whose only groundable date is its
+      // category/material INVENTION date, must NOT surface a `made` date for THIS specimen.
+      if (cap.made.trim() && namesADate(cap.made)) { madeFailures++; console.log(`  ✗ MADE-HONESTY: surfaced a date for an object with no knowable production date → "${cap.made}"`) }
+      else console.log('  ✓ made-honesty: no fabricated production date (honest-empty)')
+    } else if (fx.expectMade) {
+      if (cap.made.trim() && namesADate(cap.made)) console.log(`  ✓ made: names when it was made → "${cap.made}"`)
+      else { madeFailures++; console.log(`  ✗ MADE: the "when it was made" bucket names no production year/era (got "${cap.made || 'empty'}")`) }
+    } else if (cap.made.trim()) {
+      console.log(`  · (soft) made="${cap.made}" — reported, not gated`)
     }
 
     // ── QUALITY (report-only judge scores + baseline delta) ──
@@ -190,8 +250,8 @@ async function main(): Promise<void> {
 
   if (WRITE_BASELINE) { writeFileSync(baselinePath, JSON.stringify(next, null, 2) + '\n'); console.log(`baseline-buckets.json FROZEN (${Object.keys(next).length} fixtures).`) }
   else console.log('(re-run with --write-baseline to freeze the current output as the BEFORE)')
-  console.log(`\nDETERMINISTIC GATES — brand: ${brandFailures === 0 ? 'PASS' : `${brandFailures} FAILURE(S)`}  |  honesty: ${honestyFailures === 0 ? 'PASS' : `${honestyFailures} FAILURE(S)`}`)
-  process.exit(brandFailures === 0 && honestyFailures === 0 ? 0 : 1)
+  console.log(`\nDETERMINISTIC GATES — brand: ${brandFailures === 0 ? 'PASS' : `${brandFailures} FAILURE(S)`}  |  honesty: ${honestyFailures === 0 ? 'PASS' : `${honestyFailures} FAILURE(S)`}  |  made: ${madeFailures === 0 ? 'PASS' : `${madeFailures} FAILURE(S)`}`)
+  process.exit(brandFailures === 0 && honestyFailures === 0 && madeFailures === 0 ? 0 : 1)
 }
 
 await main()

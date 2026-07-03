@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test'
-import { estimateProgress, formatElapsed, formatClock, PROGRESS_CAP } from './composeProgress'
+import { estimateProgress, formatElapsed, formatClock, PROGRESS_CAP, seekTargetSeconds } from './composeProgress'
 
 describe('estimateProgress — honest, eased, capped', () => {
   test('non-positive / invalid elapsed → 0', () => {
@@ -55,5 +55,26 @@ describe('formatClock / formatElapsed', () => {
   test('formatElapsed takes ms', () => {
     expect(formatElapsed(62_000)).toBe('1:02')
     expect(formatElapsed(-1)).toBe('0:00')
+  })
+})
+
+describe('seekTargetSeconds — the scrubber tap/drag → seconds math (the on-device seek)', () => {
+  test('maps x across the track width to a proportional second in [0, duration]', () => {
+    expect(seekTargetSeconds(0, 200, 30)).toBe(0) // far left → start
+    expect(seekTargetSeconds(200, 200, 30)).toBe(30) // far right → end
+    expect(seekTargetSeconds(100, 200, 30)).toBe(15) // middle → half
+    expect(seekTargetSeconds(140, 200, 30)).toBeCloseTo(21, 5) // 70% → 0.7 * 30
+  })
+
+  test('clamps out-of-range x to [0, duration] (a drag past either edge)', () => {
+    expect(seekTargetSeconds(-50, 200, 30)).toBe(0)
+    expect(seekTargetSeconds(9999, 200, 30)).toBe(30)
+  })
+
+  test('returns null (no-op, never a NaN seek) when not yet seekable', () => {
+    expect(seekTargetSeconds(100, 0, 30)).toBeNull() // width not measured
+    expect(seekTargetSeconds(100, 200, 0)).toBeNull() // duration unknown
+    expect(seekTargetSeconds(Number.NaN, 200, 30)).toBeNull() // no locationX
+    expect(seekTargetSeconds(100, 200, Number.POSITIVE_INFINITY)).toBeNull()
   })
 })

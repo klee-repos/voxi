@@ -1,15 +1,29 @@
 {
   "pkg": "voxi",
   "globalName": "Voxi",
+  "projectId": "7aa4c428-76f1-4143-bd16-5fa4b2c8ba00",
   "shape": "package",
   "entry": ".design-sync/entry.ts",
   "srcDir": "app/src/components",
   "tsconfig": ".design-sync/tsconfig.bundle.json",
   "extraFonts": ".design-sync/fonts.css",
+  "readmeHeader": ".design-sync/conventions.md",
   "provider": { "component": "ThemeProvider" },
   "overrides": {
     "Screen": { "cardMode": "column" },
-    "ConfirmDialog": { "cardMode": "single", "viewport": "390x420" }
+    "AppHeader": { "cardMode": "column" },
+    "TextField": { "cardMode": "column" },
+    "ErrorState": { "cardMode": "column" },
+    "CodeInput": { "cardMode": "column" },
+    "LegalNote": { "cardMode": "column" },
+    "SafetyRefusal": { "cardMode": "column" },
+    "Scrubber": { "cardMode": "column" },
+    "ConfirmDialog": { "cardMode": "single", "viewport": "390x420" },
+    "RevealMoreMenu": { "cardMode": "single", "viewport": "390x420" },
+    "LoadingOverlay": { "cardMode": "single", "viewport": "390x480" },
+    "RecentCard": { "cardMode": "single", "viewport": "390x520" },
+    "ComposeHero": { "cardMode": "single", "viewport": "390x560" },
+    "BucketCard": { "cardMode": "single", "viewport": "390x560" }
   },
   "componentSrcMap": {
     "Screen": "app/src/components/ui.tsx",
@@ -47,7 +61,6 @@
     "GlassFill": "app/src/components/GlassFill.tsx",
     "BucketDock": "app/src/components/RevealDock.tsx",
     "BucketCard": "app/src/components/RevealDock.tsx",
-    "DrawerHost": "app/src/components/Drawer.tsx",
     "DrawerMenu": "app/src/components/Drawer.tsx"
   },
   "dtsPropsFor": {
@@ -64,12 +77,28 @@
     "Screen": "children: React.ReactNode; id?: string; center?: boolean; padded?: boolean; header?: React.ReactNode; style?: object",
     "ConfidenceChip": "band: 'CONFIDENT' | 'PROBABLE' | 'UNKNOWN'",
     "Orb": "id: string; state?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'uncertain'; size?: number; style?: object",
-    "KaraokeTranscript": "transcript: Array<{ speaker: 'ARLO' | 'MAVE'; text: string }>; positionSec: number; durationSec: number; surface: object; reduceMotion: boolean",
-    "CatalogTile": "item: { threadId: string; title: string; revealTitle?: string; band?: 'CONFIDENT' | 'PROBABLE' | 'UNKNOWN'; createdAt: number; photoUrl?: string | null }; onPress: () => void; variant?: 'grid' | 'carousel'; testID?: string; photoTestID?: string; style?: object",
-    "LegalNote": "verb?: string",
+    "PulseRings": "active: boolean; reduceMotion: boolean; color: string; size?: number; children?: React.ReactNode",
     "OfflineBanner": "visible: boolean",
     "SafetyRefusal": "visible: boolean; message?: string",
+    "CaptureOrb": "id?: string; busy: boolean; onPress: () => void; size?: number",
+    "CatalogTile": "item: { threadId: string; title: string; revealTitle?: string; band?: 'CONFIDENT' | 'PROBABLE' | 'UNKNOWN'; createdAt: number; photoUrl?: string | null }; onPress: () => void; variant?: 'grid' | 'carousel'; testID?: string; photoTestID?: string; style?: object",
+    "CodeInput": "id: string; value: string; onChangeText: (v: string) => void; onComplete?: (code: string) => void; length?: number; autoFocus?: boolean",
+    "ComposeHero": "startedAt: number | null; title: string; copy: string; surface: object; reduceMotion?: boolean",
     "ConfirmDialog": "visible: boolean; title: string; message: string; confirmLabel: string; cancelLabel?: string; destructive?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void; reduceMotion: boolean; surface: object; dialogTestId: string; cancelTestId: string; confirmTestId: string",
-    "CodeInput": "id: string; value: string; onChangeText: (v: string) => void; onComplete?: (code: string) => void; length?: number; autoFocus?: boolean"
+    "KaraokeTranscript": "transcript: Array<{ speaker: 'ARLO' | 'MAVE'; text: string }>; positionSec: number; durationSec: number; surface: object; reduceMotion: boolean",
+    "LegalNote": "verb?: string",
+    "LoadingOverlay": "run: object; kind: 'analyze' | 'revisit'; isRevisit: boolean; reduceMotion: boolean; onImage: boolean; winH: number; bottomInset: number; scrimColor: string; accentColor: string; hideStatus?: boolean; style?: object",
+    "LoadingPill": "text: string; ack?: string; orbState?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'uncertain'; onImage?: boolean; textTestId?: string; textData?: object; ackTestId?: string",
+    "PlayerTransport": "playing: boolean; onPlayPause: () => void; onSkipBack: () => void; onSkipForward: () => void; surface: object",
+    "RecentCard": "open: boolean; onClose: () => void; threads: Array<{ threadId: string; title: string; revealTitle?: string; band?: 'CONFIDENT' | 'PROBABLE' | 'UNKNOWN'; createdAt: number; photoUrl?: string | null }>; isLoading: boolean; isError: boolean; onRetry: () => void; onOpen: (item: object) => void; onSeeAll: () => void",
+    "Scrubber": "positionSec: number; durationSec: number; onSeek: (seconds: number) => void; surface: object",
+    "RevealMoreMenu": "visible: boolean; onRegenerate: () => void; onDelete: () => void; onClose: () => void; reduceMotion: boolean; surface: object",
+    "AppHeader": "leading?: 'back' | 'menu' | 'none'; showClose?: boolean; onClose?: () => void; onLeadingPress?: () => void; title?: string; titleNode?: React.ReactNode; showWordmark?: boolean; onMedia?: boolean; fallback?: string; showMore?: boolean; onMore?: () => void",
+    "AudioElement": "id: string; src?: string; playing: boolean; onPlayingChange?: (playing: boolean) => void; seekToStartOnPlay?: boolean; onProgress?: (positionSec: number, durationSec: number) => void",
+    "FadeRise": "children: React.ReactNode; reduceMotion: boolean; style?: object; delay?: number",
+    "GlassFill": "radiusStyle?: object; strong?: boolean; card?: boolean",
+    "BucketDock": "statuses: Record<'what' | 'purpose' | 'maker' | 'facts', 'loading' | 'active' | 'empty' | 'unavailable' | 'hidden'>; read: Record<'what' | 'purpose' | 'maker' | 'facts', boolean>; deepDiveState?: 'active' | 'generating' | 'ready'; reduceMotion: boolean; surface: object; onOpen: (k: 'what' | 'purpose' | 'maker' | 'facts' | 'deepdive' | 'conversation') => void",
+    "BucketCard": "bucket: 'what' | 'purpose' | 'maker' | 'facts'; body: string; facts?: Array<{ text: string; sourceUrl: string; sourceTitle: string; quote: string }>; audioUrl: string | null; audioState: 'idle' | 'loading' | 'ready' | 'failed'; playing: boolean; reduceMotion: boolean; surface: object; tabs: Array<'what' | 'purpose' | 'maker' | 'facts'>; onTab: (k: 'what' | 'purpose' | 'maker' | 'facts') => void; onPlayToggle: () => void; onClose: () => void",
+    "DrawerMenu": "onNavigate: () => void; width: number"
   }
 }

@@ -21,6 +21,7 @@ import { Orb } from '../src/components/Orb'
 import { OfflineBanner, SafetyRefusal } from '../src/components/Banners'
 import { BucketDock, BucketCard, type DockKey, type AudioState } from '../src/components/RevealDock'
 import { RevealMoreMenu } from '../src/components/RevealMoreMenu'
+import { RevealTopBar } from '../src/components/RevealTopBar'
 import { ConfirmDialog } from '../src/components/ConfirmDialog'
 import { GlassFill } from '../src/components/GlassFill'
 import { LoadingOverlay } from '../src/components/LoadingOverlay'
@@ -29,7 +30,7 @@ import { RecentCard } from '../src/components/RecentCard'
 import { CameraView, type CameraViewHandle } from '../src/components/CameraView'
 import { SurfaceProvider, useTheme } from '../src/lib/themeProvider'
 import { ids, tid, tidWith } from '../src/lib/testid'
-import { radius, space, typeStyles, type, shadow, dark, scrim, hit } from '../src/lib/theme'
+import { radius, space, typeStyles, floatShadow, dark, scrim, hit } from '../src/lib/theme'
 import { useConnectivity } from '../src/lib/connectivity'
 import { useApi } from '../src/lib/api'
 import { ApiError } from '../src/lib/apiClient'
@@ -441,25 +442,18 @@ function RevealBody(): React.ReactElement {
   )
 
   // An item's "back" slides to the VIEWFINDER in place (page 0) — never a route change. The ⋯ opens the MORE sheet.
-  // Photo-detail bar: back / ⋯ ride glass discs in the corners, the object NAME rides a matching glass PILL in the
-  // same row. No full-width scrim band — each element wraps its own content (the pill hugs the text with side +
-  // vertical padding so nothing is capped), and the translucent glass shows the photo through rather than graying
-  // the whole top. Tapping the name still toggles the how-sure/correct/tip details below. `reveal.title` = name only.
+  // Photo-detail bar: the "One bar" — back · object NAME (left-aligned) · ⋯ collected into ONE floating glass pill
+  // (RevealTopBar), rhyming with the floating bottom dock. Pre-settle (`!band`) the name slot shows an Identifying
+  // placeholder. Tapping the name still toggles the how-sure/correct/tip details below. `reveal.title` = name only.
   const mediaBackHeader = (
-    <AppHeader
-      leading="back"
-      onMedia
-      onLeadingPress={toViewfinder}
+    <RevealTopBar
+      band={band}
+      title={title}
       showMore={!!threadId}
+      onBack={toViewfinder}
       onMore={() => { haptics.tick(); setMenuOpen(true) }}
-      titleNode={
-        band ? (
-          <Pressable {...tidWith(ids.reveal.howSure, { band }, 'The name — tap for details')} accessibilityRole="button" onPress={() => setShowDetails((v) => !v)} style={styles.titlePill}>
-            <GlassFill radiusStyle={styles.titlePillRadius} />
-            <Text {...tid(ids.reveal.title)} numberOfLines={2} style={styles.headerTitle}>{title || 'An object of some interest'}</Text>
-          </Pressable>
-        ) : undefined
-      }
+      onToggleDetails={() => setShowDetails((v) => !v)}
+      reduceMotion={reduceMotion}
     />
   )
   // Discard a failed capture and return to the viewfinder (clears the errored item from the store).
@@ -649,7 +643,7 @@ function RevealBody(): React.ReactElement {
           loading it's the Orb pill overlay above. STATIC glass card; only the content fades in on settle. */}
       {band && !onViewfinder ? (
         <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, openBucket || transitioning ? styles.dockHidden : null]} pointerEvents={openBucket || transitioning ? 'none' : 'box-none'}>
-          <View style={[styles.floatCard, shadow]}>
+          <View style={[styles.floatCard, floatShadow]}>
             <GlassFill radiusStyle={{ borderRadius: radius.xl }} />
             <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
               <SurfaceProvider surface="dark">
@@ -712,6 +706,7 @@ function RevealBody(): React.ReactElement {
         <BucketCard
           bucket={openBucket}
           {...cardBody(openBucket)}
+          whenMade={openBucket === 'maker' ? (sections.made?.text ?? '') : ''}
           facts={openBucket === 'facts' ? facts : undefined}
           audioUrl={audioUrls[openAudio] ?? null}
           audioState={audioStates[openAudio] ?? 'idle'}
@@ -841,12 +836,7 @@ const styles = StyleSheet.create({
   // home indicator, with a comfortable side + bottom margin (reads more elegant than an edge-to-edge bar).
   floatWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: space.md, alignItems: 'center' },
   floatCard: { width: '100%', maxWidth: 460, borderRadius: radius.xl, paddingHorizontal: space.lg, paddingVertical: space.lg },
-  // The object NAME rides a glass PILL (matching the corner discs), centered in the control row: the pill hugs the
-  // text with side + vertical padding (nothing capped/touching), translucent so the photo shows through instead of
-  // graying the whole top. GlassFill's warm tint keeps white text ≥AA over any photo (theme.test glass guard).
-  titlePill: { alignSelf: 'center', maxWidth: '100%', borderRadius: radius.lg, overflow: 'hidden', paddingHorizontal: space.md, paddingVertical: space.xs + 2 },
-  titlePillRadius: { borderRadius: radius.lg },
-  headerTitle: { fontFamily: type.family.sans['700'], fontSize: 21, lineHeight: 26, letterSpacing: -0.3, color: '#FFFFFF', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.35)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
+  // (The reveal ITEM's top bar now lives in RevealTopBar — the "One bar" glass pill; its styles moved with it.)
   // While a morph card is open it fully replaces the dock — hide the dock so it doesn't bleed through the card's
   // translucent glass (and so the card's backdrop-filter isn't sampling a second glass layer beneath it).
   dockHidden: { opacity: 0 },

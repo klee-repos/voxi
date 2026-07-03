@@ -26,6 +26,18 @@ export function formatElapsed(ms: number): string {
 }
 
 /**
+ * Map a scrubber tap/drag x (px, relative to the track's left edge) to an ABSOLUTE seek target in seconds.
+ * Pure + platform-agnostic — native and react-native-web both feed a responder-event `locationX`. Returns null
+ * when not yet seekable (unknown duration or an unmeasured track width) so the caller no-ops instead of seeking
+ * to NaN. Clamped to [0, durationSec]. This is the exact position math the on-device scrubber runs.
+ */
+export function seekTargetSeconds(localX: number, trackWidth: number, durationSec: number): number | null {
+  if (!Number.isFinite(localX) || !Number.isFinite(trackWidth) || trackWidth <= 0) return null
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return null
+  return Math.min(durationSec, Math.max(0, (localX / trackWidth) * durationSec))
+}
+
+/**
  * A media clock string from SECONDS: "m:ss" under an hour, "h:mm:ss" at/over an hour (matches the Spotify scrubber
  * "1:02" / "-1:03:18"). Negative/NaN/∞ → "0:00" (so an unloaded duration renders cleanly, never "NaN:NaN").
  */

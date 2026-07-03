@@ -94,6 +94,24 @@ function looksSensitiveOrJunk(s: string): boolean {
   return false
 }
 
+/** Corporate / label FORM suffixes the VLM often APPENDS to a make that are NOT physically on the object ("Sub Pop
+ *  Records" for a wordmark that reads only "SUB POP"). A trailing run of these is stripped so the corroboration can
+ *  match the brand AS BORNE by the object (§13.3, the Sub Pop-logo regression). WHOLE trailing tokens only. */
+const ENTITY_SUFFIXES: ReadonlySet<string> = new Set([
+  'records', 'recordings', 'inc', 'incorporated', 'ltd', 'limited', 'llc', 'plc', 'corp', 'corporation',
+  'company', 'gmbh',
+])
+
+/** Drop a trailing run of corporate/label-form suffix tokens ("Sub Pop Records" → "Sub Pop"). Never strips to empty
+ *  (keeps ≥1 token) and returns the brand UNCHANGED when it bears no such suffix — so it only ever shortens a
+ *  clearly-corporate name, never a plain one. */
+export function stripEntitySuffix(brand: string): string {
+  const toks = brand.trim().split(/\s+/).filter(Boolean)
+  let end = toks.length
+  while (end > 1 && ENTITY_SUFFIXES.has(foldAlnum(toks[end - 1]!))) end--
+  return toks.slice(0, end).join(' ')
+}
+
 /**
  * The distilled OBSERVED BRAND (§13.3, adversarial #8/#17/#19/#22). Derived from the CLEAN structured `make` — NOT
  * reconstructed from a raw OCR array (the real Sub Pop capture is ['S','U','B','P','O','P'], whose naive join is
@@ -105,7 +123,15 @@ function looksSensitiveOrJunk(s: string): boolean {
 export function observedBrandFrom(make: string | undefined, readOff: string): string | undefined {
   const brand = cleanField(make)
   if (!brand || looksSensitiveOrJunk(brand)) return undefined
-  return foldAlnum(readOff).includes(foldAlnum(brand)) ? brand : undefined
+  const hay = foldAlnum(readOff)
+  if (hay.includes(foldAlnum(brand))) return brand
+  // The VLM may append a corporate/label suffix the object does NOT bear ("Sub Pop Records" for a "SUB POP"
+  // wordmark) — defeating the full-string corroboration. Corroborate the suffix-stripped CORE and return THAT (what
+  // the object actually reads), so a logo whose make carries an inferred "…Records" still surfaces its brand and the
+  // maker lane fires instead of falling to a generic class ("Logo") reveal (§13.3, the Sub Pop-logo regression).
+  const core = stripEntitySuffix(brand)
+  if (core !== brand && !looksSensitiveOrJunk(core) && hay.includes(foldAlnum(core))) return core
+  return undefined
 }
 
 /**

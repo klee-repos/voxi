@@ -63,7 +63,7 @@ describe('ElevenLabsTts — each speaker is synthesized in its own configured vo
     await tts.synthesize(script)
     expect(calls).toHaveLength(2)
     expect(calls[0]!).toContain('6u6JbqKdaQy89ENzLSju') // arlo
-    expect(calls[1]!).toContain('q0IMILNRPxOgtBTS4taI') // mave (Matt)
+    expect(calls[1]!).toContain('s3TPKV1kjDlVtZbl4Ksh') // mave
   })
 
   test('a caller-supplied voice pair overrides the default (the future user-config seam)', async () => {
@@ -76,7 +76,7 @@ describe('ElevenLabsTts — each speaker is synthesized in its own configured vo
   })
 
   test('DEFAULT_PODCAST_VOICES pins the exact shipped IDs', () => {
-    expect(DEFAULT_PODCAST_VOICES).toEqual({ arlo: '6u6JbqKdaQy89ENzLSju', mave: 'q0IMILNRPxOgtBTS4taI' })
+    expect(DEFAULT_PODCAST_VOICES).toEqual({ arlo: '6u6JbqKdaQy89ENzLSju', mave: 's3TPKV1kjDlVtZbl4Ksh' })
   })
 })
 

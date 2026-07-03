@@ -266,6 +266,7 @@ function Waveform({ playing, color }: { playing: boolean; color: string }): Reac
 export function BucketCard({
   bucket,
   body,
+  whenMade,
   facts,
   audioUrl,
   audioState,
@@ -279,6 +280,8 @@ export function BucketCard({
 }: {
   bucket: MorphKey
   body: string
+  /** the "when it was made" grounded date (maker card only) — a muted line beside the maker prose; '' when absent. */
+  whenMade?: string
   facts?: RevealFact[]
   audioUrl: string | null
   audioState: AudioState
@@ -305,6 +308,9 @@ export function BucketCard({
           { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
         ],
   }
+  // The grounded "when it was made" date, maker card only (trimmed; '' when absent). It does NOT enter `isEmpty` —
+  // an empty maker with only a date has no voiced audio, and the date is a visual sibling, not the maker prose.
+  const makerDate = bucket === 'maker' ? (whenMade ?? '').trim() : ''
   const isEmpty = !body && (!facts || facts.length === 0)
   const hasAudio = !isEmpty
   const playLabel = audioState === 'failed' ? 'Audio unavailable — retry' : audioState === 'loading' ? 'Preparing…' : playing ? 'Stop' : 'Hear it'
@@ -366,12 +372,31 @@ export function BucketCard({
           ) : body ? (
             // Prose buckets (what / purpose / maker) show ONLY the grounded text — larger + looser for reading.
             <Text {...(bucket === 'what' ? tid(ids.reveal.whatItIs) : {})} style={[typeStyles.body, { color: surface.text, fontSize: 17, lineHeight: 26 }]}>{body}</Text>
+          ) : bucket === 'maker' && makerDate ? (
+            // Date-known / maker-unknown (Lviv "Painter unknown, 1830"): the date LEADS below, so the one grounded
+            // fact isn't buried under a negation. The made block (rendered next) carries the softened maker note.
+            null
           ) : (
             // Honest empty — an ANSWER, not a broken icon (design review 3a).
             <Text style={[typeStyles.body, { color: surface.textMuted, fontStyle: 'italic', fontSize: 16, lineHeight: 24 }]}>
               {bucket === 'maker' ? 'The maker keeps their counsel — nothing I can prove.' : 'Nothing grounded to add on this one.'}
             </Text>
           )}
+          {/* "When it was made" — a compact, muted date line beside the maker prose (no dock slot; design.md
+              maker-adjacent metadata, Mobbin museum pattern). LAST child inside cardScroll so it scrolls with the
+              prose and never competes with the pinned transport. textMuted (AA over the card scrim), never
+              textTertiary (sub-AA). When the maker prose is present the date follows it under a hairline; when the
+              maker is unknown the date LEADS and a softened note follows. */}
+          {bucket === 'maker' && makerDate ? (
+            <View style={[styles.madeBlock, body ? { marginTop: space.md, paddingTop: space.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: surface.border } : null]}>
+              <Text {...tid(ids.reveal.whenMade)} style={[typeStyles.body, { color: surface.textMuted, fontSize: 15, lineHeight: 22 }]}>{makerDate}</Text>
+              {!body ? (
+                <Text style={[typeStyles.body, { color: surface.textMuted, fontStyle: 'italic', fontSize: 15, lineHeight: 22, marginTop: space.sm }]}>
+                  Who made it isn't something I can prove.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </ScrollView>
 
         {hasAudio ? (
@@ -436,6 +461,7 @@ const styles = StyleSheet.create({
   // and the card hugs it, but on overflow only the ScrollView shrinks+scrolls — the fixed tab bar + pinned transport
   // never fall below the screen edge (RN's default flexShrink is 0; docs/REVEAL-CARD-CLEANUP-PLAN.md §2a).
   cardScroll: { marginTop: space.md, flexShrink: 1 },
+  madeBlock: {}, // "when it was made" line; the hairline + top spacing are applied inline only when maker prose precedes it
   factRow: { paddingVertical: space.sm, gap: space.xs }, // divider list (IMDb-trivia): fact text + its own source link
   factSourceRow: { alignSelf: 'flex-start', minHeight: hit.min, justifyContent: 'center' }, // per-fact source link
   // The pinned audio transport: a filled circular play/pause + the state label + a calm static level ornament.

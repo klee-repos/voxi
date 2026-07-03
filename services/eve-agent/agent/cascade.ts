@@ -122,6 +122,22 @@ const MATERIAL_WORDS: ReadonlySet<string> = new Set([
   'canvas', 'nylon', 'polyester', 'bamboo', 'wicker', 'rattan',
 ])
 
+/** Descriptive adjectives (colour, size, shape, condition, texture) a VLM prepends to a category — "Red Perforated
+ *  Brick", "Vintage Chair" — that are NEVER a maker. Kept SEPARATE from MATERIAL_WORDS so each set stays semantic;
+ *  screened ONLY in `leadingBrandToken` (deriveMaker branch 3), so the shipped observedBrand lane (branch 1) is
+ *  untouched — a real colour-named brand READ OFF the object (observedBrand "Orange") still works. This closes the
+ *  leading-adjective brand-lane MISFIRE (a "Red Perforated Brick" whose leading token "Red"/"Perforated" is not a
+ *  material nor part of the category → slipped through as a distinctive "brand" → off-topic entity research). Only
+ *  makes leadingBrandToken MORE conservative — a real brand is never one of these words. */
+const DESCRIPTOR_WORDS: ReadonlySet<string> = new Set([
+  'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'black', 'white', 'grey', 'gray',
+  'silver', 'gold', 'golden', 'beige', 'tan', 'turquoise', 'violet', 'maroon', 'navy', 'teal', 'multicolored',
+  'small', 'large', 'big', 'tiny', 'mini', 'giant', 'round', 'square', 'rectangular', 'oval', 'flat', 'thin',
+  'thick', 'perforated', 'ribbed', 'smooth', 'rough', 'textured', 'plain', 'patterned', 'striped', 'colorful',
+  'vintage', 'antique', 'modern', 'classic', 'old', 'new', 'used', 'worn', 'shiny', 'matte', 'glossy',
+  'decorative', 'ornate', 'simple', 'generic', 'standard', 'assorted', 'mixed',
+])
+
 const foldTok = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 const categoryTokensOf = (result: IdentifyResult): Set<string> =>
   new Set((result.category ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))
@@ -134,7 +150,7 @@ function leadingBrandToken(displayTitle: string | undefined, categoryToks: Set<s
   const first = (displayTitle ?? '').trim().split(/\s+/).filter(Boolean)[0]
   if (!first) return undefined
   const fold = foldTok(first)
-  if (!isDistinctiveBrand(first) || MATERIAL_WORDS.has(fold) || categoryToks.has(fold)) return undefined
+  if (!isDistinctiveBrand(first) || MATERIAL_WORDS.has(fold) || DESCRIPTOR_WORDS.has(fold) || categoryToks.has(fold)) return undefined
   return first
 }
 
@@ -153,6 +169,38 @@ export function deriveMaker(result: IdentifyResult): string | undefined {
 }
 
 /**
+ * Beyond deriveMaker's BARE-brand corroboration: a corroborated MAKE paired with a disambiguating MODEL is a safe
+ * maker even when the brand is a common dictionary word (Apple, Shell, Galaxy…) that `isDistinctiveBrand` refuses
+ * as a lone entity — research keyed on [make, model] anchors `sourceMatchesSubject` on the MODEL, so a homonym page
+ * (apple-the-fruit) can never match. Returns {make, model} when this lane applies, else undefined. This is why a
+ * PROBABLE Apple/common-word-brand reveal (a user's own, non-web-indexed photo → arbitration step 8) still names
+ * its maker instead of falling to generic class research. Each guard preserves a shipped test:
+ *   - non-CONFIDENT only — a CONFIDENT+make reveal is already routed by `buildDossierInput`'s first branch (and its
+ *     sync-research behaviour is unchanged);
+ *   - `deriveMaker` must decline first — the distinctive-brand lanes (Xbox, Sub Pop) are untouched;
+ *   - single-candidate — a 2-candidate hedge never asserts one maker (#7);
+ *   - a real make + a real model (parentheticals stripped, ≥2 alnum chars, not a MATERIAL word nor the category);
+ *   - the make CORROBORATED — read off the object (observedBrand) OR a token of the clean displayTitle, never a bare
+ *     inference (so an uncorroborated VLM make stays class-scope, honest-empty).
+ */
+export function deriveModelMaker(result: IdentifyResult): { make: string; model: string } | undefined {
+  if (result.confidence_band === 'CONFIDENT') return undefined
+  if (deriveMaker(result)) return undefined
+  if (result.candidates.length >= 2) return undefined
+  const chosen = result.candidates[0]
+  const make = chosen?.make?.trim()
+  const model = chosen?.model?.replace(/\(.*?\)/g, '').trim()
+  if (!make || !model) return undefined
+  const modelFold = foldTok(model)
+  if (modelFold.length < 2 || MATERIAL_WORDS.has(modelFold) || categoryTokensOf(result).has(modelFold)) return undefined
+  const makeFold = foldTok(make)
+  const observed = !!result.observedBrand && foldTok(result.observedBrand) === makeFold
+  const inTitle = makeFold.length > 0 && foldTok(result.displayTitle ?? '').includes(makeFold)
+  if (!observed && !inTitle) return undefined
+  return { make, model }
+}
+
+/**
  * The honesty-safe DOSSIER keying for the async deep-research step (PROMPT-QUALITY §3.B4, §13.2/§13.3).
  *  - CONFIDENT → 'item' scope on the corroborated make + BASE model (`subject` prefers the clean `displayTitle`).
  *  - PROBABLE with a DISTINCTIVE observed brand → the BRAND LANE: research the brand ENTITY at item rigor
@@ -168,11 +216,15 @@ export function buildDossierInput(result: IdentifyResult): DossierInput | null {
   const model = chosen?.model?.replace(/\(.*?\)/g, '').trim() || undefined
   const category = result.category || result.label
 
-  // A CONFIDENT identity with a real MAKE (e.g. "Canon AE-1", "La Croix") → research THAT specific item.
+  // A CONFIDENT identity with a real MAKE (e.g. "Canon AE-1", "La Croix") → research THAT specific item. Thread the
+  // CORROBORATED (non-VLM) model year as a research HINT so the deep-research can find the model's production-date
+  // page and fill the `made` bucket — it never displays (the shown date still grounds on an admitted fact). Only
+  // this lane: a brand-lane / class reveal cannot date THIS specimen, so neither carries a year.
   if (result.confidence_band === 'CONFIDENT' && make) {
     const terms = [make, model].filter(Boolean) as string[]
     const subject = result.displayTitle || terms.join(' ') || result.label
-    return { subject, scope: 'item', subjectTerms: terms.length ? terms : [result.label] }
+    const year = chosen && chosen.source !== 'vlm' ? chosen.year : undefined
+    return { subject, scope: 'item', subjectTerms: terms.length ? terms : [result.label], ...(year ? { year } : {}) }
   }
 
   // Otherwise — a hedged reveal, OR a CONFIDENT-but-GENERIC web label ("coffee cup") — if the object bears a
@@ -186,14 +238,27 @@ export function buildDossierInput(result: IdentifyResult): DossierInput | null {
     return { subject: maker, scope: 'item', subjectTerms: [maker], brandLane: true, objectType: category }
   }
 
+  // A corroborated common-word brand (Apple, Shell, …) that `deriveMaker` refuses as a BARE entity is still a safe
+  // MAKER when a specific model disambiguates the research — keyed on [make, model] so `sourceMatchesSubject` anchors
+  // on the model and a homonym (apple-the-fruit) page can't match. `subject` is the make+model ENTITY, NOT the
+  // displayTitle (its category noise dilutes the maker) and NOT the bare make (the brand-lane consumers lead
+  // retrieval with `subject`, and it must carry the model to align with the anchor — a bare make finds only
+  // company pages the model-anchor then rejects → zero facts). brandLane keeps facts about the maker, never
+  // asserting this hedged specimen is that exact edition.
+  const modelMaker = deriveModelMaker(result)
+  if (modelMaker) {
+    return { subject: `${modelMaker.make} ${modelMaker.model}`, scope: 'item', subjectTerms: [modelMaker.make, modelMaker.model], brandLane: true, objectType: category }
+  }
+
   // No corroborated brand → class scope on the category, with the (unconfirmed) VLM make/model disallowed.
   const disallowed = [make, model].filter(Boolean) as string[]
   return { subject: category, scope: 'class', subjectTerms: [category], disallowedSpecificTerms: disallowed }
 }
 
-/** The two narrative buckets that stream as their own `section` event (ANALYSIS-UX): `what_is_it` rides the
- *  `token`s/`description_upgrade`, the facts bucket rides `fact` events, and these two get `section` events. */
-const SECTION_BUCKETS: readonly Extract<NarrativeBucket, 'purpose' | 'maker'>[] = ['purpose', 'maker']
+/** The narrative buckets that stream as their own `section` event (ANALYSIS-UX): `what_is_it` rides the
+ *  `token`s/`description_upgrade`, the facts bucket rides `fact` events, and these get `section` events. `made`
+ *  (when it was made) rides alongside `maker` — a grounded date bucket, gated like maker at class scope. */
+const SECTION_BUCKETS: readonly Extract<NarrativeBucket, 'purpose' | 'maker' | 'made'>[] = ['purpose', 'maker', 'made']
 
 /**
  * Build a `section` payload for one bucket from gate-approved narration clauses + the closed evidence. Source proof
@@ -333,6 +398,15 @@ export async function* runIdentificationCascade(
   // before `done` (a NEW reveal ALWAYS carries the full purpose/maker set → the client shows honest `empty`, while
   // a pre-redesign durable reveal with NO section events stays distinguishable → its buckets hide, never false-empty).
   const emittedSections = new Set<string>()
+  // At CLASS scope the object has NO confirmed maker (the dossier keys on the bare category — no CONFIDENT make, no
+  // brand lane), so the maker bucket stays honest-empty even when incidental category research surfaces a company
+  // name: an anonymous "plywood board" must never acquire a "Plywood Company" maker (the Tier C honesty spine).
+  // `made` (when it was made) carries the SAME hazard — a category-invention date ("plywood was patented in 1865")
+  // must never be surfaced as when THIS unconfirmed object was made — so it is gated identically. Purpose is a
+  // legitimate category fact at class scope, so ONLY maker + made are gated — dropping them from the narrated set
+  // lets them fall through to the empty-marker backstop below (honest-empty, never a false date).
+  const narratedBuckets: readonly NarrativeBucket[] =
+    buildDossierInput(result)?.scope === 'class' ? SECTION_BUCKETS.filter((b) => b !== 'maker' && b !== 'made') : SECTION_BUCKETS
   if (deps.narrator && result.confidence_band !== 'UNKNOWN') {
     // Enrich the closed evidence with GROUNDED facts the narrator may cite (best-effort; a failure/timeout falls
     // back to web evidence only). CONFIDENT grounds the item, PROBABLE grounds only the class — never the model.
@@ -342,7 +416,9 @@ export async function* runIdentificationCascade(
     // the real, specific purpose/maker; until it lands the bucket honestly loads rather than showing category filler.
     // Gate on deriveMaker (NOT observedBrand alone) so a logo-brand product (Xbox: brand in the display name, no OCR)
     // skips the generic researcher exactly as an OCR-branded object does — the two gates share ONE source of truth.
-    const researchInput = deriveMaker(result) ? null : buildResearchInput(result)
+    // Also skip for the model-disambiguated maker lane (a PROBABLE Apple/common-word-brand reveal) so its first pass
+    // isn't muddied by generic category facts while the dossier's maker lane loads the real specifics.
+    const researchInput = deriveMaker(result) || deriveModelMaker(result) ? null : buildResearchInput(result)
     if (deps.researcher && researchInput) {
       try {
         const facts = await deps.researcher.research(researchInput)
@@ -370,7 +446,7 @@ export async function* runIdentificationCascade(
     const whatClauses = whatWithBackstop(narration.clauses, firstPassInput, result.category)
     if (whatClauses.length) deps.onNarration?.(whatClauses.map((c) => c.text))
     for (const c of whatClauses) yield at({ type: 'token', text: c.text })
-    for (const bucket of SECTION_BUCKETS) {
+    for (const bucket of narratedBuckets) {
       const sec = sectionFor(bucket, narration.clauses, evidence)
       if (sec) {
         emittedSections.add(bucket)
@@ -414,7 +490,7 @@ export async function* runIdentificationCascade(
               const whatUp = whatWithBackstop(upgraded.clauses, upgradeInput, result.category)
               yield at({ type: 'description_upgrade', text: whatUp.map((c) => c.text).join(' ') })
             }
-            for (const bucket of SECTION_BUCKETS) {
+            for (const bucket of narratedBuckets) {
               const sec = sectionFor(bucket, upgraded.clauses, ev.dossier.evidence)
               if (sec) {
                 emittedSections.add(bucket)

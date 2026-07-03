@@ -43,6 +43,32 @@ describe('script.system.md — the Deep Dive two-voice interview prompt', () => 
   test('still specifies the JSON return shape', () => {
     expect(sys).toContain('{ clauses: [{ speaker, text, claimType, evidenceRef? }] }')
   })
+
+  // The Deep Dive story framework (defamiliarization + Serial) — the fix for "it starts in the middle".
+  test('uses the reveal CONTEXT to orient rather than rediscover the object', () => {
+    expect(sys).toMatch(/context/i)
+    expect(sys).toMatch(/orient/i)
+  })
+  test('directs a stage-setting, defamiliarizing intro (name it plainly, then make it strange)', () => {
+    expect(sys).toMatch(/defamiliar/i)
+    expect(sys).toMatch(/stage/i)
+    expect(sys).toMatch(/strange/i)
+    // and explicitly forbids the mid-thought / dry-intro failure modes
+    expect(sys).toMatch(/mid-argument|middle of|Today we're looking at/i)
+  })
+  test('the naming opener must be a GROUNDED clause, not flavor (so a branded title is not cut)', () => {
+    expect(sys).toMatch(/provenance/i)
+    expect(sys).toMatch(/identified as|identity/i)
+  })
+  test('names the spine question shapes and the intimate↔cosmic zoom', () => {
+    expect(sys).toMatch(/spine/i)
+    expect(sys).toMatch(/How did this get here|What is this really|What did this witness|Why does this exist/i)
+    expect(sys).toMatch(/zoom|intimate|cosmic/i)
+  })
+  test('treats what/purpose/maker as non-citeable background, cite-or-cut (honesty bridge)', () => {
+    expect(sys).toMatch(/background/i)
+    expect(sys).toMatch(/cut the line|keep it as (plain )?flavor/i)
+  })
 })
 
 describe('research.md — the wider, story-biased research brief', () => {
@@ -56,7 +82,10 @@ describe('research.md — the wider, story-biased research brief', () => {
   })
 })
 
-describe('script.user.md — byte-exact vs the original fact-list build (UNCHANGED)', () => {
+describe('script.user.md — a no-context job stays byte-exact to the original fact-list build (back-compat)', () => {
+  // The template GAINED an optional reveal-context block (identity confidence + what/purpose/maker). With no
+  // context every section elides and the render must be byte-identical to the original — so older items / global
+  // catalog ids with no durable reveal are unaffected.
   const build = (subject: string, claims: string[]) => {
     const facts = claims.map((claim) => ({ claim }))
     const refs = facts.map((_, i) => `f${i + 1}`)
@@ -71,5 +100,21 @@ describe('script.user.md — byte-exact vs the original fact-list build (UNCHANG
   test('a single fact', () => {
     const { original, rendered } = build('a camera', ['It takes photographs.'])
     expect(rendered).toBe(original)
+  })
+  test('WITH context: renders the identity confidence + what/purpose/maker block above the FACTS', () => {
+    const rendered = renderPrompt('script.user.md', {
+      subject: '1976 Canon AE-1', band: 'CONFIDENT', whatItIs: 'A 35mm SLR film camera.', purpose: 'Taking photographs.', maker: 'Made by Canon.',
+      facts: [{ ref: 'f1', claim: 'Launched in 1976.' }],
+    })
+    expect(rendered).toBe(
+      [
+        'OBJECT: 1976 Canon AE-1 (identified with CONFIDENT confidence)',
+        'WHAT IT IS: A 35mm SLR film camera.',
+        "WHAT IT'S FOR: Taking photographs.",
+        'WHO MADE IT: Made by Canon.',
+        'FACTS you may cite:',
+        '  f1 → Launched in 1976.',
+      ].join('\n'),
+    )
   })
 })

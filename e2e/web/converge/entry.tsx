@@ -119,8 +119,8 @@ function ConvergeRoot(): React.ReactElement {
             if (e.type === 'fact' && e.text) {
               store.getState().appendFact({ text: e.text, sourceUrl: e.sourceUrl ?? '', sourceTitle: e.sourceTitle ?? '', quote: e.quote ?? '' })
             }
-            // normalized research buckets (purpose/maker) — empty text is the honest "nothing groundable" marker.
-            if (e.type === 'section' && (e.bucket === 'purpose' || e.bucket === 'maker')) {
+            // normalized research buckets (purpose/maker/made) — empty text is the honest "nothing groundable" marker.
+            if (e.type === 'section' && (e.bucket === 'purpose' || e.bucket === 'maker' || e.bucket === 'made')) {
               store.getState().appendSection(e.bucket, { text: e.text ?? '', sourceUrl: e.sourceUrl ?? '', sourceTitle: e.sourceTitle ?? '', quote: e.quote ?? '' })
             }
             if (e.type === 'description_upgrade' && e.text) store.getState().upgradeDescription(e.text)

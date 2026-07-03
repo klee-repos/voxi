@@ -86,10 +86,17 @@ const { check, fails } = makeChecker()
 
 // ── PROOF B + C — the Deep Dive player, mounting the real screen with a real thread ──────────────────────────
 {
-  const rig = await standUp('deepdive-client.tsx', { seed: { converge: { scan: 5, podcast: 1, voiceMin: 10 } } })
+  // podcast:5 (not 1) so the retest REGENERATE (Proof R) has credits after B3's first generate spends one — a
+  // regenerate at a fresh version is a NEW gate key, so it decrements again (the honest paid path).
+  const rig = await standUp('deepdive-client.tsx', { seed: { converge: { scan: 5, podcast: 5, voiceMin: 10 } } })
   const { driver: d, page, base } = rig
   await page.goto(`${base}/`)
 
+  const boxX = async (id: string): Promise<number> => {
+    const b = await page.locator(`[data-testid="${id}"]`).first().boundingBox()
+    if (!b) throw new Error(`${id} is not in the layout`)
+    return b.x
+  }
   const readIdx = async (): Promise<number> => Number((await d.state(ids.podcast.activeWordIndex)).attrs?.idx ?? 'NaN')
   const setTime = (t: number): Promise<void> =>
     page.evaluate((tt) => {
@@ -164,12 +171,65 @@ const { check, fails } = makeChecker()
     if ((await playingNow()) !== 'false') throw new Error('tap pause did not set playing=false (it bounced back — the transport-mirror bug)')
   })
 
+  await check('C6 · dragging the SCRUBBER seeks by POSITION — the client onSeek→seekTo path the device exercises', async () => {
+    // The user's bug: scrubber drag does nothing. This drives the REAL Scrubber PanResponder with a positional
+    // mouse drag (a center .click()/onPress carries NO locationX on RNW → would fall back to mid-track and prove
+    // nothing) and reads the Scrubber's OWN `fraction` anchor — which reflects the post-seek playhead. We NEVER
+    // write currentTime here: that would bypass onSeek and fake-green the very path under test.
+    const fractionNow = async (): Promise<number> => Number((await d.state(ids.podcast.scrubber)).attrs?.fraction ?? 'NaN')
+    const box = await page.locator(`[data-testid="${ids.podcast.scrubber}"]`).first().boundingBox()
+    if (!box) throw new Error('the scrubber has no layout box')
+    const dragToFraction = async (fx: number): Promise<void> => {
+      const x = box.x + box.width * fx
+      const y = box.y + box.height / 2
+      await page.mouse.move(box.x + box.width * 0.5, y)
+      await page.mouse.down()
+      await page.mouse.move(x, y, { steps: 6 }) // real move → onPanResponderMove(locationX)
+      await page.mouse.up() // onPanResponderRelease(locationX) → onSeek(fraction*duration)
+      await page.waitForTimeout(250)
+    }
+    const before = await fractionNow()
+    await dragToFraction(0.72)
+    const near = await fractionNow()
+    // Must land NEAR 72% — not at ~0.5. A center value would mean the pan never engaged (locationX absent) and the
+    // seek fell back to mid-track: that is the "scrubber only jumps to the middle / does nothing" bug, NOT a pass.
+    if (!(near > 0.6 && near < 0.85)) {
+      throw new Error(
+        `dragging the scrubber to ~72% did not seek THERE: fraction ${before} → ${near} ` +
+          `(~0.5 = a center fallback = the pan didn't engage / no locationX; unchanged = a dead onSeek)`,
+      )
+    }
+    await dragToFraction(0.1)
+    const back = await fractionNow()
+    if (!(back < 0.25)) throw new Error(`dragging the scrubber back to ~10% did not pull the playhead down to it: ${near} → ${back}`)
+  })
+
+  // ── PROOF R — the retest REGENERATE button (left of the close X → a genuine fresh generation) ───────────────
+  await check('R1 · the ready player shows a Regenerate control positioned LEFT of the close X', async () => {
+    if (!(await d.state(ids.podcast.regenerate)).visible) throw new Error('the Regenerate control is missing from the ready player header')
+    const regenX = await boxX(ids.podcast.regenerate)
+    const closeX = await boxX(ids.nav.close)
+    if (!(regenX < closeX)) throw new Error(`Regenerate (${regenX}) is not LEFT of the close X (${closeX}) — the requested placement`)
+  })
+
+  await check('R2 · tapping Regenerate leaves the ready player and re-enters composing (a genuine fresh generation, not a UI reset)', async () => {
+    await d.tap(ids.podcast.regenerate)
+    // regenerateDeepDive sets composing SYNCHRONOUSLY at a fresh version; the real BFF gate mints a new token → a real compose.
+    await d.waitFor(ids.podcast.composingState, { timeoutMs: 8000 })
+    if ((await d.state(ids.podcast.scrubber)).visible) throw new Error('the ready-player scrubber is still shown — the regenerate did not re-enter composing')
+  })
+
+  await check('R3 · the regenerated deep dive completes back to a READY player (full fresh cycle through the real gate + worker)', async () => {
+    await d.waitFor(ids.podcast.scrubber, { timeoutMs: 25000 }) // the fresh token polls composing→ready → the player re-renders
+    if (!(await d.state(ids.podcast.regenerate)).visible) throw new Error('the Regenerate control did not return on the re-generated ready player')
+  })
+
   await rig.stop()
 }
 
 console.log(
   fails() === 0
-    ? '\nDEEP DIVE PROOF GREEN — dock: the Deep Dive icon sits after the buckets, reflects background generation (generating→ready) and taps to the player; player: opens IDLE (no auto-compose), never says "podcast/episode", Generate → a large composing hero with a live elapsed indicator → a dark Spotify player whose karaoke highlight COUPLES to the playhead (advances with currentTime, moves on ±15)'
+    ? '\nDEEP DIVE PROOF GREEN — dock: the Deep Dive icon sits after the buckets, reflects background generation (generating→ready) and taps to the player; player: opens IDLE (no auto-compose), never says "podcast/episode", Generate → a large composing hero with a live elapsed indicator → a dark Spotify player whose karaoke highlight COUPLES to the playhead (advances with currentTime, moves on ±15); a Regenerate control sits LEFT of the close X and re-runs a genuine fresh generation (ready → composing → ready) through the real gate + worker'
     : `\nDEEP DIVE FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

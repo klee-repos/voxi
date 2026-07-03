@@ -25,10 +25,11 @@ export interface NarrationInput {
   candidates: string[]
 }
 
-/** The three narrative buckets a reveal is normalized into (ANALYSIS-UX). `what_is_it` becomes the `whatItIs`
- *  description + the `what` audio; `purpose`/`maker` stream as their own `section` events + per-bucket audio. The
- *  "curious facts" bucket is NOT here — it comes from the researcher's `fact` events, not the narrator. */
-export type NarrativeBucket = 'what_is_it' | 'purpose' | 'maker'
+/** The narrative buckets a reveal is normalized into (ANALYSIS-UX). `what_is_it` becomes the `whatItIs`
+ *  description + the `what` audio; `purpose`/`maker`/`made` stream as their own `section` events. `made` is the
+ *  "when it was made" date bucket (rendered alongside the maker; not voiced). The "curious facts" bucket is NOT
+ *  here — it comes from the researcher's `fact` events, not the narrator. */
+export type NarrativeBucket = 'what_is_it' | 'purpose' | 'maker' | 'made'
 
 /** A gate-approved narration clause, retaining its bucket tag + evidence ref so the cascade can (a) group by
  *  bucket and (b) resolve a section's source proof from the clause's cited evidence. */
@@ -57,9 +58,10 @@ const NARRATION_SCHEMA = {
           text: { type: 'string' },
           claimType: { type: 'string', enum: ['spec', 'provenance', 'date', 'causal', 'superlative', 'comparative', 'observation', 'flavor'] },
           evidenceRef: { type: 'string' },
-          // Which of the four reveal questions this clause answers (ANALYSIS-UX). `what_is_it` = identity/what/detail;
-          // `purpose` = what it's FOR; `maker` = WHO made it. (Curious facts come from research, not the narrator.)
-          bucket: { type: 'string', enum: ['what_is_it', 'purpose', 'maker'] },
+          // Which reveal question this clause answers (ANALYSIS-UX). `what_is_it` = identity/what/detail;
+          // `purpose` = what it's FOR; `maker` = WHO made it; `made` = WHEN it was made (date/era). (Curious facts
+          // come from research, not the narrator.)
+          bucket: { type: 'string', enum: ['what_is_it', 'purpose', 'maker', 'made'] },
         },
         required: ['text', 'claimType', 'bucket'],
       },

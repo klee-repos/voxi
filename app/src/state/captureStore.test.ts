@@ -67,7 +67,9 @@ describe('capture store actions', () => {
     const st = useCaptureStore.getState()
     st.appendSection('purpose', { text: 'first pass', sourceUrl: '', sourceTitle: '', quote: '' })
     st.appendSection('purpose', { text: 'dossier upgrade', sourceUrl: 'u', sourceTitle: 't', quote: 'q' })
+    st.appendSection('made', { text: 'Produced from 1976 to 1984.', sourceUrl: 'u2', sourceTitle: 't2', quote: 'q2' }) // the "when it was made" bucket stores like the others
     expect(useCaptureStore.getState().sections.purpose?.text).toBe('dossier upgrade')
+    expect(useCaptureStore.getState().sections.made?.text).toBe('Produced from 1976 to 1984.')
     expect(useCaptureStore.getState().sawAnySection).toBe(true)
   })
 

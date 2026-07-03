@@ -11,7 +11,9 @@
  * Run: `bun services/voxi-podcast-worker/src/server.ts` (from repo root so .env.local loads the vendor keys).
  */
 import { renderPodcast, memoryAssetStore, type PodcastJob } from './render'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { buildProductionDeps } from './production-deps'
+import { audioRangeResponse } from './audio-range'
 import { mkdirSync } from 'node:fs'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 
@@ -45,23 +47,29 @@ Bun.serve({
   fetch: withRequestTelemetry(async (req: Request): Promise<Response> => {
     const url = new URL(req.url)
 
-    // --- serve rendered audio (no secret; the URL is unguessable-enough for dev; range-safe via Bun.file) ---
+    // --- serve rendered audio (no secret; the URL is unguessable-enough for dev) ---
+    // Honors `Range:` with a real 206 (audioRangeResponse) — WITHOUT it iOS AVPlayer treats the episode as a
+    // non-seekable progressive stream and the scrubber + ±15 do nothing. `Response(Bun.file)` alone does NOT
+    // range-handle in a fetch handler (the prior "range-safe via Bun.file" was false).
     const audioMatch = /^\/audio\/([^/]+)\/v(\d+)\/episode\.mp3$/.exec(url.pathname)
     if (req.method === 'GET' && audioMatch) {
       const item = decodeURIComponent(audioMatch[1]!)
       const version = Number(audioMatch[2])
       const f = Bun.file(fileFor(item, version))
       if (!(await f.exists())) return new Response('not found', { status: 404 })
-      return new Response(f, { headers: { 'content-type': 'audio/mpeg', 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=86400' } })
+      return audioRangeResponse(f, f.size, req.headers.get('range'))
     }
 
     // --- enqueue a render (called by the BFF after it gates the credit) ---
     if (req.method === 'POST' && url.pathname === '/render') {
       if (unauthorized(req)) return Response.json({ error: 'forbidden' }, { status: 403 })
-      const body = (await req.json().catch(() => null)) as { token?: string; catalogItemId?: string; version?: number; subject?: string } | null
+      const body = (await req.json().catch(() => null)) as { token?: string; catalogItemId?: string; version?: number; subject?: string; context?: PodcastContext } | null
       if (!body?.token || !body?.catalogItemId || !body?.subject) return Response.json({ error: 'token, catalogItemId, subject required' }, { status: 400 })
       const version = body.version ?? 1
-      const job: PodcastJob = { catalogItemId: body.catalogItemId, version, subject: body.subject }
+      // Carry the server-owned reveal context (identity + what/purpose/maker + grounded facts) into the job so the
+      // interview is built from everything the reveal learned — the BFF is the only writer of this (never trusted
+      // from a raw client), and it is optional so an older BFF that doesn't send it still renders.
+      const job: PodcastJob = { catalogItemId: body.catalogItemId, version, subject: body.subject, ...(body.context ? { context: body.context } : {}) }
       // Idempotent: a repeat token/job for an already-known token is a no-op (render.ts also CAS-guards).
       if (!jobs.has(body.token)) {
         jobs.set(body.token, { catalogItemId: job.catalogItemId, version, subject: job.subject })
@@ -72,6 +80,9 @@ Bun.serve({
               subject: job.subject,
               version,
               kind: o.kind,
+              // whether the closed facts came from fresh research or (research having failed) the reveal's own
+              // facts alone — so a degraded-but-shipped episode is observable, not a silent success.
+              ...('grounding' in o ? { grounding: o.grounding } : {}),
               // surface WHY a render didn't ship (the old log dropped this — an RCA blind spot).
               ...('reason' in o ? { reason: o.reason } : {}),
               ...('details' in o && o.details ? { details: JSON.stringify(o.details).slice(0, 400) } : {}),

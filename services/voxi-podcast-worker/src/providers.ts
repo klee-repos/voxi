@@ -147,15 +147,33 @@ const SCRIPT_SCHEMA = {
  * mid-JSON (gemini-2.5 thinking tokens count against the budget) — same no-single-failure-kills-the-render
  * discipline as research().
  */
+/**
+ * Build the script model's USER prompt: the OBJECT + the server-owned reveal ORIENTATION (identity confidence +
+ * what/purpose/maker, carried on job.context) + the closed FACTS list. Exported so a test can assert the
+ * orientation actually reaches the prompt scope — the byte-golden alone can't (it builds the expected string from
+ * the same scope, so it would pass even if this spread were dropped). A missing context field renders '' and its
+ * section is elided, so a no-context job is byte-identical to the original fact-list build (back-compat).
+ */
+export function buildScriptUserPrompt(job: PodcastJob, facts: Fact[]): string {
+  return renderPrompt('script.user.md', {
+    subject: job.subject,
+    band: job.context?.band,
+    whatItIs: job.context?.whatItIs,
+    purpose: job.context?.purpose,
+    maker: job.context?.maker,
+    whenMade: job.context?.whenMade,
+    facts: facts.map((f, i) => ({ ref: `f${i + 1}`, claim: f.claim })),
+  })
+}
+
 export class GeminiScriptProvider implements ScriptProvider {
   constructor(private readonly maxAttempts = 3) {}
 
   async writeScript(job: PodcastJob, facts: Fact[]): Promise<Script> {
     const refs = facts.map((_, i) => `f${i + 1}`)
-    // Prompt prose lives in `prompts/script.{system,user}.md`; code supplies only the fact list. A golden test
-    // pins the rendered output byte-for-byte against the original inline build.
+    // Prompt prose lives in `prompts/script.{system,user}.md`; code supplies only the data (facts + reveal context).
     const system = loadPrompt('script.system.md')
-    const user = renderPrompt('script.user.md', { subject: job.subject, facts: facts.map((f, i) => ({ ref: refs[i], claim: f.claim })) })
+    const user = buildScriptUserPrompt(job, facts)
     let lastErr = 'script generation failed'
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       const r = await fetch(ENDPOINT, {

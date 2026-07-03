@@ -74,8 +74,8 @@ export function applyStreamEvent(ev: StreamEvent, a: StreamActions): void {
       a.appendFact({ text: ev.text, sourceUrl: ev.sourceUrl, sourceTitle: ev.sourceTitle, quote: ev.quote })
       break
     case 'section':
-      // Only the two narrative buckets ride `section`; an unknown bucket (a newer server) is ignored, not crashed.
-      if (ev.bucket === 'purpose' || ev.bucket === 'maker') {
+      // Only the known narrative buckets ride `section`; an unknown bucket (a newer server) is ignored, not crashed.
+      if (ev.bucket === 'purpose' || ev.bucket === 'maker' || ev.bucket === 'made') {
         a.appendSection(ev.bucket, { text: ev.text, sourceUrl: ev.sourceUrl, sourceTitle: ev.sourceTitle, quote: ev.quote })
       }
       break

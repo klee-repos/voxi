@@ -8,7 +8,7 @@
  * half; the live half (real Gemini + Cloud Vision through the same generator) is proven by spikes/live-bff-scan.ts.
  */
 import { test, expect, describe } from 'bun:test'
-import { runIdentificationCascade, buildResearchInput, buildDossierInput, isDistinctiveBrand, deriveMaker, type CascadeDeps } from './cascade'
+import { runIdentificationCascade, buildResearchInput, buildDossierInput, isDistinctiveBrand, deriveMaker, deriveModelMaker, type CascadeDeps } from './cascade'
 import type { VisionProvider, VisionStages, ImageRef, IdentifyResult } from './tools/identify_object'
 import type { SafetyClassifier, SafetyClassification } from './tools/safety_gate'
 import type { Candidate } from '../../../packages/shared/src/arbitration'
@@ -139,9 +139,9 @@ describe('cascade — persona narration streams as token events AFTER the reveal
     const narrator = new FakeNarrator(['A 2008 Cannondale SuperSix EVO.', 'A featherweight climbing frame, and it knows it.'])
     const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
     expect(narrator.called).toBe(true)
-    // what-only clauses stream as `token`s; the ungrounded purpose/maker buckets emit empty-marker `section`s
+    // what-only clauses stream as `token`s; the ungrounded purpose/maker/made buckets emit empty-marker `section`s
     // (so their icons resolve to an honest `empty`, never a perpetual spinner) — then the deferred `done`.
-    expect(types(evs)).toEqual(['tool_start', 'tool_result', 'tool_start', 'tool_result', 'confidence_band', 'token', 'token', 'section', 'section', 'done'])
+    expect(types(evs)).toEqual(['tool_start', 'tool_result', 'tool_start', 'tool_result', 'confidence_band', 'token', 'token', 'section', 'section', 'section', 'done'])
     const tokens = evs.filter((e) => e.type === 'token') as Extract<StreamEvent, { type: 'token' }>[]
     expect(tokens.map((t) => t.text)).toEqual(['A 2008 Cannondale SuperSix EVO.', 'A featherweight climbing frame, and it knows it.'])
     // narration comes strictly AFTER the reveal band
@@ -255,6 +255,17 @@ describe('cascade — grounded enrichment merges facts into narration evidence (
     expect(researcher.called).toBe(false) // deriveMaker('Xbox') truthy → the generic class researcher is skipped (the dossier brand lane supplies the specifics)
   })
 
+  test('a PROBABLE common-word-brand product (Apple AirPods Max) ALSO skips the sync class researcher (deriveModelMaker gate — the F2 half)', async () => {
+    // The ONLY test that catches a revert of `|| deriveModelMaker(result)` at the skip gate: the Xbox test above
+    // decides via deriveMaker (truthy), which is undefined here ('apple' ∈ COMMON_WORD_BRANDS). deriveModelMaker
+    // fires (corroborated make + specific model) → the generic headphone facts are skipped so the maker lane loads.
+    const vlm: Candidate = { name: 'Apple AirPods Max', make: 'Apple', model: 'AirPods Max', source: 'vlm', confidence: 0.6, category: 'Headphones', displayTitle: 'Apple AirPods Max', observedBrand: 'Apple' }
+    const researcher = new FakeResearcher(FACTS)
+    const evs = await drain({ vision: new FakeVision({ vlm }), safety: SAFE, narrator: new RecordingNarrator(), researcher })
+    expect(band(evs)!.band).toBe('PROBABLE')
+    expect(researcher.called).toBe(false)
+  })
+
   test('a researcher THROW is non-fatal — the reveal + narration still stream', async () => {
     const researcher = new FakeResearcher(FACTS, true) // throws
     const narrator = new RecordingNarrator()
@@ -358,11 +369,48 @@ describe('cascade — normalized research buckets stream as `section` events (AN
   })
 
   test('a bucket the narrator never grounds gets an EMPTY-marker section (honest empty, never perpetual loading)', async () => {
-    const narrator = new FakeNarrator([clause('A carbon road bike.', 'what_is_it')]) // no purpose/maker clause
+    const narrator = new FakeNarrator([clause('A carbon road bike.', 'what_is_it')]) // no purpose/maker/made clause
     const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
     const secs = sections(evs)
     expect(secs.find((s) => s.bucket === 'purpose')).toMatchObject({ text: '' })
     expect(secs.find((s) => s.bucket === 'maker')).toMatchObject({ text: '' })
+    // `made` (when it was made) rides alongside maker — an item-scope reveal with no date fact still emits the
+    // empty marker so the client shows honest-empty (and a NEW reveal stays distinguishable from a legacy one).
+    expect(secs.find((s) => s.bucket === 'made')).toMatchObject({ text: '' })
+  })
+
+  test('a grounded "made" date clause streams as its own `made` SECTION event (when it was made, beside the maker)', async () => {
+    const narrator = new FakeNarrator([
+      clause('A 35mm SLR camera.', 'what_is_it'),
+      clause('Made by Canon in Japan.', 'maker'),
+      { text: 'Produced from 1976 to 1984.', claimType: 'date', bucket: 'made' } as NarrationClause,
+    ])
+    const evs = await drain({ vision: new FakeVision({ catalog, vlm }), safety: SAFE, narrator })
+    const secs = sections(evs)
+    expect(secs.find((s) => s.bucket === 'maker')?.text).toBe('Made by Canon in Japan.')
+    expect(secs.find((s) => s.bucket === 'made')?.text).toBe('Produced from 1976 to 1984.')
+  })
+
+  test('CLASS scope (a generic, unbranded object) SUPPRESSES the maker section → honest-empty, even when the narrator wrote a maker clause (Tier C honesty spine; the plywood→"Plywood Company" fix)', async () => {
+    // A CONFIDENT-but-generic web label with NO make/brand → buildDossierInput keys on the bare category (class scope).
+    // Class research yields category facts only; a company name it incidentally surfaces must NEVER fill the maker
+    // bucket. purpose (a legitimate category fact) still streams; only maker is gated → honest-empty via the backstop.
+    const genericVlm: Candidate = { name: 'plywood', source: 'vlm', confidence: 0.3, category: 'plywood', displayTitle: 'Plywood Board' }
+    const web: Candidate = { name: 'plywood', source: 'web', confidence: 0.85, aka: ['plywood', 'plywood board'] }
+    const narrator = new FakeNarrator([
+      clause('A sheet of plywood.', 'what_is_it'),
+      clause('Used as a building material.', 'purpose'),
+      clause('Made by the Plywood Company.', 'maker'), // the fabricated maker the class path must drop
+      { text: 'Dates to 1865, when plywood was patented.', claimType: 'date', bucket: 'made' } as NarrationClause, // a CATEGORY-invention date — must be dropped, not surfaced as this board's age
+    ])
+    const evs = await drain({ vision: new FakeVision({ vlm: genericVlm, web }), safety: SAFE, narrator })
+    expect(band(evs)!.band).not.toBe('UNKNOWN') // narration ran (so the empty-marker backstop applies)
+    const secs = sections(evs)
+    expect(secs.find((s) => s.bucket === 'purpose')?.text).toBe('Used as a building material.') // category fact survives
+    expect(secs.find((s) => s.bucket === 'maker')).toMatchObject({ text: '' }) // maker SUPPRESSED at class scope, not fabricated
+    // `made` carries the SAME class-scope hazard (a category-invention date must not become THIS object's age) →
+    // suppressed to honest-empty via the narratedBuckets exclusion, even though the narrator wrote a date clause.
+    expect(secs.find((s) => s.bucket === 'made')).toMatchObject({ text: '' })
   })
 
   test('F1 backstop: narration with NO what_is_it clause → a gate-approved, lowercased CATEGORY token so the What card always names the KIND of thing', async () => {
@@ -432,6 +480,16 @@ describe('brand lane — a DISTINCTIVE observed brand routes item-rigor entity r
     expect(di).toEqual({ subject: 'East Street Records', scope: 'item', subjectTerms: ['East Street Records'], brandLane: true, objectType: 'mug' })
   })
 
+  test('CONFIDENT + make item lane threads the CORROBORATED (non-VLM) year as a research HINT for the `made` bucket; a VLM-only year is dropped; brand lane carries none', () => {
+    // corroborated (catalog) year → carried as a hint on the item non-brand-lane input (fills `made`; never displayed)
+    const withYear = buildDossierInput(mk({ confidence_band: 'CONFIDENT', label: 'Canon AE-1', displayTitle: 'Canon AE-1', category: 'camera', candidates: [{ name: 'Canon AE-1', make: 'Canon', model: 'AE-1', year: 1976, source: 'catalog', confidence: 0.95 }] }))
+    expect(withYear).toEqual({ subject: 'Canon AE-1', scope: 'item', subjectTerms: ['Canon', 'AE-1'], year: 1976 })
+    // an UNCORROBORATED VLM year is NOT threaded (never seed a hint from the unverified stage)
+    const vlmYear = buildDossierInput(mk({ confidence_band: 'CONFIDENT', label: 'Canon AE-1', displayTitle: 'Canon AE-1', category: 'camera', candidates: [{ name: 'Canon AE-1', make: 'Canon', model: 'AE-1', year: 1976, source: 'vlm', confidence: 0.9 }] }))
+    expect(vlmYear?.year).toBeUndefined()
+    // the brand lane never carries a year — it cannot date the specimen (the shipped test above pins the brand-lane shape, no `year`)
+  })
+
   test('CONFIDENT with a real MAKE → researches THAT specific item, NOT the brand lane (Canon AE-1 stays specific)', () => {
     const di = buildDossierInput(mk({ confidence_band: 'CONFIDENT', label: 'Canon AE-1', displayTitle: 'Canon AE-1', observedBrand: 'Canon', candidates: [{ name: 'Canon AE-1', make: 'Canon', model: 'AE-1', source: 'vlm', confidence: 0.9 }] }))
     expect(di?.scope).toBe('item')
@@ -468,6 +526,21 @@ describe('brand lane — a DISTINCTIVE observed brand routes item-rigor entity r
     expect(di?.brandLane).toBeUndefined()
   })
 
+  test('deriveMaker: a leading DESCRIPTIVE ADJECTIVE ("Red Perforated Brick", "Vintage Chair") is NEVER a maker → class lane (the brand-lane adjective-misfire fix)', () => {
+    // The live "brick" fixture: the VLM reads "Red Perforated Brick"; "Red"/"Perforated" are distinctive non-material,
+    // non-category tokens, so leadingBrandToken wrongly treated them as a brand → brand lane → off-topic "Red"/"…
+    // Perforated Metals" entity research. DESCRIPTOR_WORDS screens them so the reveal stays class-scope + honest.
+    for (const [displayTitle, category] of [['Red Perforated Brick', 'brick'], ['Vintage Chair', 'chair'], ['Round Plate', 'plate'], ['Blue Mug', 'mug']] as const) {
+      expect(deriveMaker(mk({ displayTitle, category, candidates: [{ name: displayTitle, source: 'vlm', confidence: 0.6 }] }))).toBeUndefined()
+      const di = buildDossierInput(mk({ confidence_band: 'CONFIDENT', displayTitle, category, candidates: [{ name: displayTitle, source: 'vlm', confidence: 0.8 }] }))
+      expect(di?.scope).toBe('class')
+      expect(di?.brandLane).toBeUndefined()
+    }
+    // GUARD: a real leading BRAND token is unaffected — DESCRIPTOR_WORDS only screens generic adjectives.
+    expect(deriveMaker(mk({ displayTitle: 'Xbox Wireless Controller', category: 'video game controller', candidates: [{ name: 'Xbox Wireless Controller', source: 'vlm', confidence: 0.7 }] }))).toBe('Xbox')
+    expect(deriveMaker(mk({ displayTitle: 'Canon AE-1', category: 'camera', candidates: [{ name: 'Canon AE-1', source: 'vlm', confidence: 0.9 }] }))).toBe('Canon')
+  })
+
   test('deriveMaker: a 2-candidate disagreement stays CLASS lane — a hedged "X or Y" never asserts a maker (#7)', () => {
     const di = buildDossierInput(mk({
       displayTitle: 'Cannondale SuperSix EVO', category: 'bicycle',
@@ -484,6 +557,79 @@ describe('brand lane — a DISTINCTIVE observed brand routes item-rigor entity r
     expect(deriveMaker(mk({ observedBrand: 'Sub Pop', displayTitle: 'Sub Pop Mug', category: 'mug', candidates: [] }))).toBe('Sub Pop')
     // a non-distinctive observed brand + a distinctive display token still falls through to the corroborated token
     expect(deriveMaker(mk({ observedBrand: 'Dove', displayTitle: 'Xbox Controller', category: 'controller', candidates: [{ name: 'x', source: 'vlm', confidence: 0.5 }] }))).toBe('Xbox')
+  })
+
+  test('deriveMaker: a distinctive observedBrand PREEMPTS the 2-candidate guard → brand lane (the Sub Pop-logo fix)', () => {
+    // The live Sub Pop logo: a VLM↔web framing disagreement → PROBABLE/2 candidates, but the object BEARS the "Sub
+    // Pop" mark (observedBrand, surfaced once the corroboration tolerates the inferred "…Records" suffix). Branch-1
+    // must win over the #7 guard so the maker lane fires; #7 (line above) stays class-lane because it has NO observed
+    // brand. This locks the branch ordering the fix relies on.
+    const subpopLogo = mk({
+      observedBrand: 'Sub Pop', displayTitle: 'Sub Pop Logo', category: 'Logo',
+      candidates: [
+        { name: '1988 Sub Pop Records', make: 'Sub Pop Records', source: 'vlm', confidence: 1 },
+        { name: 'sub pop', source: 'web', confidence: 0.98 },
+      ],
+    })
+    expect(deriveMaker(subpopLogo)).toBe('Sub Pop')
+    expect(buildDossierInput(subpopLogo)).toEqual({ subject: 'Sub Pop', scope: 'item', subjectTerms: ['Sub Pop'], brandLane: true, objectType: 'Logo' })
+  })
+
+  // ── the model-disambiguated maker lane: a corroborated COMMON-word brand (Apple) + a specific model → maker lane
+  //    keyed on [make, model], because the model disambiguates the homonym. (The AirPods Max empty-maker fix.) ──
+  const airpods = (over: Partial<IdentifyResult> = {}): IdentifyResult => mk({
+    observedBrand: 'Apple', displayTitle: 'Apple AirPods Max', category: 'Headphones',
+    candidates: [{ name: 'Apple AirPods Max', make: 'Apple', model: 'AirPods Max', source: 'vlm', confidence: 0.6 }],
+    ...over,
+  })
+
+  test('deriveModelMaker: PROBABLE common-word brand + specific model + corroboration → {make, model} (the AirPods fix)', () => {
+    expect(deriveModelMaker(airpods())).toEqual({ make: 'Apple', model: 'AirPods Max' })
+  })
+
+  test('buildDossierInput: PROBABLE AirPods Max → maker lane on [Apple, AirPods Max], subject = make+model (NOT displayTitle, NOT bare make)', () => {
+    // subject carries the model so retrieval aligns with sourceMatchesSubject's model-anchor (bare "Apple" → 0 facts,
+    // proven live); subjectTerms keep the homonym-safe anchor; brandLane keeps facts about the maker, not the edition.
+    expect(buildDossierInput(airpods())).toEqual({
+      subject: 'Apple AirPods Max', scope: 'item', subjectTerms: ['Apple', 'AirPods Max'], brandLane: true, objectType: 'Headphones',
+    })
+  })
+
+  test('deriveModelMaker: corroboration via displayTitle alone (no observedBrand) still fires', () => {
+    expect(deriveModelMaker(airpods({ observedBrand: undefined }))).toEqual({ make: 'Apple', model: 'AirPods Max' })
+  })
+
+  test('deriveModelMaker: CONFIDENT is handled by buildDossierInput’s first branch → undefined here', () => {
+    expect(deriveModelMaker(airpods({ confidence_band: 'CONFIDENT' }))).toBeUndefined()
+  })
+
+  test('deriveModelMaker: an UNCORROBORATED make (not observed, not in displayTitle) → undefined → class scope (Dove-guard preserved)', () => {
+    // displayTitle undefined so deriveMaker is cleanly undefined (no leading brand token) and the CORROBORATION
+    // guard is what declines — a bare VLM make never asserts a maker.
+    const uncorroborated = airpods({ observedBrand: undefined, displayTitle: undefined })
+    expect(deriveModelMaker(uncorroborated)).toBeUndefined()
+    expect(buildDossierInput(uncorroborated)?.scope).toBe('class')
+  })
+
+  test('deriveModelMaker: a common-word brand with NO model (Dove soap) → undefined → class scope (unchanged)', () => {
+    expect(deriveModelMaker(mk({ observedBrand: 'Dove', displayTitle: 'Dove Soap', category: 'soap', candidates: [{ name: 'Dove', make: 'Dove', source: 'vlm', confidence: 0.6 }] }))).toBeUndefined()
+  })
+
+  test('deriveModelMaker: a MATERIAL or category model token → undefined (never a disambiguating model)', () => {
+    expect(deriveModelMaker(airpods({ candidates: [{ name: 'x', make: 'Apple', model: 'Aluminum', source: 'vlm', confidence: 0.6 }] }))).toBeUndefined()
+    expect(deriveModelMaker(airpods({ candidates: [{ name: 'x', make: 'Apple', model: 'Headphones', source: 'vlm', confidence: 0.6 }] }))).toBeUndefined()
+  })
+
+  test('deriveModelMaker: a 2-candidate disagreement → undefined (a hedged X-or-Y never asserts a maker, #7)', () => {
+    expect(deriveModelMaker(airpods({ candidates: [
+      { name: 'Apple AirPods Max', make: 'Apple', model: 'AirPods Max', source: 'vlm', confidence: 0.6 },
+      { name: 'Sony WH-1000XM4', make: 'Sony', model: 'WH-1000XM4', source: 'web', confidence: 0.8 },
+    ] }))).toBeUndefined()
+  })
+
+  test('deriveModelMaker: deriveMaker PREEMPTS — a distinctive-brand object never reaches this lane (Xbox unchanged)', () => {
+    // observedBrand 'Sub Pop' is distinctive → deriveMaker returns it → deriveModelMaker declines (guard 1).
+    expect(deriveModelMaker(mk({ observedBrand: 'Sub Pop', displayTitle: 'Sub Pop Mug', category: 'mug', candidates: [{ name: 'x', make: 'Sub Pop', model: 'Tote', source: 'vlm', confidence: 0.6 }] }))).toBeUndefined()
   })
 })
 

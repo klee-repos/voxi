@@ -15,7 +15,9 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { View, StyleSheet, Pressable, Text } from 'react-native'
+import { StatusBar } from 'expo-status-bar'
 import { useRouter } from 'expo-router'
+import { RefreshCw } from 'lucide-react-native'
 import { Screen, Title, Body, Muted, Button } from '../src/components/ui'
 import { AppHeader } from '../src/components/AppHeader'
 import { AudioElement, type AudioHandle } from '../src/components/AudioElement'
@@ -27,11 +29,11 @@ import { KaraokeTranscript } from '../src/components/KaraokeTranscript'
 import { OfflineBanner } from '../src/components/Banners'
 import { SurfaceProvider, useTheme } from '../src/lib/themeProvider'
 import { ids, tid, tidWith } from '../src/lib/testid'
-import { space, typeStyles, type as typeTokens } from '../src/lib/theme'
+import { space, typeStyles, type as typeTokens, hit } from '../src/lib/theme'
 import { useApi } from '../src/lib/api'
 import { useConnectivity } from '../src/lib/connectivity'
 import { useCaptureStore } from '../src/state/captureStore'
-import { startDeepDive, seedReadyDeepDive, useDeepDiveStatus } from '../src/state/deepDiveStore'
+import { startDeepDive, regenerateDeepDive, seedReadyDeepDive, useDeepDiveStatus } from '../src/state/deepDiveStore'
 
 function DeepDiveBody(): React.ReactElement {
   const api = useApi()
@@ -84,6 +86,16 @@ function DeepDiveBody(): React.ReactElement {
   const onReport = useCallback((): void => {
     if (threadId) void api.report({ targetId: threadId, kind: 'episode' })
   }, [api, threadId])
+
+  // Regenerate (retest affordance) — force a FRESH deep dive at a new version. Reset the local playhead so the
+  // fresh episode's transport starts clean; the store guard collapses a sub-frame double-tap (no double charge).
+  const onRegenerate = useCallback((): void => {
+    if (!threadId) return
+    setPlaying(false)
+    setPosition(0)
+    setDuration(0)
+    regenerateDeepDive(api, { threadId, subject: title })
+  }, [api, threadId, title])
 
   // ---- EMPTY ----
   if (!threadId) {
@@ -188,8 +200,20 @@ function DeepDiveBody(): React.ReactElement {
     // the transport bug: pause bounced back to play, and skip/seek looked dead because playback never settled).
     if (Number.isFinite(dur) && dur > 0 && pos >= dur - 0.35) setPlaying(false)
   }
+  // The ready player's header carries a regenerate control immediately LEFT of the close X (retest affordance).
+  const readyHeader = (
+    <AppHeader
+      leading="none"
+      showClose
+      rightAccessory={
+        <Pressable {...tid(ids.podcast.regenerate, 'Regenerate Deep Dive')} accessibilityRole="button" onPress={onRegenerate} hitSlop={12} style={styles.headerCtrl}>
+          <RefreshCw size={22} color={surface.text} strokeWidth={2.5} />
+        </Pressable>
+      }
+    />
+  )
   return (
-    <Screen id={ids.podcast.player} padded={false} header={closeHeader}>
+    <Screen id={ids.podcast.player} padded={false} header={readyHeader}>
       <OfflineBanner visible={offline} />
       <AudioElement ref={audioRef} id={ids.podcast.audio} src={status.audioUrl} playing={playing} onProgress={onProgress} />
       {/* off-layout state anchor so the E2E + Maestro can assert the transport actually drives playback (playing
@@ -230,6 +254,11 @@ function DeepDiveBody(): React.ReactElement {
 export default function DeepDive(): React.ReactElement {
   return (
     <SurfaceProvider surface="dark">
+      {/* Now full-screen (fullScreenModal), the near-black surface extends under the notch, so force LIGHT
+          status-bar glyphs — legible on #17181A where the app's global dark glyphs would vanish. Mounted here at
+          the wrapper (not in a DeepDiveBody branch) so it covers every state — composing, ready, all of them — and
+          reverts to the global dark bar when the screen pops (expo-status-bar is last-mounted-wins; no-op on web). */}
+      <StatusBar style="light" />
       <DeepDiveBody />
     </SurfaceProvider>
   )
@@ -245,5 +274,6 @@ const styles = StyleSheet.create({
   dockTitle: { fontFamily: typeTokens.family.sans['800'] },
   transport: { marginTop: space.md },
   report: { alignSelf: 'center', marginTop: space.md, minHeight: 32, justifyContent: 'center' },
+  headerCtrl: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
   srOnly: { position: 'absolute', left: -9999, width: 1, height: 1, opacity: 0 },
 })

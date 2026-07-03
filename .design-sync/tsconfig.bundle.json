@@ -4,7 +4,7 @@
     "paths": {
       "react-native": ["../app/node_modules/react-native-web/dist/index.js"],
       "react-native-safe-area-context": ["../e2e/web/converge/shims/safe-area.tsx"],
-      "lucide-react-native": ["../e2e/web/converge/shims/lucide.tsx"],
+      "lucide-react-native": ["../.ds-sync/node_modules/lucide-react/dist/esm/lucide-react.mjs"],
       "expo-router": ["../e2e/web/converge/shims/expo-router.tsx"],
       "expo-image": ["../e2e/web/converge/shims/expo-image.tsx"],
       "expo-constants": ["../e2e/web/converge/shims/expo-constants.tsx"],

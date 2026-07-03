@@ -45,6 +45,16 @@ describe('gateNarration — CONFIDENT may assert the model, PROBABLE is forced t
     expect(r.clauses.find((c) => c.text === 'For enthusiast photographers.')?.bucket).toBe('purpose')
     expect(r.clauses.find((c) => c.text === 'A handsome, workmanlike thing.')?.bucket).toBe('what_is_it') // untagged → identity
   })
+
+  test('a "made" (when it was made) date clause is honesty-gated: grounded is kept + keeps its bucket, ungrounded is dropped', () => {
+    // A grounded date clause tagged `made` citing the real web ref → approved, bucket preserved for the cascade.
+    const grounded = gateNarration(base, [{ text: 'Introduced in 1976.', claimType: 'date', bucket: 'made', evidenceRef: 'w1' }])
+    expect(grounded.clauses.find((c) => c.text === 'Introduced in 1976.')?.bucket).toBe('made')
+    // The SAME date clause with NO evidence ref → dropped (a date is FALSIFIABLE; the gate is bucket-agnostic).
+    const ungrounded = gateNarration(base, [{ text: 'Introduced in 1976.', claimType: 'date', bucket: 'made' }])
+    expect(ungrounded.clauses).toHaveLength(0)
+    expect(ungrounded.dropped).toBe(1)
+  })
 })
 
 describe('gateNarration — falsifiable claims need real grounding; auditor catches smuggling', () => {

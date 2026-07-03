@@ -81,29 +81,23 @@ const POLL_MAX = 90 // ~180s, matching the old in-screen budget
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Begin (or ATTACH to) a Deep Dive generation for `threadId`. Idempotent: a live job or a ready episode returns
- * immediately (no second `generate`, no re-charge). Sets `composing` synchronously so the dock/player reflect it
- * before any network call. The poll runs to a terminal state (ready/failed) or budget-lapse (`slow`), then the
- * job is removed so a later re-open can resume (generate is idempotent server-side).
+ * Launch (or relaunch) the compose→poll job for `threadId` at a specific content `version`. Writes `composing`
+ * SYNCHRONOUSLY (before any await) so the dock/player — and a racing tap — see it at once; polls to a terminal
+ * state (ready/failed) or budget-lapse (`slow`), then removes ITS OWN job. Callers own the pre-flight guards.
  */
-export function startDeepDive(api: DeepDiveApi, args: { threadId: string; subject?: string }, opts: StartOpts = {}): void {
-  const { threadId, subject } = args
-  if (jobs.has(threadId)) return // a poll is already in flight → ATTACH, do not re-fire generate
-  if (read(threadId).state === 'ready') return // already have the episode → nothing to do
-
+function launchJob(api: DeepDiveApi, threadId: string, subject: string | undefined, version: number, opts: StartOpts): void {
   const now = opts.now ?? Date.now
   const sleep = opts.sleep ?? defaultSleep
   const pollMs = opts.pollMs ?? POLL_MS
   const pollMax = opts.pollMax ?? POLL_MAX
 
-  // composing is set SYNCHRONOUSLY (before any await) so a racing second startDeepDive sees the job and attaches.
   write(threadId, { state: 'composing', failReason: null, startedAt: now() })
   const job: Job = { cancelled: false, promise: Promise.resolve() }
   jobs.set(threadId, job)
 
   job.promise = (async () => {
     try {
-      const { token } = await api.generatePodcast({ catalogItemId: threadId, version: 1, subject: subject || undefined })
+      const { token } = await api.generatePodcast({ catalogItemId: threadId, version, subject: subject || undefined })
       if (job.cancelled) return
       write(threadId, { token })
       for (let i = 0; i < pollMax; i++) {
@@ -127,9 +121,44 @@ export function startDeepDive(api: DeepDiveApi, args: { threadId: string; subjec
       const reason: DeepDiveFailReason = e instanceof ApiError && e.status === 402 ? 'limit' : 'render'
       write(threadId, { state: 'failed', failReason: reason })
     } finally {
-      jobs.delete(threadId)
+      // Identity-checked: only remove THIS job. `regenerateDeepDive` does cancel(old)+launch(new); when the
+      // cancelled old poll later resumes and reaches here, the map already holds the NEW job — a bare
+      // delete-by-key would orphan it (dead poll, broken attach guard). No-op on every non-regenerate path.
+      if (jobs.get(threadId) === job) jobs.delete(threadId)
     }
   })()
+}
+
+/**
+ * Begin (or ATTACH to) a Deep Dive generation for `threadId`. Idempotent: a live job or a ready episode returns
+ * immediately (no second `generate`, no re-charge). Sets `composing` synchronously so the dock/player reflect it
+ * before any network call. The poll runs to a terminal state (ready/failed) or budget-lapse (`slow`), then the
+ * job is removed so a later re-open can resume (generate is idempotent server-side). First generation is
+ * version 1 — the durable slot the getThread probe reads back.
+ */
+export function startDeepDive(api: DeepDiveApi, args: { threadId: string; subject?: string }, opts: StartOpts = {}): void {
+  const { threadId, subject } = args
+  if (jobs.has(threadId)) return // a poll is already in flight → ATTACH, do not re-fire generate
+  if (read(threadId).state === 'ready') return // already have the episode → nothing to do
+  launchJob(api, threadId, subject, 1, opts)
+}
+
+/**
+ * Force a FRESH Deep Dive for a thread that already has one — the retest affordance behind the player's
+ * regenerate button. Renders at a fresh (timestamp) content `version` so the BFF gate + worker (both idempotent
+ * per (item,version)) actually re-render instead of replaying the cached episode. GUARDED: if a generation is
+ * already in flight (composing/slow) it's a no-op — the guard is read synchronously off the store (which
+ * `launchJob` writes before any await), so a sub-frame double-tap can't fire two concurrent generates (the gate
+ * is not concurrency-atomic; two would each spend a credit). The fresh episode lives at a high version the
+ * getThread probe (version 1) never reads back, so this is a WITHIN-SESSION retest, not a durable replacement.
+ */
+export function regenerateDeepDive(api: DeepDiveApi, args: { threadId: string; subject?: string }, opts: StartOpts = {}): void {
+  const { threadId, subject } = args
+  const st = read(threadId).state
+  if (st === 'composing' || st === 'slow') return // a generation is already running — don't stack / double-charge
+  cancelDeepDive(threadId) // drop tracking of any prior job; the fresh version renders anew
+  const version = Math.floor((opts.now ?? Date.now)() / 1000) // fresh per tap → a new gate key → a genuine re-render
+  launchJob(api, threadId, subject, version, opts)
 }
 
 /** Cancel + forget a thread's generation (item delete). The server keeps rendering harmlessly; the client stops
@@ -144,6 +173,7 @@ export function cancelDeepDive(threadId: string): void {
  *  without a (re)generate. No-op if a generation is in flight. */
 export function seedReadyDeepDive(threadId: string, audioUrl: string, transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[]): void {
   if (jobs.has(threadId)) return
+  if (read(threadId).state === 'ready') return // don't let a same-session reopen's probe clobber a fresher (regenerated) episode
   write(threadId, { state: 'ready', audioUrl, transcript, failReason: null, startedAt: null })
 }
 

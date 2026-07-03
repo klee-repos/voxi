@@ -59,6 +59,10 @@ export interface DossierInput {
   brandLane?: boolean
   /** the coarse object type (e.g. "mug") — used only to widen the brand-lane search query ("Sub Pop … mug"). */
   objectType?: string
+  /** a CORROBORATED (non-VLM) model year, threaded ONLY on the item non-brand-lane lane — a RETRIEVAL HINT that
+   *  helps the search find the model's production-date page. It is NEVER displayed: the shown `made` date still must
+   *  ground on an admitted fact (verbatim quote + on-subject source + entailment), never on this bare number. */
+  year?: number
   provenance?: { model: string; generatedAt: number; toolCalls: number }
 }
 
@@ -138,6 +142,65 @@ export function namesDisallowedSpecific(text: string, disallowed: string[]): boo
   return disallowed.flatMap(tokens).some((t) => t.length >= 2 && hay.has(t))
 }
 
+/** Leading adjectives / colours a category phrase carries that are never its head noun, so the topical anchor keys
+ *  on the real noun ("Red Brick" → "brick"). Deliberately small — the head is the LAST significant token anyway. */
+const CATEGORY_STOPWORDS: ReadonlySet<string> = new Set([
+  'red', 'blue', 'green', 'black', 'white', 'grey', 'gray', 'brown', 'yellow', 'orange', 'pink', 'purple',
+  'small', 'large', 'big', 'old', 'new', 'plain', 'generic', 'vintage', 'antique', 'modern', 'classic',
+  'the', 'kind', 'type', 'object', 'item', 'thing', 'piece', 'style',
+])
+
+/**
+ * (5a) The CATEGORY HEAD NOUN — the last SIGNIFICANT token of a category phrase ("Red Brick" → "brick",
+ * "office chair" → "chair", "kitchen utensil" → "utensil"). At CLASS scope it anchors BOTH the source match (a
+ * compound category should match its head-noun page: "Red Brick" ↦ "Brick — Wikipedia", which the strict full-phrase
+ * anchor missed) and the set-level topical gate. Falls back to the LAST RAW token when no ≥3-char non-stopword token
+ * survives, so a short real category ("CD", "TV") still yields a real anchor — an EMPTY head would DISABLE both gates
+ * (a no-op source match + a short-circuited set anchor), MORE permissive than the pre-fix strict anchor.
+ */
+export function categoryHead(category: string): string {
+  const raw = tokens(category)
+  const significant = raw.filter((t) => t.length >= 3 && !CATEGORY_STOPWORDS.has(t))
+  const pick = significant.length ? significant : raw
+  return fold(pick[pick.length - 1] ?? '')
+}
+
+/** Does `text` name the category head as a WHOLE word (regular plural/possessive tolerated) — a word-boundary match,
+ *  NOT a raw substring, so a head buried in an unrelated word never counts ("board" ⊄ "billboard", "pen" ⊄
+ *  "Pennsylvania", "block" ⊄ "blockbuster") and a SHORT head is not over-matched into an unrelated word ("pen" ⊄
+ *  "penny", "can" ⊄ "candy") — while a genuine plural still does ("brick"→"bricks", "box"→"boxes"). Irregular
+ *  plurals/synonyms ("mouse"→"mice", "sofa"→"couch") are a known residual → honest-empty, never a false assertion.
+ *  `head` is fold()'d to [a-z0-9] so it is safe to interpolate into the pattern. */
+export function namesCategoryHead(text: string, head: string): boolean {
+  return head.length > 0 && new RegExp(`\\b${head}(?:s|es|'s)?\\b`, 'i').test(text)
+}
+
+/** (5a′) The SIGNIFICANT category tokens — every content token of a category phrase ("Plywood Board" → ['plywood',
+ *  'board'], "Red Brick" → ['brick'], "office chair" → ['office','chair']), dropping colour/adjective stopwords. A
+ *  fact/source is topical if it matches ANY of them, because a compound category's SPECIFIC noun often precedes a
+ *  GENERIC head ("Plywood Board" IS plywood): a head-only anchor on 'board' wrongly dropped every "plywood" fact AND
+ *  the real "Plywood — Wikipedia" page. Falls back to the raw tokens when none is ≥3-char/non-stopword (so "CD" →
+ *  ['cd'] keeps a real anchor, never an empty one that would DISABLE the gate). Each token is fold()'d to [a-z0-9]. */
+export function categoryAnchors(category: string): string[] {
+  const raw = tokens(category)
+  const significant = raw.filter((t) => t.length >= 3 && !CATEGORY_STOPWORDS.has(t))
+  return (significant.length ? significant : raw).map((t) => fold(t)).filter((t) => t.length > 0)
+}
+
+/** Retail / search-listing RESULT-COUNT SEO noise a CATEGORY web search drags in — a fact citing a store's result
+ *  count ("Target lists over 8,000 results", "Amazon … 60,000+ listings") is never a fact about the object. It
+ *  requires a search/listing count, so a genuine spec ("the meter displays results"), a sales figure ("350,000,000
+ *  units sold"), or a retailer-ENTITY fact ("Target operates a store chain") is never matched. Applied at CLASS
+ *  scope only (see admitFact) — the drift is a category-search artefact; item/brand facts stay byte-unchanged. */
+const LISTING_JUNK_PATTERNS: readonly RegExp[] = [
+  /\b\d[\d,]{2,}\+?\s*(?:results?|listings?)\b/i, //                              "8,000 results", "60,000+ listings"
+  /\b(?:lists?|listed|listing)\b[^.]{0,20}\b\d[\d,]{1,}\+?\s*(?:results?|listings?|items?|products?)\b/i, // "lists over 8,000 items"
+]
+/** (5b) Is this fact retail / search-listing RESULT-COUNT SEO noise rather than a fact about the object? */
+export function isListingJunk(text: string): boolean {
+  return LISTING_JUNK_PATTERNS.some((re) => re.test(text))
+}
+
 /** The shared per-fact primitive — called identically by the live provider (inline) and buildDossier (batch). */
 export function admitFact(
   fact: ProposedFact,
@@ -147,10 +210,22 @@ export function admitFact(
   const src = sources.find((s) => s.url === fact.sourceUrl)
   if (!src) return { ok: false, reason: 'source-not-fetched' }
   if (!verifyQuote(fact.quote, src.text)) return { ok: false, reason: 'quote-not-in-source' }
-  if (!sourceMatchesSubject(src, ctx.subjectTerms)) return { ok: false, reason: 'source-off-subject' }
+  // Source-subject match. ITEM/brand scope keeps the strict [make, model] anchor (a quote lifted from a DIFFERENT
+  // model's page must fail). CLASS scope accepts a source about ANY significant category token, so a compound category
+  // ("Red Brick" → "Brick — Wikipedia", "Plywood Board" → "Plywood — Wikipedia") still matches: the strict full-phrase
+  // anchor over-rejected genuine category sources, starving the deep path into the drift-prone grounding fallback.
+  const classAnchors = ctx.scope === 'class' ? categoryAnchors(ctx.subjectTerms[0] ?? '') : []
+  const subjectOk =
+    ctx.scope === 'class'
+      ? classAnchors.length === 0 || classAnchors.some((a) => sourceMatchesSubject(src, [a]))
+      : sourceMatchesSubject(src, ctx.subjectTerms)
+  if (!subjectOk) return { ok: false, reason: 'source-off-subject' }
   if (ctx.scope === 'class' && namesDisallowedSpecific(`${fact.text} ${fact.quote}`, ctx.disallowedSpecificTerms)) {
     return { ok: false, reason: 'class-scope-names-model' }
   }
+  // Retail / search-listing RESULT-COUNT SEO noise — CLASS scope only. It is a category-search artefact; an item/brand
+  // fact (a sales figure "350,000,000 units sold", a spec that says "results") must stay byte-unchanged (Tier A/B).
+  if (ctx.scope === 'class' && isListingJunk(`${fact.text} ${fact.quote}`)) return { ok: false, reason: 'listing-junk' }
   // (3) entailment: the gate's judge sees the VERIFIED QUOTE as the evidence claim → grades quote ⊨ fact.text.
   const ev: Evidence = { ref: 'q', sourceUrl: fact.sourceUrl, claim: fact.quote }
   const clause: Clause = { text: fact.text, claimType: fact.claimType, evidenceRef: 'q' }
@@ -201,6 +276,30 @@ export function buildDossier(input: DossierInput, proposed: ProposedDossier, opt
       quote: f.quote,
       order: kept.length,
     })
+  }
+
+  // Set-level topical anchor (CLASS scope) — the last defence against WHOLESALE off-topic drift on the credential-free
+  // grounding path, whose SYNTHETIC source title (= the subject) makes the per-fact source match a no-op (RCA: a
+  // "brick" query returned an all-"Red Bull" cluster every per-fact gate admitted). A fact is topically anchored when
+  // EITHER its source is a REAL page (deep path — its title already passed the head-noun source match, so it IS about
+  // the category even if the fact itself uses a pronoun) OR it names the category head as a whole word. If NOTHING in
+  // the cluster is anchored, it is off-topic drift → drop it whole (honest-empty beats confidently off-topic).
+  // Two residuals are deliberately accepted because both degrade to honest-empty / over-keep, NEVER to a new false
+  // assertion: a purely grounding cluster that only ever uses a SYNONYM/irregular plural ("couch" for a "sofa" query)
+  // is dropped to empty; and a single genuine anchor keeps the rest of ITS cluster, so a rare grounding drift that
+  // leads on-topic then wanders is not thinned.
+  if (input.scope === 'class' && kept.length > 0) {
+    const anchors = categoryAnchors(input.subjectTerms[0] ?? input.subject)
+    const anchored = kept.some((f) => {
+      const src = proposed.sources.find((s) => s.url === f.sourceUrl)
+      const realTitle = !!src && src.title.trim().length > 0 && fold(src.title) !== fold(input.subject)
+      return realTitle || anchors.some((a) => namesCategoryHead(`${f.text} ${f.quote}`, a))
+    })
+    if (anchors.length > 0 && !anchored) {
+      for (const f of kept) dropped.push({ fact: { text: f.text, claimType: f.claimType, sourceUrl: f.sourceUrl, quote: f.quote }, reason: 'class-cluster-off-topic' })
+      kept.length = 0
+      evidence.length = 0
+    }
   }
 
   // The overview's falsifiable clauses (if the draft supplied any) must cite the same closed evidence (render

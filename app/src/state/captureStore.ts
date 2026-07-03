@@ -29,8 +29,9 @@ export interface RevealSection {
   quote: string
 }
 
-/** The two narrative buckets that stream as their own `section` event. `what` rides `whatItIs`; `facts` ride `facts[]`. */
-export type SectionBucket = 'purpose' | 'maker'
+/** The narrative buckets that stream as their own `section` event. `what` rides `whatItIs`; `facts` ride `facts[]`.
+ *  `made` (when it was made) is stored like the others but has no dock slot — it renders inside the Maker card. */
+export type SectionBucket = 'purpose' | 'maker' | 'made'
 
 /** A thread's fully-loaded reveal content, cached in-session (revealCache) so a revisit paints instantly. */
 export interface CachedReveal {

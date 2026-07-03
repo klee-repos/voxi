@@ -30,6 +30,7 @@ import {
   type Evidence,
 } from '../../../packages/shared/src/confidence'
 import { gateClaim, type ClaimClassifier, type Source } from '../../../packages/shared/src/moderation'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
 
 // ---- domain types ----
 
@@ -39,6 +40,9 @@ export interface PodcastJob {
   version: number
   /** the object the episode is about (e.g. "2008 Cannondale SuperSix EVO"). */
   subject: string
+  /** server-owned reveal context (identity + what/purpose/maker + grounded facts) threaded from the BFF, so the
+   *  interview is built from everything the reveal already learned — NOT re-researched from the subject alone. */
+  context?: PodcastContext
 }
 
 /** A closed, grounded fact the script is allowed to draw on (§6.2.1). */
@@ -144,7 +148,10 @@ export interface RenderDeps {
 // ---- outcomes ----
 
 export type RenderOutcome =
-  | { kind: 'rendered'; asset: PodcastAsset }
+  // `grounding` records whether the closed facts[] came from fresh deep-dive research, or — when that research
+  // failed but the threaded reveal already carried grounded facts — from the reveal's `priorFacts` alone (the
+  // degraded-but-still-honest path). The worker logs it so a research failure is observable, not a silent success.
+  | { kind: 'rendered'; asset: PodcastAsset; grounding: 'research' | 'priorFacts' }
   | { kind: 'replayed'; asset: PodcastAsset } // duplicate job; already ready — no second render
   | { kind: 'in_progress' } // another worker holds the rendering lease
   | {
@@ -169,6 +176,59 @@ export function estimateWords(script: Script): number {
     const t = c.text.trim()
     return n + (t ? t.split(/\s+/).length : 0)
   }, 0)
+}
+
+// The server-owned marker used as the sourceUrl for the identity fact — the reveal's own identification IS the
+// provenance for "this is a <subject>", exactly as the reveal narrator grounds its identity line (live-narrator's
+// narrationEvidence pushes `voxi:cascade`). It is NOT a `voxi:observed` ref, so it legitimately grounds the
+// interview's naming opener as a `provenance` clause — which is what keeps the stage-setting intro from being cut
+// by the proper-noun auditor when the title is branded/multi-word ("Sub Pop Mug", "Herman Miller chair").
+const CASCADE_SOURCE = 'voxi:cascade'
+// Bound the closed facts[] so a rich reveal + wide research can't balloon the prompt (cost) — the reveal's own
+// facts and the identity come first, so the cap only ever trims the tail of the additive research.
+const MAX_CLOSED_FACTS = 24
+
+/**
+ * Fold the server-owned reveal CONTEXT into grounded, CITEABLE facts the interview may draw on (the honesty
+ * substrate). ONLY narrow, provably-sourced material becomes a fact:
+ *   - the reveal's `priorFacts` (each already carries a real sourceUrl + quote);
+ *   - a purpose/maker SECTION only when the reveal grounded it with a real (non-empty) sourceUrl — a section with
+ *     no source would otherwise become an empty-string ref that resolves and re-opens the citation-laundering hole;
+ *   - the IDENTITY as one `voxi:cascade` fact, but ONLY when the id is CONFIDENT (mirrors the reveal narrator),
+ *     so the opener can NAME the object without the proper-noun auditor cutting a flavor line.
+ * The what/purpose/maker PROSE itself (source-less) is passed to the model as orientation only, never as a fact.
+ */
+export function contextFacts(ctx?: PodcastContext): Fact[] {
+  if (!ctx) return []
+  const out: Fact[] = []
+  for (const f of ctx.priorFacts ?? []) {
+    if (f.text?.trim() && f.sourceUrl) out.push({ claim: f.text.trim(), sourceUrl: f.sourceUrl, confidence: 0.9 })
+  }
+  if (ctx.purpose?.trim() && ctx.purposeSourceUrl) out.push({ claim: ctx.purpose.trim(), sourceUrl: ctx.purposeSourceUrl, confidence: 0.9 })
+  if (ctx.maker?.trim() && ctx.makerSourceUrl) out.push({ claim: ctx.maker.trim(), sourceUrl: ctx.makerSourceUrl, confidence: 0.9 })
+  if (ctx.whenMade?.trim() && ctx.whenMadeSourceUrl) out.push({ claim: ctx.whenMade.trim(), sourceUrl: ctx.whenMadeSourceUrl, confidence: 0.9 })
+  if (ctx.band === 'CONFIDENT' && ctx.subject?.trim()) {
+    // Phrased as a plain identity statement (NOT "identified as …") so the host voices the naming opener cleanly
+    // — "This is a <subject>" — instead of echoing meta-language like "identified by the system".
+    out.push({ claim: `The object is a ${ctx.subject.trim()}.`, sourceUrl: CASCADE_SOURCE, confidence: 1 })
+  }
+  return out
+}
+
+/** Merge the reveal facts (authoritative, first) with the additive research, deduped on normalized claim text and
+ *  capped. Reveal facts and the identity lead, so the cap only trims the additive-research tail. */
+export function mergeFacts(priorFacts: Fact[], researched: Fact[]): Fact[] {
+  const seen = new Set<string>()
+  const out: Fact[] = []
+  for (const f of [...priorFacts, ...researched]) {
+    const key = f.claim.trim().toLowerCase().replace(/\s+/g, ' ')
+    if (key && !seen.has(key)) {
+      seen.add(key)
+      out.push(f)
+      if (out.length >= MAX_CLOSED_FACTS) break
+    }
+  }
+  return out
 }
 
 /**
@@ -263,9 +323,21 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
   }
 
   try {
-    // 1. Grounded research → closed facts[].
-    const facts = await deps.research.research(job)
-    // 2. Claim-structured script over the closed facts[].
+    // 1. Closed facts[] = the reveal's OWN grounded facts (identity + priorFacts + sourced sections) folded in
+    //    FIRST, then the additive deep-dive research merged on top. The reveal facts are authoritative and already
+    //    provably sourced, so if the fresh research fails but we hold reveal facts, we DEGRADE to those alone
+    //    rather than sinking the whole episode — the length gate below still screens a too-thin result.
+    const priorFacts = contextFacts(job.context)
+    let researched: Fact[] = []
+    let grounding: 'research' | 'priorFacts' = 'research'
+    try {
+      researched = await deps.research.research(job)
+    } catch (researchErr) {
+      if (priorFacts.length === 0) throw researchErr // nothing to fall back on → fail-closed exactly as before
+      grounding = 'priorFacts'
+    }
+    const facts = mergeFacts(priorFacts, researched)
+    // 2. Claim-structured script over the closed facts[] (+ the reveal orientation carried on job.context).
     const script = await deps.script.writeScript(job, facts)
 
     // 3+4. HONESTY (drop-and-keep) + DEFAMATION gates BEFORE any synthesis. On a defamation / degenerate-length
@@ -313,7 +385,7 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
     if (published) {
       await deps.push?.notifyReady(asset)
     }
-    return { kind: 'rendered', asset }
+    return { kind: 'rendered', asset, grounding }
   } catch (err) {
     // Fail-closed on any exception: release the lease as failed, ship nothing.
     await deps.store.compareAndSetStatus(catalogItemId, version, 'rendering', 'failed')

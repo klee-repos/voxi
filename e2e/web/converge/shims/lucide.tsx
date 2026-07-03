@@ -40,6 +40,7 @@ export const Lightbulb = Stub
 export const AudioLines = Stub
 export const MessageCircle = Stub
 export const RotateCcw = Stub
+export const RefreshCw = Stub // Deep Dive player: regenerate (left of the close X) — distinct from the ±15 rotate arrows
 // reveal ⋯ More-menu glyphs (header overflow + regenerate/delete rows)
 export const MoreHorizontal = Stub
 export const RotateCw = Stub

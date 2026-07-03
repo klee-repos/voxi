@@ -81,7 +81,11 @@ function AppShell(): React.ReactElement {
         <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
         <Stack.Screen name="processing" options={{ animation: 'fade' }} />
         <Stack.Screen name="reveal" options={{ animation: 'none' }} />
-        <Stack.Screen name="podcast" options={{ presentation: 'modal' }} />
+        {/* Deep Dive is a full-screen, dark, Spotify-style player (like `conversation`) — NOT a page-sheet. A
+            'modal' page-sheet left a ~10% top gap over the reveal; 'fullScreenModal' covers the whole screen for
+            both the composing (loading) and ready (playing) states. The dark surface then extends under the status
+            bar, so the screen mounts its own light StatusBar (podcast.tsx). */}
+        <Stack.Screen name="podcast" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="conversation" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="interview" />
         <Stack.Screen name="contribute" options={{ presentation: 'modal' }} />

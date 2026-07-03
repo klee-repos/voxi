@@ -212,6 +212,19 @@ export const shadow = {
   shadowOffset: { width: 0, height: 2 },
   elevation: 2,
 } as const
+/**
+ * Separation shadow for the FLOATING glass cards over a full-bleed photo — the reveal top bar AND the bottom dock,
+ * a MATCHED PAIR. Shared so the two can't drift: same fill (`glass.tint`), same border (`glass.border`), same lift.
+ * Deliberately stronger than the soft `shadow` token (far too faint over a bright photo) so the glass reads as one
+ * raised layer. ≈ 0 8px 22px -8px rgba(0,0,0,0.4).
+ */
+export const floatShadow = {
+  shadowColor: '#000000',
+  shadowOpacity: 0.4,
+  shadowRadius: 11,
+  shadowOffset: { width: 0, height: 8 },
+  elevation: 8,
+} as const
 
 /**
  * Liquid Glass material — a DARK, warm frost for the reveal dock floating over a full-bleed photo. Consumed by both

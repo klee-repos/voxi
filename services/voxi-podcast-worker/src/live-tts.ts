@@ -15,7 +15,7 @@ export type PodcastVoices = Record<'arlo' | 'mave', string>
 
 export const DEFAULT_PODCAST_VOICES: PodcastVoices = {
   arlo: '6u6JbqKdaQy89ENzLSju',
-  mave: 'q0IMILNRPxOgtBTS4taI', // "Matt" (user-chosen) — replaced the prior Q1Qc… voice
+  mave: 's3TPKV1kjDlVtZbl4Ksh', // user-chosen
 }
 
 function concat(buffers: Uint8Array[]): Uint8Array {

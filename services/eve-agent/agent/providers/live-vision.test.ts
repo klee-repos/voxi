@@ -4,7 +4,7 @@
  * RANGE, and web verified_confidence reflects bestGuess↔entity AGREEMENT, not a raw unbounded relevance score.
  */
 import { test, expect, describe } from 'bun:test'
-import { parseYear, webConfidence, cleanDisplayTitle, cleanField, observedBrandFrom, cleanIdentityField, isGenreLabel } from './live-vision'
+import { parseYear, webConfidence, cleanDisplayTitle, cleanField, observedBrandFrom, stripEntitySuffix, cleanIdentityField, isGenreLabel } from './live-vision'
 import type { WebDetect } from '../lib/gcp-vision'
 
 describe('cleanIdentityField — strips a trailing " or <alt>" the VLM smuggles into a make/model FIELD (F4)', () => {
@@ -74,6 +74,38 @@ describe('observedBrandFrom — a clean, corroborated, PII-safe brand read off t
     expect(observedBrandFrom('555 1234', '555 1234 printed here')).toBeUndefined() // digit run
     expect(observedBrandFrom('a@b.com', 'a@b.com on the label')).toBeUndefined() // email
     expect(observedBrandFrom('®', '®')).toBeUndefined() // mark only
+  })
+  test('an INFERRED corporate/label suffix the object does NOT bear is tolerated → the corroborated CORE is the brand', () => {
+    // The Sub Pop-logo regression: the VLM makes it "Sub Pop Records", but the wordmark reads only "SUB POP" / the
+    // clean title is "Sub Pop Logo". Full-string corroboration fails on the inferred "…Records"; the core does not.
+    expect(observedBrandFrom('Sub Pop Records', "S U B P O P Stylized text 'SUB POP' Sub Pop Logo")).toBe('Sub Pop')
+    expect(observedBrandFrom('Virgin Records', 'a VIRGIN wordmark on the sleeve')).toBe('Virgin')
+  })
+  test('the suffix-strip still binds to the object — a core NOT read off the object yields no brand', () => {
+    // "Records" stripped, but the object bears no "Sub Pop" text at all → still undefined (never a background/inferred brand).
+    expect(observedBrandFrom('Sub Pop Records', 'a plain white ceramic mug with tea')).toBeUndefined()
+  })
+  test('a plain brand ending in a non-suffix token is UNCHANGED (never over-strips a real name)', () => {
+    expect(observedBrandFrom('Sub Pop', "'SUB POP' Sub Pop Logo")).toBe('Sub Pop') // "Pop" is not a suffix
+    expect(observedBrandFrom('Canon', 'Canon EOS printed on the body')).toBe('Canon')
+  })
+})
+
+describe('stripEntitySuffix — drops trailing corporate/label FORM tokens, never a plain brand', () => {
+  test('a trailing corporate/label suffix run is removed to the brand core', () => {
+    expect(stripEntitySuffix('Sub Pop Records')).toBe('Sub Pop')
+    expect(stripEntitySuffix('Acme Corp')).toBe('Acme')
+    expect(stripEntitySuffix('Foo Inc')).toBe('Foo')
+    expect(stripEntitySuffix('Bar Recordings Ltd')).toBe('Bar') // a trailing RUN of suffix tokens
+  })
+  test('a brand with no corporate suffix is returned unchanged', () => {
+    expect(stripEntitySuffix('Sub Pop')).toBe('Sub Pop')
+    expect(stripEntitySuffix('Canon')).toBe('Canon')
+    expect(stripEntitySuffix('Xbox')).toBe('Xbox')
+  })
+  test('never strips to empty — a lone suffix token survives (≥1 token kept)', () => {
+    expect(stripEntitySuffix('Records')).toBe('Records')
+    expect(stripEntitySuffix('Inc')).toBe('Inc')
   })
 })
 

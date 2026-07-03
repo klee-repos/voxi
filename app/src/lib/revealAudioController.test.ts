@@ -251,3 +251,72 @@ describe('RevealAudioController — serialization kills the -11800/-12780 race',
     expect(log.length).toBe(n)
   })
 })
+
+// ── seek() — the Deep Dive scrubber + ±15 client path (the native half of the seek RCA) ──────────────────────
+// The scrubber (onSeek → seekTo) and ±15 (seekBy → seek) both route through controller.seek(). These pin that
+// a loaded episode actually seeks, and that a seek can never fire on an unloaded / stale / wrong bucket (which
+// would seek the wrong or an empty queue). The SERVER-side 206 fix makes the platform honor these seeks; this
+// proves the JS chain that issues them is correct without a device.
+describe('RevealAudioController — seek (Deep Dive scrubber + ±15)', () => {
+  test('seek(s) on a loaded episode calls player.seekTo(s) exactly once', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async (s) => `${s}.mp3` })
+    c.update({ src: 'A', playing: true })
+    await c.settled()
+    const n = log.length
+    c.seek(42)
+    await c.settled()
+    expect(log.slice(n)).toEqual(['seekTo:42'])
+  })
+
+  test('seek clamps a negative target to 0 (a −15 back-skip from near the start)', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async (s) => `${s}.mp3` })
+    c.update({ src: 'A', playing: true }); await c.settled()
+    const n = log.length
+    c.seek(-15)
+    await c.settled()
+    expect(log.slice(n)).toEqual(['seekTo:0'])
+  })
+
+  test('seek ignores a non-finite target (never enqueues a bad seekTo)', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async (s) => `${s}.mp3` })
+    c.update({ src: 'A', playing: true }); await c.settled()
+    const n = log.length
+    c.seek(Number.NaN)
+    c.seek(Number.POSITIVE_INFINITY)
+    await c.settled()
+    expect(log.slice(n)).toEqual([])
+  })
+
+  test('seek before anything is loaded is DROPPED (no seek on an empty queue)', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async (s) => `${s}.mp3` })
+    c.seek(30)
+    await c.settled()
+    expect(log.filter((x) => x.startsWith('seekTo'))).toEqual([])
+  })
+
+  test('seek after a FAILED load is DROPPED (never seeks the previous/empty bucket)', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async () => { throw new Error('io') }, onError: () => {} })
+    c.update({ src: 'A', playing: false }); await c.settled() // load fails → loadedSrc stays undefined
+    c.seek(20)
+    await c.settled()
+    expect(log.filter((x) => x.startsWith('seekTo'))).toEqual([])
+  })
+
+  test('after a bucket switch, a seek only ever targets the CURRENT loaded episode', async () => {
+    const { log, player } = makeMock()
+    const c = createRevealAudioController({ player, resolveUrl: async (s) => `${s}.mp3` })
+    c.update({ src: 'A', playing: true }); await c.settled()
+    c.update({ src: 'B', playing: true }); await c.settled() // B (a different episode) takes the singleton
+    const n = log.length
+    c.seek(12)
+    await c.settled()
+    // one seekTo, and it ran while B was loaded — it can never have addressed A's timeline
+    expect(log.slice(n)).toEqual(['seekTo:12'])
+    expect(log.filter((x) => x.startsWith('add:'))).toEqual(['add:A.mp3', 'add:B.mp3'])
+  })
+})

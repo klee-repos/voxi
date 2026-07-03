@@ -8,6 +8,8 @@
  */
 const g = globalThis as unknown as { global?: unknown; process?: { env: Record<string, string> }; __DEV__?: boolean }
 g.global = g.global || globalThis
-g.process = g.process || { env: { NODE_ENV: 'production' } }
+// EXPO_PUBLIC_TEST_MODE=1 makes AuthProvider select FakeAuthProvider (a deterministic `test:` session) instead
+// of Clerk — so DrawerMenu's useAuth()/useApi() resolve in the preview without real auth.
+g.process = g.process || { env: { NODE_ENV: 'production', EXPO_PUBLIC_TEST_MODE: '1' } }
 g.__DEV__ = false
 export {}

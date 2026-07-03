@@ -47,6 +47,7 @@ export function AppHeader({
   fallback = '/(tabs)/camera',
   showMore = false,
   onMore,
+  rightAccessory,
 }: {
   leading?: 'back' | 'menu' | 'none'
   /** render the dismiss X in the right slot (modals). */
@@ -67,6 +68,10 @@ export function AppHeader({
    *  exclusive with the close X in practice (a media/back header has no X). */
   showMore?: boolean
   onMore?: () => void
+  /** An extra control rendered in the right region, immediately LEFT of the close X (e.g. the Deep Dive
+   *  regenerate button). The region only WIDENS when this is set — absent, the right slot is a single control
+   *  exactly as before, so no other screen's centering shifts. */
+  rightAccessory?: React.ReactNode
 }): React.ReactElement {
   const { surface } = useTheme()
   const { open, isOpen } = useDrawer()
@@ -121,6 +126,7 @@ export function AppHeader({
       )}
 
       <View style={styles.rightSlot}>
+        {rightAccessory}
         {showX ? (
           <Pressable {...tid(ids.nav.close, 'Close')} accessibilityRole="button" onPress={closeHandler} hitSlop={12} style={ctrlStyle}>
             {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
@@ -148,7 +154,10 @@ const styles = StyleSheet.create({
   // cross-axis stretch lets the node take the full width so a long title WRAPS (centered via its own textAlign)
   // rather than sizing to content and overflowing; justifyContent centers the (1- or 2-line) block vertically.
   titleSlot: { flex: 1, justifyContent: 'center', paddingHorizontal: space.sm },
-  rightSlot: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
+  // A row so an optional rightAccessory sits LEFT of the close X. With no accessory it holds a single
+  // hit.min-square control — content-sized to the same width as the old fixed slot, so title centering is
+  // unchanged on every other screen.
+  rightSlot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', minHeight: hit.min },
   ctrl: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
   // Over-media controls are Liquid-Glass discs (the dock's material) — GlassFill absolute-fills this rounded host,
   // so it must clip (overflow) and keep a backgroundColor as the no-blur/no-module fallback.

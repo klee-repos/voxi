@@ -138,8 +138,11 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
     // prose Sources row exercises the hostname fallback, not a fabricated title.
     yield JSON.stringify({ type: 'section', index: 5, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame — stiff enough to sprint on, tuned to smooth rough tarmac.', sourceUrl: src, sourceTitle: '', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
     yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm that made its name on oversized aluminium frames before going all-in on this carbon platform.', sourceUrl: src, sourceTitle: '', quote: 'the SuperSix EVO is Cannondale’s flagship' })
-    yield JSON.stringify({ type: 'description_upgrade', index: 7, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer, built light for the climbs and named for its evolution of the SuperSix platform." })
-    yield JSON.stringify({ type: 'done', index: 8, sessionId })
+    // "When it was made" — a grounded date bucket that rides alongside maker (rendered as a muted line inside the
+    // Maker card, no dock slot). About THIS model's production, never the category's invention.
+    yield JSON.stringify({ type: 'section', index: 7, bucket: 'made', text: 'This EVO dates to the 2008 model year, on the SuperSix platform introduced in 2011.', sourceUrl: makerSrc, sourceTitle: '', quote: 'the EVO evolution of the SuperSix was introduced in 2011' })
+    yield JSON.stringify({ type: 'description_upgrade', index: 8, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer, built light for the climbs and named for its evolution of the SuperSix platform." })
+    yield JSON.stringify({ type: 'done', index: 9, sessionId })
     return
   }
   if (scan === 'unknown') {

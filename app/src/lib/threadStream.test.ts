@@ -55,14 +55,19 @@ describe('applyStreamEvent (the shared reducer)', () => {
     applyStreamEvent({ type: 'fact', index: 1, text: 'f', sourceUrl: 'u', sourceTitle: 's', quote: 'q' } as StreamEvent, a)
     applyStreamEvent({ type: 'section', index: 2, bucket: 'purpose', text: 'p', sourceUrl: '', sourceTitle: '', quote: '' } as StreamEvent, a)
     applyStreamEvent({ type: 'section', index: 3, bucket: 'unknownbucket', text: 'x', sourceUrl: '', sourceTitle: '', quote: '' } as StreamEvent, a)
-    applyStreamEvent({ type: 'description_upgrade', index: 4, text: 'better' } as StreamEvent, a)
-    applyStreamEvent({ type: 'confidence_band', index: 5, band: 'CONFIDENT', title: 'T', candidates: [] } as StreamEvent, a)
-    applyStreamEvent({ type: 'done', index: 6, sessionId: 's' } as StreamEvent, a)
+    applyStreamEvent({ type: 'section', index: 4, bucket: 'made', text: '1976', sourceUrl: '', sourceTitle: '', quote: '' } as StreamEvent, a)
+    applyStreamEvent({ type: 'description_upgrade', index: 5, text: 'better' } as StreamEvent, a)
+    applyStreamEvent({ type: 'confidence_band', index: 6, band: 'CONFIDENT', title: 'T', candidates: [] } as StreamEvent, a)
+    applyStreamEvent({ type: 'done', index: 7, sessionId: 's' } as StreamEvent, a)
 
-    expect(calls.setLastSeenIndex).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(calls.setLastSeenIndex).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
     expect(calls.appendText).toEqual(['A '])
     expect(calls.appendFact).toEqual([{ text: 'f', sourceUrl: 'u', sourceTitle: 's', quote: 'q' }])
-    expect(calls.appendSection).toEqual([['purpose', { text: 'p', sourceUrl: '', sourceTitle: '', quote: '' }]]) // unknown bucket ignored, not crashed
+    // purpose + made are appended; the unknown bucket is ignored, not crashed.
+    expect(calls.appendSection).toEqual([
+      ['purpose', { text: 'p', sourceUrl: '', sourceTitle: '', quote: '' }],
+      ['made', { text: '1976', sourceUrl: '', sourceTitle: '', quote: '' }],
+    ])
     expect(calls.upgradeDescription).toEqual(['better'])
     expect(calls.setBand).toEqual([['CONFIDENT', 'T', []]])
     expect(calls.setResearchComplete).toEqual([true])

@@ -16,6 +16,8 @@ import {
   renderPodcast,
   validateScript,
   estimateWords,
+  contextFacts,
+  mergeFacts,
   memoryAssetStore,
   type RenderDeps,
   type Script,
@@ -29,6 +31,8 @@ import {
   type PushSink,
 } from './render'
 import { buildProductionDeps } from './production-deps'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
+import { smugglesFalsifiable } from '../../eve-agent/agent/providers/live-narrator'
 
 // ---- fakes that COUNT real invocations ----
 
@@ -380,5 +384,155 @@ describe('render: a FAILED item can be RETRIED — "try again" re-renders, not a
     expect(out.kind).toBe('rendered')
     expect(calls.tts).toBe(1)
     expect(await store.getStatus(job.catalogItemId, job.version)).toBe('ready')
+  })
+})
+
+// ---- DEEPDIVE context completeness: the interview is built from what the reveal ALREADY learned ----
+// The worker must fold the reveal's grounded facts + identity + sourced sections into the closed facts[] the
+// interview cites, merged with the additive deep-dive research — not re-research the subject alone.
+
+const REVEAL_CTX: PodcastContext = {
+  subject: '1976 Canon AE-1',
+  band: 'CONFIDENT',
+  whatItIs: 'A 35mm SLR film camera you focus and wind by hand.',
+  purpose: 'Making photographs on 35mm film.', // NO purposeSourceUrl → orientation only, never a citeable fact
+  maker: 'Canon, in Japan.',
+  makerSourceUrl: 'https://en.wikipedia.org/wiki/Canon_Inc',
+  whenMade: 'Produced from 1976 to 1984.',
+  whenMadeSourceUrl: 'https://camerapedia.example/canon-ae1-production',
+  priorFacts: [
+    { text: 'The Canon AE-1 was launched in 1976.', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_AE-1', quote: 'launched in 1976' },
+    { text: 'It uses the Canon FD breech-lock lens mount.', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_FD' },
+  ],
+}
+const RESEARCH: Fact[] = [{ claim: 'Over one million units were sold.', sourceUrl: 'https://sales.example/ae1', confidence: 0.9 }]
+
+// A capturing ScriptProvider: records the closed facts[] it is handed and returns a script whose facts ARE that
+// set (mirroring GeminiScriptProvider), so any clause we author is validated against the real merged evidence.
+function capturingDeps(clauses: ScriptClause[], research: Fact[] | (() => Promise<Fact[]>), over: Partial<RenderDeps> = {}) {
+  const seen: { facts: Fact[] } = { facts: [] }
+  const researchFn = typeof research === 'function' ? research : async () => research
+  const deps: RenderDeps = {
+    research: { async research() { return researchFn() } },
+    script: { async writeScript(_job, facts) { seen.facts = facts; return { facts, clauses } } },
+    tts: { async synthesize() { return { audio: new TextEncoder().encode('AUDIO'), durationSec: 190 } } },
+    muxer: { async assemble({ catalogItemId, version }) { return { playlistKey: `p/${catalogItemId}/v${version}/e.mp3`, segmentKeys: [`p/${catalogItemId}/v${version}/e.mp3`] } } },
+    store: memoryAssetStore(),
+    ...over,
+  }
+  return { deps, seen }
+}
+
+// A real-shaped Deep Dive: the opener NAMES the object as a grounded provenance clause citing the identity fact
+// (voxi:cascade); other falsifiable clauses cite reveal priorFacts / the research fact; the rest is clean flavor.
+// Long enough that dropping the one research-cited clause (the degraded path) still clears the 120-word floor.
+const CTX_CLAUSES: ScriptClause[] = [
+  { speaker: 'arlo', text: 'This is a 1976 Canon AE-1, and you have probably walked past a hundred of them.', claimType: 'provenance', evidenceRef: 'voxi:cascade' },
+  { speaker: 'mave', text: 'It arrived in the middle of that decade and quietly rewired the whole camera business.', claimType: 'date', evidenceRef: 'https://en.wikipedia.org/wiki/Canon_AE-1' },
+  { speaker: 'arlo', text: 'So what makes this particular slab of metal worth a second look?', claimType: 'flavor' },
+  { speaker: 'mave', text: 'The lens twists on through a mount that outlived a dozen fashions.', claimType: 'spec', evidenceRef: 'https://en.wikipedia.org/wiki/Canon_FD' },
+  { speaker: 'arlo', text: 'And people actually bought these in enormous numbers?', claimType: 'flavor' },
+  { speaker: 'mave', text: 'More than a million of them left the factory before it was done.', claimType: 'superlative', evidenceRef: 'https://sales.example/ae1' },
+  { speaker: 'arlo', text: 'I always assumed it was just another old camera on a shelf.', claimType: 'flavor' },
+  { speaker: 'mave', text: 'Almost everyone does, and that is exactly the surprise here.', claimType: 'flavor' },
+  { speaker: 'arlo', text: 'What stays with you after you have held one for a while?', claimType: 'flavor' },
+  { speaker: 'mave', text: 'How much of the person who owned it is still pressed into the grip.', claimType: 'flavor' },
+  { speaker: 'arlo', text: 'That is a strange thing to say about a machine.', claimType: 'flavor' },
+  { speaker: 'mave', text: 'And yet it is the honest thing to say about this one.', claimType: 'flavor' },
+  { speaker: 'arlo', text: 'It really does invite you to slow down and look again.', claimType: 'flavor' },
+  { speaker: 'mave', text: 'Which is the whole reason we are still talking about it.', claimType: 'flavor' },
+]
+
+describe('render: reveal context feeds the closed facts[] the interview cites (context completeness)', () => {
+  test('priorFacts + the sourced maker section + the CONFIDENT identity are merged with the research into the closed facts', async () => {
+    const { deps, seen } = capturingDeps(CTX_CLAUSES, RESEARCH)
+    const out = await renderPodcast({ catalogItemId: 'canon-ae1', version: 1, subject: '1976 Canon AE-1', context: REVEAL_CTX }, deps)
+    expect(out.kind).toBe('rendered')
+    const claims = seen.facts.map((f) => f.claim)
+    expect(claims).toContain('The Canon AE-1 was launched in 1976.') // reveal priorFact
+    expect(claims).toContain('It uses the Canon FD breech-lock lens mount.') // reveal priorFact
+    expect(claims).toContain('Canon, in Japan.') // SOURCED maker section → citeable fact
+    expect(claims).toContain('Over one million units were sold.') // additive research
+    expect(seen.facts.some((f) => f.sourceUrl === 'voxi:cascade' && /1976 Canon AE-1/.test(f.claim))).toBe(true) // identity
+    // the SOURCELESS purpose section is orientation-only and must NEVER become a citeable fact (laundering guard)
+    expect(claims).not.toContain('Making photographs on 35mm film.')
+  })
+
+  test('the stage-setting opener AND a priorFact-grounded clause survive the honesty gate and ship', async () => {
+    const { deps } = capturingDeps(CTX_CLAUSES, RESEARCH)
+    const out = await renderPodcast({ catalogItemId: 'canon-ae1', version: 1, subject: '1976 Canon AE-1', context: REVEAL_CTX }, deps)
+    const shipped = out.kind === 'rendered' ? (out.asset.transcript ?? []).map((l) => l.text).join(' ') : ''
+    expect(shipped).toContain('This is a 1976 Canon AE-1') // the named, oriented opener (not cut)
+    expect(shipped).toContain('mount that outlived') // a reveal-priorFact-grounded clause
+  })
+})
+
+describe('render: P3 — naming a branded object survives ONLY when grounded (proper-noun auditor)', () => {
+  const filler: ScriptClause[] = Array.from({ length: 14 }, (_, i) => ({
+    speaker: (i % 2 ? 'mave' : 'arlo') as ScriptClause['speaker'],
+    text: 'It sits there quietly and asks almost nothing of you at all.',
+    claimType: 'flavor',
+  }))
+  const idFact: Fact = { claim: 'The object is a Sub Pop Mug.', sourceUrl: 'voxi:cascade', confidence: 1 }
+
+  test('the proper-noun auditor flags a branded/multi-word name (why a flavor opener is unsafe)', () => {
+    expect(smugglesFalsifiable('This is a Sub Pop Mug.')).toBe(true)
+    expect(smugglesFalsifiable('Look at this Herman Miller chair.')).toBe(true)
+  })
+
+  test('same opener words: KEPT as a grounded provenance clause, CUT as flavor', () => {
+    const asProvenance: Script = { facts: [idFact], clauses: [{ speaker: 'arlo', text: 'This is a Sub Pop Mug.', claimType: 'provenance', evidenceRef: 'voxi:cascade' }, ...filler] }
+    const asFlavor: Script = { facts: [idFact], clauses: [{ speaker: 'arlo', text: 'This is a Sub Pop Mug.', claimType: 'flavor' }, ...filler] }
+    const prov = validateScript(asProvenance, { detectNamedClaim: smugglesFalsifiable })
+    const flav = validateScript(asFlavor, { detectNamedClaim: smugglesFalsifiable })
+    expect('ok' in prov && prov.script.clauses.some((c) => c.text === 'This is a Sub Pop Mug.')).toBe(true)
+    // the flavor opener is dropped — the episode would ship WITHOUT ever naming the object (the "starts in the middle" bug)
+    expect('ok' in flav && flav.script.clauses.some((c) => c.text === 'This is a Sub Pop Mug.')).toBe(false)
+  })
+})
+
+describe('render: resilience — research failure degrades to reveal facts (observable), never a silent success', () => {
+  test('research throws but reveal priorFacts exist → renders with grounding "priorFacts"', async () => {
+    const { deps } = capturingDeps(CTX_CLAUSES, async () => { throw new Error('grounded research failed (all attempts)') })
+    const out = await renderPodcast({ catalogItemId: 'canon-ae1', version: 1, subject: '1976 Canon AE-1', context: REVEAL_CTX }, deps)
+    expect(out.kind).toBe('rendered')
+    if (out.kind === 'rendered') expect(out.grounding).toBe('priorFacts')
+  })
+
+  test('research succeeds → grounding "research"', async () => {
+    const { deps } = capturingDeps(CTX_CLAUSES, RESEARCH)
+    const out = await renderPodcast({ catalogItemId: 'canon-ae1', version: 1, subject: '1976 Canon AE-1', context: REVEAL_CTX }, deps)
+    expect(out.kind === 'rendered' && out.grounding).toBe('research')
+  })
+
+  test('research throws AND no reveal context → fails closed (nothing to fall back on)', async () => {
+    const { deps } = capturingDeps(CTX_CLAUSES, async () => { throw new Error('grounded research failed') })
+    const out = await renderPodcast({ catalogItemId: 'x', version: 1, subject: 'x' }, deps)
+    expect(out.kind).toBe('failed')
+  })
+})
+
+describe('contextFacts / mergeFacts (pure)', () => {
+  test('folds priorFacts + sourced sections + a CONFIDENT identity; drops sourceless sections', () => {
+    const facts = contextFacts(REVEAL_CTX)
+    const urls = facts.map((f) => f.sourceUrl)
+    expect(urls).toContain('https://en.wikipedia.org/wiki/Canon_AE-1') // priorFact
+    expect(urls).toContain('https://en.wikipedia.org/wiki/Canon_Inc') // sourced maker
+    expect(facts.some((f) => f.claim === 'Produced from 1976 to 1984.' && f.sourceUrl === 'https://camerapedia.example/canon-ae1-production')).toBe(true) // sourced made date folded (parallel to maker)
+    expect(facts.some((f) => f.sourceUrl === 'voxi:cascade')).toBe(true) // identity (CONFIDENT)
+    expect(facts.some((f) => f.claim === 'Making photographs on 35mm film.')).toBe(false) // sourceless purpose dropped
+    // a made date WITHOUT a source is orientation only — never a citeable fact (mirrors the sourceless-purpose rule)
+    expect(contextFacts({ ...REVEAL_CTX, whenMadeSourceUrl: undefined }).some((f) => f.claim === 'Produced from 1976 to 1984.')).toBe(false)
+  })
+  test('no identity fact when the id is not CONFIDENT (the hedge is honored)', () => {
+    expect(contextFacts({ ...REVEAL_CTX, band: 'PROBABLE' }).some((f) => f.sourceUrl === 'voxi:cascade')).toBe(false)
+  })
+  test('undefined context → no facts', () => {
+    expect(contextFacts(undefined)).toEqual([])
+  })
+  test('mergeFacts dedupes on normalized claim text (reveal facts win) and preserves order', () => {
+    const a: Fact[] = [{ claim: 'Same fact.', sourceUrl: 'u1', confidence: 1 }]
+    const b: Fact[] = [{ claim: 'same   FACT.', sourceUrl: 'u2', confidence: 1 }, { claim: 'Other.', sourceUrl: 'u3', confidence: 1 }]
+    expect(mergeFacts(a, b).map((f) => f.claim)).toEqual(['Same fact.', 'Other.'])
   })
 })

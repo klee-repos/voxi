@@ -28,9 +28,24 @@ describe('brandLaneQuery / groundingSubject — history-first lead, maker-agnost
     expect(groundingSubject(xbox)).toBe('the maker "Xbox" — the company, brand, maker or label behind this video game controller (who they are, their history, what they are best known for, and why they make things like this)')
     expect(groundingSubject(xbox).startsWith('the maker "Xbox"')).toBe(true) // the ENTITY leads, not the object type
   })
-  test('a non-brand-lane input is the plain subject (unchanged)', () => {
-    expect(brandLaneQuery(plain)).toBe('Canon AE-1')
-    expect(groundingSubject(plain)).toBe('the Canon AE-1')
+  test('a non-brand-lane ITEM input LEADS with the subject, then appends a when-it-was-made angle (fills the `made` bucket)', () => {
+    expect(brandLaneQuery(plain)).toBe('Canon AE-1 — history and key facts, including when it was made: its production years, model years, or release date')
+    expect(brandLaneQuery(plain).startsWith('Canon AE-1')).toBe(true) // subject still LEADS retrieval
+    expect(groundingSubject(plain)).toBe('the Canon AE-1, including when it was made — its production years or release date')
+  })
+  test('the corroborated year threads into the item query as a HINT (never displayed downstream)', () => {
+    const withYear = label({ subject: 'Canon AE-1', scope: 'item', subjectTerms: ['Canon', 'AE-1'], year: 1976 })
+    expect(brandLaneQuery(withYear)).toBe('Canon AE-1 1976 — history and key facts, including when it was made: its production years, model years, or release date')
+    expect(groundingSubject(withYear)).toBe('the Canon AE-1 (1976), including when it was made — its production years or release date')
+  })
+  test('the BRAND LANE never dates the specimen: a year on a brand-lane input is IGNORED (honesty — cannot know which one)', () => {
+    const brandWithYear = label({ subject: 'Sub Pop', scope: 'item', subjectTerms: ['Sub Pop'], brandLane: true, objectType: 'mug', year: 1988 })
+    expect(brandLaneQuery(brandWithYear)).toBe('Sub Pop — company, brand, maker or label: history, founding, what they are best known for, and its mug')
+    expect(brandLaneQuery(brandWithYear)).not.toContain('1988')
+    expect(brandLaneQuery(brandWithYear)).not.toContain('when it was made')
+  })
+  test('CLASS scope is UNCHANGED — a category has no specimen production date to seek', () => {
+    expect(brandLaneQuery({ subject: 'camera', scope: 'class', subjectTerms: ['camera'] })).toBe('camera')
     expect(groundingSubject({ subject: 'camera', scope: 'class', subjectTerms: ['camera'] })).toBe('the category of object: camera')
   })
 })

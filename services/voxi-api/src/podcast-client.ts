@@ -5,9 +5,10 @@
  * "ready" — the state comes straight from the worker, which only reports ready once a real MP3 exists.
  */
 import type { PodcastStatusService } from './app'
+import type { PodcastContext } from '../../../packages/shared/src/podcast'
 
 export interface PodcastBridge {
-  enqueue(args: { token: string; catalogItemId: string; version: number; subject: string; userId: string }): Promise<void>
+  enqueue(args: { token: string; catalogItemId: string; version: number; subject: string; userId: string; context?: PodcastContext }): Promise<void>
   status: PodcastStatusService
 }
 
@@ -18,9 +19,9 @@ export function createPodcastBridge(opts: { workerUrl: string; secret: string; f
   const owner = new Map<string, string>() // generation token → owning userId (ACL)
 
   return {
-    async enqueue({ token, catalogItemId, version, subject, userId }) {
+    async enqueue({ token, catalogItemId, version, subject, userId, context }) {
       owner.set(token, userId)
-      const r = await f(`${base}/render`, { method: 'POST', headers, body: JSON.stringify({ token, catalogItemId, version, subject }) })
+      const r = await f(`${base}/render`, { method: 'POST', headers, body: JSON.stringify({ token, catalogItemId, version, subject, ...(context ? { context } : {}) }) })
       if (!r.ok && r.status !== 202) throw new Error(`worker /render → ${r.status}`)
     },
     status: {
