@@ -1,0 +1,63 @@
+# Maestro flow (iOS native, deterministic) — deepdive-retry: a FAILED Deep Dive render RECOVERS on "Try again".
+# Reproduces the reported bug: the first render FAILS, the honest failed state offers "Try again", and tapping it
+# must actually RE-RENDER and reach the ready player — NOT dead-end/instant-fail. This DISCRIMINATES the fix:
+# without the BFF re-enqueue (+ the worker failed→rendering lease), the retry never re-renders, "Try again" stays,
+# and podcast.scrubber never appears (this flow times out).
+#
+# The first render is failed via the test-BFF env VOXI_TEST_PODCAST_FAIL_FIRST=1 (the standalone runner sets it),
+# so this uses the same plain-capture path as deepdive-01 — no deep-link seed needed.
+# Run:  VOXI_TEST_PODCAST_FAIL_FIRST=1 bun e2e/native/test-bff.ts &   then   maestro test e2e/flows/deepdive-retry.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+# Open the Deep Dive + generate — this first render is env-seeded to FAIL.
+- extendedWaitUntil:
+    visible:
+      id: "reveal.deepDiveIcon"
+    timeout: 20000
+- tapOn:
+    id: "reveal.deepDiveIcon"
+- extendedWaitUntil:
+    visible:
+      id: "podcast.generate"
+    timeout: 20000
+- tapOn:
+    id: "podcast.generate"
+# The FIRST render fails → the honest failed state offers "Try again" (NOT a dead screen / instant fail).
+- extendedWaitUntil:
+    visible:
+      text: "Try again"
+    timeout: 45000
+# Tap "Try again" (the failed-state button carries that label) → the fix re-enqueues → the render RECOVERS.
+- tapOn:
+    id: "podcast.playPause"
+# RECOVERY: the retry actually re-rendered and reached the ready player. WITHOUT the fix this never appears.
+- extendedWaitUntil:
+    visible:
+      id: "podcast.scrubber"
+    timeout: 90000
+- assertVisible:
+    id: "podcast.playPause"
+- assertVisible:
+    id: "podcast.skip15"

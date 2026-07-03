@@ -64,7 +64,7 @@ colors:
   pastel-lavender:  "#EDE7FB"    # "Games"
 
   # — Dark theme —
-  dark-background:      "#212325"   # charcoal canvas (range #1E2021…#242628)
+  dark-background:      "#17181A"   # near-black charcoal canvas (darkened from #212325 for legibility; range #141517…#242628)
   dark-header:          "#000000"   # top nav / status area on dark screens
   dark-surface:         "#2A2C2E"   # elevated cards (barely lighter than canvas)
   dark-surface-sunken:  "#2A2C2E"   # dark topic chips / sunken fills
@@ -299,7 +299,8 @@ Three ideas define the look:
    The contrast is what makes the brand feel hand-made.
 
 The app ships in two themes: **Warm** (the default documented here) and **Dark**
-(charcoal `#212325`). A cooler, lighter light variant (`#F7F6F1`) also appears
+(near-black charcoal `#17181A`, darkened from `#212325` for dark-shell legibility).
+A cooler, lighter light variant (`#F7F6F1`) also appears
 in later builds; treat it as a temperature shift of the Warm theme, not a third
 system.
 
@@ -357,7 +358,7 @@ system.
 
 | Role | Token | Hex |
 |------|-------|-----|
-| Canvas | `dark-background` | `#212325` |
+| Canvas | `dark-background` | `#17181A` |
 | Top nav / status | `dark-header` | `#000000` |
 | Card | `dark-surface` | `#2A2C2E` |
 | Primary text | `dark-text-primary` | `#ECEEEE` |

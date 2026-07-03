@@ -4,8 +4,10 @@
  * header (the deterministic mock shell in e2e/web/server.ts has no drawer/history and can't drive it). It mounts
  * each REAL screen and drives the REAL controls behind the testID contract:
  *
- *   1. Header present + correct control per screen: nav.menuButton (camera), nav.back (pushed:
- *      threads/settings/interview), nav.close X (modals: podcast/contribute/conversation/paywall).
+ *   1. Header present + correct control per screen: nav.menuButton (camera + the Collection/Settings drawer
+ *      SECTIONS — peers of Capture, which show the hamburger, NOT a back chevron), nav.back (genuinely pushed:
+ *      interview), nav.close X (modals: podcast/contribute/conversation/paywall). The section hamburgers are also
+ *      proven to REALLY open the drawer in a real host (?screen=flow), and to carry the F2 optical nudge (box-level).
  *   2. GUARDED fallback (adversarial-review M3): single-screen mounts have canGoBack()=false, so a back/close tap
  *      records `replace(<fallback>)` on data-last-nav — never a dead-click on a deep-link/reload.
  *   3. Constant height (adversarial-review m3): the nav.header box is equal across menu / back / close screens.
@@ -36,6 +38,11 @@ async function headerHeight(): Promise<number> {
   if (!box) throw new Error('nav.header has no bounding box')
   return Math.round(box.height)
 }
+async function menuLeft(): Promise<number> {
+  const box = await page.locator(`[data-testid="${ids.nav.menuButton}"]`).first().boundingBox()
+  if (!box) throw new Error('nav.menuButton has no bounding box')
+  return box.x
+}
 async function clearNav(): Promise<void> {
   await page.evaluate(() => document.body.removeAttribute('data-last-nav'))
 }
@@ -50,27 +57,52 @@ await check('camera: nav.header + hamburger (menu) render', async () => {
   await d.waitFor(ids.nav.menuButton, { timeoutMs: 4000 })
 })
 const hMenu = await headerHeight()
+// Baseline for the F2 optical-nudge guard: the camera hamburger carries the wordmark → NOT nudged (x ≈ bar pad).
+const cameraMenuLeft = await menuLeft()
 
-// ---- pushed screens: a back chevron that returns toward camera (guarded) ----
-for (const s of ['threads', 'settings', 'interview'] as const) {
+// ---- section screens (Collection / Settings): a MENU hamburger that opens the drawer, NOT a back chevron. These
+//      are top-level drawer destinations (peers of Capture), so they carry the SAME hamburger as the camera home. ----
+const NUDGE = 4 // = space.xs — the F2 optical nudge that aligns the wordmark-less section hamburger to the body <Title>
+for (const s of ['threads', 'settings'] as const) {
   await gotoScreen(s)
-  await check(`${s}: nav.header + back chevron (nav.back) render, no hamburger`, async () => {
+  await check(`${s}: nav.header + hamburger (nav.menuButton) render, NO back chevron`, async () => {
     await d.waitFor(ids.nav.header, { timeoutMs: 6000 })
-    await d.waitFor(ids.nav.back, { timeoutMs: 4000 })
-    const menu = await page.locator(`[data-testid="${ids.nav.menuButton}"]`).count()
-    if (menu !== 0) throw new Error('pushed screen still shows a hamburger')
+    await d.waitFor(ids.nav.menuButton, { timeoutMs: 4000 })
+    const back = await page.locator(`[data-testid="${ids.nav.back}"]`).count()
+    if (back !== 0) throw new Error('a drawer section still shows a back chevron')
   })
   await check(`${s}: header height is constant (== camera menu bar)`, async () => {
     const h = await headerHeight()
     if (h !== hMenu) throw new Error(`height ${h} != camera ${hMenu}`)
   })
-  await clearNav()
-  await d.tap(ids.nav.back)
-  await check(`${s}: back returns toward camera (guarded — never dead-clicks)`, async () => {
-    const n = await lastNav()
-    if (!n || !/camera/.test(n)) throw new Error('data-last-nav=' + n)
+  // F2 nudge guard (BOX-level — converge stubs lucide, so this measures the 44pt hit box, not glyph ink): the
+  // wordmark-less section hamburger is pulled left by space.xs vs the (un-nudged, wordmark-bearing) camera
+  // hamburger. RED if the nudge is dropped (both would sit at the same x). The GLYPH-optical proof lives in
+  // scratchpad/measure-align.ts (real lucide) + a real Expo-web screenshot — converge cannot see glyph ink.
+  await check(`${s}: hamburger optically nudged left by ~space.xs vs camera (F2 alignment, box-level)`, async () => {
+    const delta = cameraMenuLeft - (await menuLeft())
+    if (Math.abs(delta - NUDGE) > 1) throw new Error(`nudge delta ${delta.toFixed(1)} != ~${NUDGE} (camera ${cameraMenuLeft.toFixed(1)})`)
   })
 }
+
+// ---- interview: a genuinely PUSHED screen → keeps the back chevron that returns toward camera (guarded) ----
+await gotoScreen('interview')
+await check('interview: nav.header + back chevron (nav.back) render, no hamburger', async () => {
+  await d.waitFor(ids.nav.header, { timeoutMs: 6000 })
+  await d.waitFor(ids.nav.back, { timeoutMs: 4000 })
+  const menu = await page.locator(`[data-testid="${ids.nav.menuButton}"]`).count()
+  if (menu !== 0) throw new Error('pushed screen still shows a hamburger')
+})
+await check('interview: header height is constant (== camera menu bar)', async () => {
+  const h = await headerHeight()
+  if (h !== hMenu) throw new Error(`height ${h} != camera ${hMenu}`)
+})
+await clearNav()
+await d.tap(ids.nav.back)
+await check('interview: back returns toward camera (guarded — never dead-clicks)', async () => {
+  const n = await lastNav()
+  if (!n || !/camera/.test(n)) throw new Error('data-last-nav=' + n)
+})
 
 // ---- modals: a close X (right slot) that dismisses to a concrete fallback (M3) ----
 const MODALS: ReadonlyArray<readonly [string, string]> = [
@@ -96,6 +128,32 @@ for (const [s, fallback] of MODALS) {
     if (!n || !new RegExp(fallback).test(n)) throw new Error('data-last-nav=' + n)
   })
 }
+
+// ---- section hamburgers REALLY open the drawer (real host): ?screen=flow mounts NavHost wrap=DrawerHost, so a
+//      drawer row navigates AND the section screens mount under a live DrawerHost. camera → open drawer → take the
+//      Collection/Settings row → on the section, tapping ITS hamburger reopens the drawer, then the Capture row
+//      returns home. Each drawer-row tap only LANDS if the drawer actually opened (Playwright hit-tests through
+//      the shell), so a landing IS the honest proof the section hamburger opened the drawer (patch #3). ----
+await gotoScreen('flow')
+async function proveSectionOpensDrawer(rowId: string, screenId: string, label: string): Promise<void> {
+  await d.tap(rowId) // from the OPEN drawer, take the section row → navigates in the real NavHost
+  await d.waitFor(screenId, { timeoutMs: 6000 })
+  await d.waitFor(ids.nav.menuButton, { timeoutMs: 4000 })
+  const back = await page.locator(`[data-testid="${ids.nav.back}"]`).count()
+  if (back !== 0) throw new Error(`${label} shows a back chevron in the real stack`)
+  await d.tap(ids.nav.menuButton) // the section hamburger opens the drawer…
+  await d.tap(ids.drawer.home) // …proven: the Capture row is now hittable + returns home
+  await d.waitFor(ids.camera.screen, { timeoutMs: 6000 })
+}
+await check('flow: the Collection hamburger opens the real drawer (not a back-nav, not a dead no-op)', async () => {
+  await d.waitFor(ids.camera.screen, { timeoutMs: 8000 })
+  await d.tap(ids.nav.menuButton) // open the drawer from camera
+  await proveSectionOpensDrawer(ids.nav.threadsTab, ids.threads.screen, 'Collection')
+})
+await check('flow: the Settings hamburger opens the real drawer (not a back-nav, not a dead no-op)', async () => {
+  await d.tap(ids.nav.menuButton) // back on camera → open the drawer
+  await proveSectionOpensDrawer(ids.nav.settingsTab, ids.settings.screen, 'Settings')
+})
 
 await check('no uncaught errors across the per-screen header journeys (real component tree)', async () => {
   if (rig.errors.length) throw new Error(rig.errors.join(' | '))

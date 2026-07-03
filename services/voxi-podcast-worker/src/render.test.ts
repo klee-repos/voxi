@@ -368,3 +368,17 @@ describe('render: fail-closed on provider exception', () => {
     expect(await store.getStatus(job.catalogItemId, job.version)).toBe('failed')
   })
 })
+
+describe('render: a FAILED item can be RETRIED — "try again" re-renders, not a dead-end', () => {
+  test('a prior failed (item,version) re-renders on a fresh call (failed→rendering lease)', async () => {
+    const { deps, store, calls } = fakeDeps(cleanScript)
+    // simulate a prior attempt that FAILED for this item
+    await store.compareAndSetStatus(job.catalogItemId, job.version, 'queued', 'failed')
+    expect(await store.getStatus(job.catalogItemId, job.version)).toBe('failed')
+    // the retry must actually re-run the pipeline — NOT bail as in_progress (the reported "try again fails instantly")
+    const out = await renderPodcast(job, deps)
+    expect(out.kind).toBe('rendered')
+    expect(calls.tts).toBe(1)
+    expect(await store.getStatus(job.catalogItemId, job.version)).toBe('ready')
+  })
+})

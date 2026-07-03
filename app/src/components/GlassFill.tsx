@@ -17,10 +17,14 @@ export interface GlassFillProps {
   radiusStyle?: ViewStyle
   /** denser tint for a card sitting over the (already dimmed) scrim vs. directly over the bright photo. */
   strong?: boolean
+  /** deepest tint — the reveal reading sheet only, so enlarged prose stays crisp (kept distinct from `strong`
+   *  so the ⋯ MORE sheet, the other `strong` consumer, is not darkened with it). */
+  card?: boolean
 }
 
-export function GlassFill({ radiusStyle, strong }: GlassFillProps): React.ReactElement {
+export function GlassFill({ radiusStyle, strong, card }: GlassFillProps): React.ReactElement {
   const filter = `blur(${glass.blur}px) saturate(${glass.saturate})`
+  const tint = card ? glass.tintCard : strong ? glass.tintStrong : glass.tint
   // `backdropFilter` is a web CSS prop RN core's ViewStyle doesn't type; RNW renders it. The `WebkitBackdropFilter`
   // key is load-bearing (RNW does not prefix an inline literal), NOT belt-and-suspenders.
   const web =
@@ -35,7 +39,7 @@ export function GlassFill({ radiusStyle, strong }: GlassFillProps): React.ReactE
         StyleSheet.absoluteFill,
         styles.fill,
         radiusStyle,
-        { backgroundColor: strong ? glass.tintStrong : glass.tint },
+        { backgroundColor: tint },
         web,
       ]}
     />

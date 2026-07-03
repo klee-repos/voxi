@@ -63,7 +63,7 @@ describe('ElevenLabsTts — each speaker is synthesized in its own configured vo
     await tts.synthesize(script)
     expect(calls).toHaveLength(2)
     expect(calls[0]!).toContain('6u6JbqKdaQy89ENzLSju') // arlo
-    expect(calls[1]!).toContain('Q1QcmfZPmFDVUWmzASdy') // mave
+    expect(calls[1]!).toContain('q0IMILNRPxOgtBTS4taI') // mave (Matt)
   })
 
   test('a caller-supplied voice pair overrides the default (the future user-config seam)', async () => {
@@ -76,6 +76,37 @@ describe('ElevenLabsTts — each speaker is synthesized in its own configured vo
   })
 
   test('DEFAULT_PODCAST_VOICES pins the exact shipped IDs', () => {
-    expect(DEFAULT_PODCAST_VOICES).toEqual({ arlo: '6u6JbqKdaQy89ENzLSju', mave: 'Q1QcmfZPmFDVUWmzASdy' })
+    expect(DEFAULT_PODCAST_VOICES).toEqual({ arlo: '6u6JbqKdaQy89ENzLSju', mave: 'q0IMILNRPxOgtBTS4taI' })
+  })
+})
+
+describe('ElevenLabsTts — a TRANSIENT vendor blip is retried, not fatal (a single turn used to fail the whole render)', () => {
+  const OK = { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([0xff, 0xfb, 0x90, 0x00]).buffer }
+  const err = (status: number) => ({ ok: false, status, text: async () => `boom ${status}` })
+  const oneTurn: Script = { facts: [], clauses: [{ speaker: 'arlo', text: 'One clause.', claimType: 'flavor' }] }
+  // backoff 0 so the retries don't sleep in tests.
+  const tts = (fetchImpl: typeof fetch) => new ElevenLabsTts('k', DEFAULT_PODCAST_VOICES, fetchImpl, 0)
+
+  test('recovers from a transient 429 then 500 then 200 (3rd attempt succeeds)', async () => {
+    let n = 0
+    const seq = [err(429), err(500), OK]
+    const f = (async () => seq[n++]) as unknown as typeof fetch
+    const out = await tts(f).synthesize(oneTurn)
+    expect(n).toBe(3) // two retries, then success
+    expect(out.audio.length).toBeGreaterThan(0)
+  })
+
+  test('a real 4xx (e.g. 401/400) FAILS FAST — no retries wasted', async () => {
+    let n = 0
+    const f = (async () => { n++; return err(401) }) as unknown as typeof fetch
+    await expect(tts(f).synthesize(oneTurn)).rejects.toThrow(/elevenlabs 401/)
+    expect(n).toBe(1) // fail-fast, not retried
+  })
+
+  test('a PERSISTENT transient (always 503) throws after exhausting retries', async () => {
+    let n = 0
+    const f = (async () => { n++; return err(503) }) as unknown as typeof fetch
+    await expect(tts(f).synthesize(oneTurn)).rejects.toThrow(/elevenlabs 503/)
+    expect(n).toBe(3) // MAX attempts
   })
 })

@@ -50,28 +50,12 @@ type RNMediaStream = {
   getTracks(): RNMediaStreamTrack[]
   release(releaseTracks?: boolean): void
 }
-type MediaDeviceInfoLike = {
-  deviceId: string
-  kind: string
-  label: string
-  groupId: string
-}
-/** The exact shape transport.js reads: addUserMedia() -> tracks().local.audio; syncTrackStatus() (guarded by
- *  supportsScreenShare, which is false here) -> tracks().local.screenVideo. */
-type TracksShape = {
-  local: {
-    audio: RNMediaStreamTrack | null
-    video: null
-    screenAudio: null
-    screenVideo: null
-  }
-  bot: {
-    audio: null
-    video: null
-    screenAudio: null
-    screenVideo: null
-  }
-}
+// The base MediaManager's device/track member types reference SDK types that aren't exported as concrete values;
+// derive them straight from the abstract class we extend so our overrides CONFORM to it without importing the
+// nominal SDK types. The methods build loosened runtime shapes (the exact fields transport.js reads — a mic
+// device's deviceId/kind/label/groupId, and tracks().local.audio) and `unknown`-cast them at each return.
+type MediaDeviceInfoLike = Awaited<ReturnType<MediaManager['getAllMics']>>[number]
+type TracksShape = ReturnType<MediaManager['tracks']>
 
 /** react-native-webrtc's `mediaDevices` typed to just the two calls we make. */
 const rnMediaDevices = mediaDevices as unknown as {
@@ -187,7 +171,7 @@ class VoxiAudioMediaManager extends MediaManager {
         kind: 'audioinput',
         label: typeof d.label === 'string' ? d.label : '',
         groupId: typeof d.groupId === 'string' ? d.groupId : '',
-      }))
+      })) as unknown as MediaDeviceInfoLike[]
   }
 
   get selectedMic(): MediaDeviceInfoLike | Record<string, never> {
@@ -258,7 +242,7 @@ class VoxiAudioMediaManager extends MediaManager {
         screenAudio: null,
         screenVideo: null,
       },
-    }
+    } as unknown as TracksShape
   }
 }
 

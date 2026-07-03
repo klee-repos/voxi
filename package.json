@@ -14,7 +14,9 @@
   "scripts": {
     "test": "bun test",
     "e2e:web:auth": "bun e2e/web/run-auth.web.ts",
-    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/reveal-menu.web.ts && bun e2e/web/converge/reveal-deepdive.web.ts && bun e2e/web/converge/agentic-swipe.web.ts && bun e2e/web/converge/agentic-sweep.web.ts && bun e2e/web/converge/sentry-capture.web.ts",
+    "e2e:web:agentic": "bun e2e/web/converge/agentic-auth.web.ts && bun e2e/web/converge/agentic-collection.web.ts && bun e2e/web/converge/threads-rnw.web.ts && bun e2e/web/converge/collection-scroll.web.ts && bun e2e/web/converge/reveal-agentic.web.ts && bun e2e/web/converge/reveal-menu.web.ts && bun e2e/web/converge/reveal-deepdive.web.ts && bun e2e/web/converge/agentic-swipe.web.ts && bun e2e/web/converge/agentic-sweep.web.ts && bun e2e/web/converge/sentry-capture.web.ts",
+    "e2e:web:agentic:scroll": "bun e2e/web/converge/collection-scroll.web.ts",
+    "e2e:web:agentic:threads": "bun e2e/web/converge/threads-rnw.web.ts",
     "e2e:web:agentic:deepdive": "bun e2e/web/converge/reveal-deepdive.web.ts",
     "e2e:web:agentic:sentry": "bun e2e/web/converge/sentry-capture.web.ts",
     "e2e:web:agentic:auth": "bun e2e/web/converge/agentic-auth.web.ts",

@@ -1,65 +1,40 @@
 /**
- * Threads / collection (PLAN §10.2 screen 9) — the retention engine, X "Chat History" model (design-notes
- * §Threads): a GRID of captured-object thumbnails (the proto-Pokédex "collection") up top, then the same
- * captures as AUTO-TITLED threads GROUPED BY DATE (Today / Yesterday / earlier), each row revisiting the
- * durable eve session. Loads via TanStack Query against the owner-scoped GET /v1/threads.
+ * Threads / collection (PLAN §10.2 screen 9) — the retention engine, the proto-Pokédex "collection": a
+ * PHOTO-BOOK grid of captured-object tiles GROUPED BY DATE (Today / Yesterday / earlier), each tile revisiting
+ * the durable eve session behind that capture. Loads via TanStack Query against the owner-scoped GET /v1/threads.
+ *
+ * INFINITE SCROLL is client-side by design: the `['threads']` cache is a SHARED single source of truth (the
+ * reveal's swipe-paging reads the FULL list from it — reveal.tsx pageableThreads — and the camera-home recent
+ * carousel + delete/regenerate invalidations depend on its `{threads:[]}` shape). So we keep one un-paginated
+ * fetch and virtualize the RENDER: a `FlatList` over date-flattened rows (collectionRows.buildRows) mounts only
+ * on-screen tiles (the fix for "too many images loading at once"), and a `visibleCount` window grows on
+ * onEndReached — the loaded set expands as you scroll. Nothing here changes the cache, so no other surface moves.
  *
  * State matrix (PLAN §10.2): loading = a spinner while the collection fetches; empty = the DESIGNED first-run
- * state ("0 of ∞ catalogued — the Guide is vast…", prominent "Capture your first object"); error = an
- * in-persona failure with retry; offline = global.offlineBanner (cached list still shown if present).
- * Revisit = tap a capture/thread → resume that thread (reveal). testids: threads.screen / emptyState /
- * captureCta / grid / item.
+ * state (warm invite + "Capture your first object"); error = an in-persona error with retry; offline =
+ * global.offlineBanner (cached list still shown if present). Revisit = tap a tile → resume that thread (reveal).
+ * testids: threads.screen / emptyState / captureCta / count / grid / item / loadingMore.
  */
-import React, { useMemo } from 'react'
-import { View, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
+import React, { useCallback, useMemo, useState } from 'react'
+import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { Screen, Title, Body, Muted, Button } from '../../src/components/ui'
 import { AppHeader } from '../../src/components/AppHeader'
 import { OfflineBanner } from '../../src/components/Banners'
 import { CatalogTile } from '../../src/components/CatalogTile'
-import { ids, tid } from '../../src/lib/testid'
-import { space } from '../../src/lib/theme'
+import { ids, tid, tidWith } from '../../src/lib/testid'
+import { space, typeStyles } from '../../src/lib/theme'
 import { useTheme } from '../../src/lib/themeProvider'
 import { useApi } from '../../src/lib/api'
 import { useOffline, isOfflineError } from '../../src/lib/useOffline'
 import { useRevisitThread } from '../../src/lib/useRevisitThread'
 import { threadsKey } from '../../src/lib/queryKeys'
 import { orderThreads } from '../../src/lib/collectionOrder'
-import type { ThreadSummary } from '../../src/lib/apiClient'
+import { buildRows, groupByDate, type CollectionRow } from '../../src/lib/collectionRows'
 
-/** Date buckets for the "chat history" grouping (newest first). */
-const DAY = 86_400_000
-function bucketLabel(createdAt: number, now: number): string {
-  const days = Math.floor((startOfDay(now) - startOfDay(createdAt)) / DAY)
-  if (days <= 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return 'Earlier this week'
-  if (days < 30) return 'Earlier this month'
-  return 'Earlier'
-}
-function startOfDay(ms: number): number {
-  const d = new Date(ms)
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
-}
-
-interface DateGroup {
-  label: string
-  items: ThreadSummary[]
-}
-function groupByDate(threads: ThreadSummary[]): DateGroup[] {
-  const now = Date.now()
-  const sorted = orderThreads(threads) // newest-first — the SAME order the reveal pages through (shared helper)
-  const out: DateGroup[] = []
-  for (const t of sorted) {
-    const label = bucketLabel(t.createdAt, now)
-    const last = out[out.length - 1]
-    if (last && last.label === label) last.items.push(t)
-    else out.push({ label, items: [t] })
-  }
-  return out
-}
+/** Tiles revealed per infinite-scroll page (grows `visibleCount` on onEndReached). */
+const PAGE = 12
 
 export default function Threads(): React.ReactElement {
   const router = useRouter()
@@ -67,7 +42,7 @@ export default function Threads(): React.ReactElement {
   const { surface } = useTheme()
   const openThread = useRevisitThread()
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: threadsKey,
     queryFn: () => api.listThreads(),
   })
@@ -77,20 +52,48 @@ export default function Threads(): React.ReactElement {
   const offline = useOffline(isOfflineError(error))
 
   const threads = data?.threads ?? []
-  const groups = useMemo(() => groupByDate(threads), [threads])
 
-  // Collection is a top-level drawer destination → its back returns HOME (camera), not to whichever other
-  // destination you came from. Same header across all four states (loading/error/empty/populated).
-  const backHeader = <AppHeader leading="back" onLeadingPress={() => router.navigate('/(tabs)/camera')} />
+  // Collection is a top-level drawer destination (a peer of Capture), not a pushed screen → the header shows the
+  // menu hamburger that opens the drawer, NOT a back chevron. Same header across all four states
+  // (loading/error/empty/populated).
+  const menuHeader = <AppHeader leading="menu" />
+
+  // ---- infinite-scroll window: keep the WHOLE ordered list in memory (unchanged cache) but only build rows for
+  // the first `visibleCount`; onEndReached grows the window. Newest-first — the SAME order the reveal pages through.
+  const ordered = useMemo(() => orderThreads(threads), [threads])
+  const total = ordered.length
+  const [visibleCount, setVisibleCount] = useState(PAGE)
+  const shown = useMemo(() => ordered.slice(0, visibleCount), [ordered, visibleCount])
+  const rows = useMemo(() => buildRows(groupByDate(shown, Date.now())), [shown])
+  const hasMore = shown.length < total
+  const loadMore = useCallback(() => {
+    setVisibleCount((c) => (c < total ? Math.min(total, c + PAGE) : c)) // idempotent + clamped (safe if a delete shrinks total)
+  }, [total])
 
   // Revisit → resume the durable eve session behind this thread (shared with the camera-home recent carousel via
   // useRevisitThread): /processing STREAMS the thread, the BFF REPLAYS the persisted reveal (no re-run/re-bill),
   // and the photo is seeded so the image shows immediately instead of a blank card.
+  const renderRow = useCallback(
+    ({ item: row }: { item: CollectionRow }) => {
+      if (row.kind === 'header') {
+        return <Text style={[typeStyles.overline, styles.groupLabel, { color: surface.textMuted }]}>{row.label}</Text>
+      }
+      return (
+        <View style={styles.pairRow}>
+          {row.items.map((item) => (
+            <CatalogTile key={item.threadId} variant="grid" item={item} onPress={() => openThread(item)} />
+          ))}
+          {row.items.length === 1 ? <View style={styles.spacer} /> : null}
+        </View>
+      )
+    },
+    [surface.textMuted, openThread],
+  )
 
   // ---- loading: first fetch with nothing cached ----
   if (isLoading) {
     return (
-      <Screen id={ids.threads.screen} center header={backHeader}>
+      <Screen id={ids.threads.screen} center header={menuHeader}>
         <ActivityIndicator color={surface.accent} />
         <Muted style={{ marginTop: space.md }}>Opening your collection…</Muted>
       </Screen>
@@ -100,7 +103,7 @@ export default function Threads(): React.ReactElement {
   // ---- error: fetch failed and we have nothing to show ----
   if (isError && threads.length === 0) {
     return (
-      <Screen id={ids.threads.screen} center header={backHeader}>
+      <Screen id={ids.threads.screen} center header={menuHeader}>
         <OfflineBanner visible={offline} />
         <Title style={{ textAlign: 'center' }}>The Guide is briefly out of reach.</Title>
         <Body style={{ textAlign: 'center', marginTop: space.md, maxWidth: 380 }}>
@@ -114,13 +117,13 @@ export default function Threads(): React.ReactElement {
   // ---- empty: designed first-run state (F2) ----
   if (threads.length === 0) {
     return (
-      <Screen id={ids.threads.screen} center header={backHeader}>
+      <Screen id={ids.threads.screen} center header={menuHeader}>
         <OfflineBanner visible={offline} />
         <View {...tid(ids.threads.emptyState)} style={styles.empty}>
-          <Title style={{ textAlign: 'center' }}>0 of ∞ catalogued.</Title>
+          <Title style={{ textAlign: 'center' }}>The Guide awaits your first find.</Title>
           <Body style={{ textAlign: 'center', marginTop: space.md }}>
-            The Guide is vast, and presently rather empty on your account. Photograph your first object and
-            we'll begin filling it in — a bike, a camera, a curious bottle.
+            Nothing catalogued yet. Photograph your first object and we'll begin filling it in — a bike, a camera,
+            a curious bottle.
           </Body>
           <Button
             id={ids.threads.captureCta}
@@ -133,37 +136,41 @@ export default function Threads(): React.ReactElement {
     )
   }
 
-  // ---- populated: collection grid + date-grouped titled threads ----
+  // ---- populated: the photo-book grid (virtualized + infinite-scroll). No footer button — the tab/drawer is the
+  // capture entry point (the whole screen IS the catalog). `threads.grid` marks the scroll container; each tile is
+  // the single canonical `threads.item` (one per thread, so the selector matches exactly `shown`). ----
   return (
-    <Screen id={ids.threads.screen} header={backHeader}>
+    <Screen id={ids.threads.screen} header={menuHeader} padded={false}>
       <OfflineBanner visible={offline} />
-      <Title>Your collection</Title>
-      <Muted style={{ marginBottom: space.md }}>{threads.length} catalogued · ∞ to go</Muted>
-
-      {/* `threads.grid` marks the whole collection container; each tile is the single canonical `threads.item`
-          (one per thread, so the selector matches exactly N) and taps to REVISIT the durable eve session. */}
-      <ScrollView
+      {/* Hidden anchor carrying the infinite-scroll window (shown/total) — mounted OUTSIDE the FlatList so the
+          virtualizer can never drop it; lets E2E read the window growth deterministically (not via volatile
+          DOM tile counts). */}
+      <View {...tidWith(ids.threads.window, { shown: String(shown.length), total: String(total) })} style={styles.windowAnchor} pointerEvents="none" />
+      <FlatList
         {...tid(ids.threads.grid)}
-        contentContainerStyle={{ paddingBottom: space.xl }}
+        data={rows}
+        keyExtractor={(r) => r.key}
+        renderItem={renderRow}
         showsVerticalScrollIndicator={false}
-      >
-        {groups.map((g) => (
-          <View key={g.label} style={{ marginBottom: space.lg }}>
-            <Muted style={styles.groupLabel}>{g.label}</Muted>
-            <View style={styles.grid}>
-              {g.items.map((item) => (
-                <CatalogTile key={item.threadId} variant="grid" item={item} onPress={() => openThread(item)} />
-              ))}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <View style={styles.listHeader}>
+            <Title>Your collection</Title>
+            <View {...tid(ids.threads.count)} style={styles.countRow}>
+              <Text style={[typeStyles.calloutBold, { color: surface.text }]}>{total}</Text>
+              <Muted> catalogued</Muted>
             </View>
           </View>
-        ))}
-      </ScrollView>
-
-      <Button
-        id={ids.threads.captureCta}
-        label={isFetching ? 'Refreshing…' : 'Capture another'}
-        onPress={() => router.replace('/(tabs)/camera')}
-        style={{ marginTop: space.md }}
+        }
+        ListFooterComponent={
+          hasMore ? (
+            <View {...tid(ids.threads.loadingMore)} style={styles.footer}>
+              <ActivityIndicator color={surface.accent} />
+            </View>
+          ) : null
+        }
       />
     </Screen>
   )
@@ -171,6 +178,14 @@ export default function Threads(): React.ReactElement {
 
 const styles = StyleSheet.create({
   empty: { maxWidth: 420 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  groupLabel: { textTransform: 'uppercase', letterSpacing: 1, marginBottom: space.sm, marginTop: space.md },
+  // space.xl (the app's standard Screen gutter, matching Settings) so the grid title + tiles line up under the
+  // header hamburger (which aligns to that same content gutter). space.lg here left the grid 8pt left of the icon.
+  listContent: { paddingHorizontal: space.xl, paddingTop: space.sm, paddingBottom: space.xxl },
+  listHeader: { marginBottom: space.md },
+  countRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: space.xs },
+  groupLabel: { marginTop: space.lg, marginBottom: space.sm },
+  pairRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.sm },
+  spacer: { flex: 1 }, // keeps a lone trailing tile at column width (never full-bleed)
+  footer: { paddingVertical: space.lg, alignItems: 'center' },
+  windowAnchor: { height: 0 }, // zero-height hidden anchor (data-shown / data-total only)
 })

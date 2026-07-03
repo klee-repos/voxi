@@ -1,0 +1,80 @@
+# Maestro flow (iOS native, deterministic) — deepdive-01: the Deep Dive PLAYER transport on the real binary.
+# Capture (fixture shutter, EXPO_PUBLIC_TEST_MODE=1) → reveal → open the Deep Dive icon → Generate → the composing
+# hero → the dark player. Then the TRANSPORT REGRESSION: tapping Play flips the control to "Pause" and it STICKS,
+# real playback advances the elapsed clock off 0:00, and tapping Pause flips back to "Play" and STICKS — i.e. the
+# reported native bug (play didn't work / "stop just restarts play") is fixed. `playing` is user INTENT now; it is
+# no longer mirrored from TrackPlayer's async PlaybackState (that mirror was the feedback loop that fought the tap).
+# The test-BFF returns a ready episode with a real (silent) audio the native player actually loads + plays.
+# Run:  bun e2e/native/test-bff.ts &   then   maestro test e2e/flows/deepdive-01.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+# Open the Deep Dive player from the reveal dock.
+- tapOn:
+    id: "reveal.deepDiveIcon"
+- extendedWaitUntil:
+    visible:
+      id: "podcast.generate"
+    timeout: 20000
+# Generate → (a brief composing hero, proven on the web tier C0 — too fast to catch on the deterministic BFF) →
+# the ready player.
+- tapOn:
+    id: "podcast.generate"
+- extendedWaitUntil:
+    visible:
+      id: "podcast.scrubber"
+    timeout: 90000
+# The Spotify transport rendered.
+- assertVisible:
+    id: "podcast.playPause"
+- assertVisible:
+    id: "podcast.skip15"
+- assertVisible:
+    id: "podcast.skipBack"
+# PLAY → the control flips to "Pause" and STICKS across successive checks (the old hardware-mirror bounced it
+# back to "Play" via TrackPlayer's async PlaybackState — that feedback loop is gone; `playing` is intent only).
+- tapOn:
+    id: "podcast.playPause"
+- assertVisible:
+    text: "Pause"
+- assertVisible:
+    text: "Pause"
+# Real playback advances — the elapsed clock leaves 0:00 (proven audibly in the device log: rate 1.0, position
+# 0 → ~30s). A literal `notVisible "0:00"` is Maestro-robust (its text matcher treats a range regex literally).
+- extendedWaitUntil:
+    notVisible:
+      text: "0:00"
+    timeout: 20000
+# PAUSE → flips back to "Play" and STICKS — the reported "stop just restarts play" is fixed.
+- tapOn:
+    id: "podcast.playPause"
+- assertVisible:
+    text: "Play"
+- assertVisible:
+    text: "Play"
+# ±15 skip is present + tappable without breaking the player (seek logic proven deterministically on the web tier).
+- tapOn:
+    id: "podcast.skipBack"
+- assertVisible:
+    id: "podcast.player"

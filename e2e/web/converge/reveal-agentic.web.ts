@@ -8,9 +8,9 @@
  * value that matters is pinned by a DETERMINISTIC assertion after the agent navigates.
  *
  * It proves the redesigned dock with real clicks: the agent opens the "What it is" bucket (→ morph card + the
- * per-bucket spoken reveal round-tripping the real /speech route), opens "Curious facts" (→ ≥3 verified chips),
- * and asks Voxi (→ the /conversation nav intent). The planner is scripted here (deterministic CI); in production
- * it is an LLM reading the same perceived tree.
+ * per-bucket spoken reveal round-tripping the real /speech route), switches to the "Curious facts" card TAB (Facts
+ * is hidden from the dock to keep a single flush row) (→ ≥3 verified chips), and asks Voxi (→ the /conversation nav
+ * intent). The planner is scripted here (deterministic CI); in production it is an LLM reading the same perceived tree.
  *
  * Run: `bun e2e/web/converge/reveal-agentic.web.ts`  (exit 0 = agentic proof GREEN).
  */
@@ -70,16 +70,14 @@ await check('the bucket audio round-trips the REAL /speech route and plays after
   throw new Error('bucket audio never played from /speech')
 })
 
-// ── Goal 2: the agent closes the card and opens Curious facts. ──
-const openFacts: Planner = async (_g, obs, history) => {
-  const v = (id: string) => obs.visibleIds.includes(id)
-  if (v(ids.reveal.facts)) return { kind: 'done', rationale: 'facts are shown' }
-  if (v(ids.nav.close) && !did(history, 'tap', ids.reveal.bucketFacts)) return { kind: 'tap', id: ids.nav.close, rationale: 'close the open card first' }
-  if (v(ids.reveal.bucketFacts)) return { kind: 'tap', id: ids.reveal.bucketFacts, rationale: 'open "Curious facts"' }
-  return { kind: 'done', rationale: 'cannot reach facts' }
-}
-await new Agent(d, openFacts).achieve('open the curious facts', { maxSteps: 5 })
-await check('agent reached the facts card with ≥3 verified chips (real clicks)', async () => {
+// ── Goal 2: switch the open card to the Curious-facts TAB (Facts is hidden from the dock — reached as a card tab). ──
+await check('the facts card, reached via its card TAB (Facts has no dock icon), shows ≥3 verified chips', async () => {
+  // The What card is open from Goal 1. Facts has no dock icon (single flush row) — switch to its TAB in place.
+  const factsTab = page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="facts"]`)
+  const tabDeadline = Date.now() + 8000
+  while (Date.now() < tabDeadline && (await factsTab.count()) === 0) await new Promise((r) => setTimeout(r, 150))
+  if ((await factsTab.count()) === 0) throw new Error('the facts card tab never appeared')
+  await factsTab.first().click()
   await d.waitFor(ids.reveal.facts, { timeoutMs: 3000 })
   const deadline = Date.now() + 6000
   let n = 0

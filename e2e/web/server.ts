@@ -199,23 +199,66 @@ function memThreadStore(): ThreadStore {
   }
 }
 
-/** Podcast worker status: a gated token reports composing, then ready, on the next poll (honest 15–40s wait). */
-function memPodcastStatus(): { svc: PodcastStatusService; markComposing: (token: string, userId: string) => void } {
+/** A real, loadable N-second silent WAV as a data: URI — so the converge <audio> loads it with a real duration
+ *  and an advancing currentTime (the Deep Dive scrubber + word-level karaoke bind to that). 8-bit unsigned mono. */
+function makeSilentWav(seconds: number, sampleRate = 8000): string {
+  const n = Math.floor(seconds * sampleRate)
+  const buf = Buffer.alloc(44 + n)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20) // PCM
+  buf.writeUInt16LE(1, 22); buf.writeUInt32LE(sampleRate, 24); buf.writeUInt32LE(sampleRate, 28) // mono, byteRate
+  buf.writeUInt16LE(1, 32); buf.writeUInt16LE(8, 34) // blockAlign, bitsPerSample
+  buf.write('data', 36); buf.writeUInt32LE(n, 40)
+  buf.fill(0x80, 44) // 8-bit unsigned silence
+  return `data:audio/wav;base64,${buf.toString('base64')}`
+}
+const READY_AUDIO = makeSilentWav(30)
+// A real-shaped two-voice transcript (exactly the {speaker,text}[] the worker returns) so the karaoke read-along
+// has real words to highlight — a shape-accurate fake, never a fabricated "ready".
+const READY_TRANSCRIPT: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[] = [
+  { speaker: 'ARLO', text: 'So what exactly are we looking at here?', endSec: 6 },
+  { speaker: 'MAVE', text: 'A properly interesting object, as it happens, with a history worth telling.', endSec: 15 },
+  { speaker: 'ARLO', text: 'Go on then, set the scene for us.', endSec: 21 },
+  { speaker: 'MAVE', text: 'It begins, as these things often do, somewhere entirely unexpected.', endSec: 30 },
+]
+
+/** Podcast worker status: a gated token reports composing, then ready, on the next poll (honest 15–40s wait).
+ *  Supports the retry-after-failure E2E: a user flagged `failNextFor` has their NEXT render FAIL; a RE-ENQUEUE
+ *  (which the BFF only does on a retry of a non-ready episode) flips that token to success — so the flow recovers
+ *  ONLY when the re-enqueue fix works. A plain poll never flips it (so a broken retry stays failed). */
+function memPodcastStatus(): {
+  svc: PodcastStatusService
+  markComposing: (token: string, userId: string, reenqueue?: boolean) => void
+  failNextFor: (userId: string) => void
+} {
   const polls = new Map<string, number>() // token -> times polled
   const owners = new Map<string, string>() // token -> userId
+  const mode = new Map<string, 'fail' | 'ok'>() // token -> outcome
+  const failUsers = new Set<string>() // users whose NEXT render should fail once
   return {
-    markComposing(token, userId) {
-      // idempotent: registering an already-known token must NOT reset its poll progress.
-      if (owners.has(token)) return
-      owners.set(token, userId)
-      polls.set(token, 0)
+    failNextFor(userId) { failUsers.add(userId) },
+    markComposing(token, userId, reenqueue = false) {
+      if (!owners.has(token)) {
+        owners.set(token, userId)
+        polls.set(token, 0)
+        // The FIRST render fails when this user was flagged (seed=podcastfail) OR the env forces fail-first (the
+        // standalone Maestro retry proof); the retry re-enqueues → recovers. Consume the per-user flag.
+        if (failUsers.has(userId)) { mode.set(token, 'fail'); failUsers.delete(userId) }
+        else if (process.env.VOXI_TEST_PODCAST_FAIL_FIRST === '1') mode.set(token, 'fail')
+        else mode.set(token, 'ok')
+        return
+      }
+      // A RE-ENQUEUE (the BFF's retry path) of a FAILED render → flip to success + restart the poll. A plain poll
+      // (reenqueue=false) never flips it, so a retry that DOESN'T re-enqueue stays failed (the bug, un-fixed).
+      if (reenqueue && mode.get(token) === 'fail') { mode.set(token, 'ok'); polls.set(token, 0) }
     },
     svc: {
       async status(token, userId) {
         if (owners.get(token) !== userId) return null // owner-scoped
         const n = (polls.get(token) ?? 0) + 1
         polls.set(token, n)
-        if (n >= 2) return { state: 'ready', audioUrl: `g/podcast/${token}.m4a` }
+        if (mode.get(token) === 'fail') return n >= 2 ? { state: 'failed' } : { state: 'composing' }
+        if (n >= 2) return { state: 'ready', audioUrl: READY_AUDIO, transcript: READY_TRANSCRIPT }
         return { state: 'composing' }
       },
     },
@@ -861,11 +904,15 @@ export function createWebHarness(
     planFor: async (userId) => plans.get(userId) ?? 'free',
     podcastStatus: {
       async status(token, userId) {
-        // first gate ever seen for this token registers it as composing for the owner.
+        // defensive: a poll for an unregistered token registers it (never a re-enqueue → never flips a failure).
         podcast.markComposing(token, userId)
         return podcast.svc.status(token, userId)
       },
     },
+    // The BFF enqueues a render here on a FRESH gate AND on a retry of a non-ready episode (the fix). Routing the
+    // retry through the REAL dep (not the fetch-level mirror below) is what makes the retry-recovery E2E genuinely
+    // exercise the BFF's re-enqueue logic: a broken retry never calls this → the failed render never recovers.
+    podcastEnqueue: async ({ token, userId }: { token: string; userId: string }) => podcast.markComposing(token, userId, true),
     speech, // spoken reveal: FakeTts + content-hash cache (undefined when opts.speech === false → route 503s)
   }
 
@@ -899,7 +946,15 @@ export function createWebHarness(
         // page was opened with `?scan=<object>` (carried on the Referer), seed that object so a genuine capture can
         // reach any band/refusal. Untouched for the mock shell + data-URI captures (they already carry `obj:`/bytes).
         if (url.pathname === '/api/v1/threads' && req.method === 'POST' && (req.headers.get('content-type') ?? '').includes('application/json')) {
-          const scan = scanFromReferer(req.headers.get('referer')) ?? scanFromHeader(req.headers.get('x-voxi-test-seed'))
+          const seedHdr = req.headers.get('x-voxi-test-seed')
+          // opt-in retry-after-failure E2E: `seed=podcastfail` fails this user's NEXT Deep Dive render once. The
+          // band is NOT steered (the default fixture reveal settles + shows the dock, like deepdive-01); the retry
+          // re-enqueues → recovers.
+          if (seedHdr === 'podcastfail') {
+            const userId = req.headers.get('authorization')?.replace(/^Bearer test:/, '') ?? ''
+            if (userId) podcast.failNextFor(userId)
+          }
+          const scan = scanFromReferer(req.headers.get('referer')) ?? scanFromHeader(seedHdr)
           if (scan) {
             const raw = await req.text()
             let body: { photoUrl?: unknown } | null = null
@@ -917,15 +972,9 @@ export function createWebHarness(
           }
         }
         const stripped = new Request(url.origin + url.pathname.slice('/api'.length) + url.search, forward)
-        const res = await app.fetch(stripped)
-        // Mirror a successful podcast gate into the status service so the next poll can transition.
-        if (url.pathname === '/api/v1/podcast' && res.status === 200) {
-          const clone = res.clone()
-          const body = await clone.json().catch(() => null)
-          const userId = req.headers.get('authorization')?.replace(/^Bearer test:/, '') ?? ''
-          if (body?.token && userId) podcast.markComposing(body.token, userId)
-        }
-        return res
+        // The render is registered by the BFF calling `deps.podcastEnqueue` (a FRESH gate + the retry-of-a-non-ready
+        // fix), NOT by mirroring the gate response here — so the retry-recovery E2E exercises the real enqueue path.
+        return await app.fetch(stripped)
       }
       return new Response('not found', { status: 404 })
     },

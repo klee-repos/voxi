@@ -4,12 +4,14 @@
  * Renders the REAL Expo screen `app/app/reveal.tsx` (unmodified app source, real child components, real Zustand
  * store, real shared confidence register, real ApiClient → real voxi-api BFF) under react-native-web in a real
  * Chromium via Playwright, driven by the SAME testIDs. It proves the redesigned reveal DOCK:
- *   1. The four research bucket icons render and carry `bucket.state` (loading→active/empty), plus a blue Ask-Voxi
- *      icon; the identification (title + chip + description preview) is visible on the dock FACE.
+ *   1. The dock research icons (What/Purpose/Maker — Facts is hidden from the dock to keep a single flush row)
+ *      render and carry `bucket.state` (loading→active/empty), plus a blue Ask-Voxi icon; the identification
+ *      (title + chip + description preview) is visible on the dock FACE.
  *   2. Tapping an active bucket MORPHS it into `reveal.bucketCard`; the per-bucket audio round-trips through the
  *      REAL `/speech[/:bucket]` route (a `data:audio/mpeg` source) and plays; nothing plays on the FACE at load.
- *   3. The `maker` bucket that never grounds RESOLVES to `empty` on `done` (never a perpetual spinner).
- *   4. The facts card shows ≥3 verified chips + a tappable source proof.
+ *   3. The dock research buckets RESOLVE on `done` (never a perpetual spinner).
+ *   4. The facts card (reached via its morph-card TAB, since Facts has no dock icon) shows ≥3 verified chips + a
+ *      tappable source proof.
  *   5. The Ask-Voxi icon fires the /conversation navigation intent.
  *   Negative control: speech seam UNconfigured → /speech 503 → the card shows "unavailable — retry", no audio.
  *
@@ -81,16 +83,23 @@ await check('the name carries the settled band=PROBABLE (no visible pill; band r
 await check('there is NO visible confidence pill on the reveal (removed by request)', async () => {
   if ((await page.locator(`[data-testid="${ids.reveal.confidenceChip}"]`).count()) !== 0) throw new Error('confidence chip should not render on the reveal')
 })
+await check('the header title renders in the SAME row as the controls (name only, tappable via reveal.howSure)', async () => {
+  await d.waitFor(ids.reveal.title, { timeoutMs: 3000 })
+  const t = (await d.state(ids.reveal.title)).text ?? ''
+  if (!t) throw new Error('reveal.title is empty')
+})
 await check('the item NAME is on the floating card FACE (no tray; the description lives in the What card)', async () => {
   await d.waitFor(ids.reveal.title, { timeoutMs: 3000 })
   // the full description is NOT on the resting face — it opens inside the What bucket card.
   if ((await page.locator(`[data-testid="${ids.reveal.whatItIs}"]`).count()) !== 0) throw new Error('whatItIs should not be on the resting face — it belongs in the What card')
 })
-await check('the bucket DOCK renders with the four research icons + the conversation icon', async () => {
+await check('the bucket DOCK renders What/Purpose/Maker + conversation; Facts is HIDDEN from the dock (single flush row)', async () => {
   await d.waitFor(ids.reveal.buckets, { timeoutMs: 3000 })
-  for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho, ids.reveal.bucketFacts, ids.reveal.conversationIcon]) {
+  for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho, ids.reveal.conversationIcon]) {
     await d.waitFor(b, { timeoutMs: 3000 })
   }
+  // Facts ("Curious facts") is intentionally omitted so the dock is one flush row — it is NOT a dock icon.
+  if ((await page.locator(`[data-testid="${ids.reveal.bucketFacts}"]`).count()) !== 0) throw new Error('the Facts (bucketFacts) icon should be hidden from the dock')
 })
 await check('what bucket is ACTIVE on band-settle; purpose grounds to active; maker (class scope) is EMPTY', async () => {
   await pollState(ids.reveal.bucketWhat, 'active')
@@ -128,21 +137,36 @@ await check('nothing plays on the reveal FACE at load — no audio element until
   await page.waitForTimeout(600)
   if ((await page.locator(`[data-testid="${ids.reveal.narrationAudio}"]`).count()) !== 0) throw new Error('audio mounted on the face before any card was opened')
 })
-await check('every research bucket RESOLVES (none stuck loading): what+purpose+maker+facts all reach active on CONFIDENT', async () => {
+await check('every DOCK research bucket RESOLVES (none stuck loading): what+purpose+maker reach active on CONFIDENT', async () => {
   await pollState(ids.reveal.bucketWhat, 'active')
   await pollState(ids.reveal.bucketPurpose, 'active')
   await pollState(ids.reveal.bucketWho, 'active') // maker is SPECIFIC + grounded at CONFIDENT (not generic, not empty)
-  await pollState(ids.reveal.bucketFacts, 'active')
 })
-// Deterministic proof of the REDESIGN's two visual asks (docs/REVEAL-DOCK-GLASS-PLAN.md) — computed style, not eyeball.
-await check('ALIGNMENT: the dock is a full-width 5-slot space-between row (icons flush to the title edges, not centered)', async () => {
+// Deterministic proof of the dock's visual ask (full-width, flush to the edges, NOT centered) — computed style +
+// geometry, not eyeball. The dock is now a plain flex row of EQUAL `flex:1` icon slots (the redesign replaced the
+// old space-between ScrollView), so the even distribution is proven by every icon slot carrying flex-grow:1 and the
+// first/last slots hugging the row edges — the same "flush, not bunched" property, its new mechanism.
+await check('ALIGNMENT: the dock is a full-width row of equal flex:1 icon slots (flush to the edges, not centered)', async () => {
   const dock = await page.evaluate((tid) => {
     const el = document.querySelector(`[data-testid="${tid}"]`) as HTMLElement | null
-    return el ? { justify: getComputedStyle(el).justifyContent, children: el.children.length } : null
+    if (!el) return null
+    const box = el.getBoundingClientRect()
+    // Icon slots = the tappable Pressables (role=button); the thin hairline divider is the one non-button child.
+    const slots = (Array.from(el.children) as HTMLElement[]).filter((k) => k.getAttribute('role') === 'button')
+    const first = slots[0]?.getBoundingClientRect()
+    const last = slots[slots.length - 1]?.getBoundingClientRect()
+    return {
+      slotCount: slots.length,
+      allGrow1: slots.length > 0 && slots.every((s) => getComputedStyle(s).flexGrow === '1'),
+      flushLeft: first ? Math.round(first.left - box.left) : 999,
+      flushRight: last ? Math.round(box.right - last.right) : 999,
+    }
   }, ids.reveal.buckets)
   if (!dock) throw new Error('dock not found')
-  if (dock.justify !== 'space-between') throw new Error('dock justify-content=' + dock.justify + ' (want space-between)')
-  if (dock.children !== 5) throw new Error('dock should have 5 fixed slots (4 research + Ask); got ' + dock.children)
+  if (!dock.allGrow1) throw new Error('dock icon slots are not equal flex:1 (even distribution); ' + JSON.stringify(dock))
+  if (dock.slotCount < 5) throw new Error('dock should have ≥5 icon slots (research + Deep Dive + Ask); got ' + dock.slotCount)
+  if (dock.flushLeft > 4) throw new Error('leftmost icon slot not flush to the dock left edge; inset=' + dock.flushLeft)
+  if (dock.flushRight > 4) throw new Error('rightmost icon slot not flush to the dock right edge; inset=' + dock.flushRight)
 })
 await check('LIQUID GLASS: the dock renders a BLURRED, TRANSLUCENT material (not the old flat white fill)', async () => {
   const g = await page.evaluate((cardTid) => {
@@ -179,10 +203,29 @@ await check('the card audio round-trips through the REAL /speech route (a data:a
   }
   throw new Error('bucket audio never played from /speech: ' + fmt(await audioState()))
 })
-await check('the Curious-facts card: ≥3 fact rows, each with its OWN source link showing a title (never a raw URL)', async () => {
-  await d.tap(ids.nav.close) // close the What card
-  await pollState(ids.reveal.bucketFacts, 'active')
-  await d.tap(ids.reveal.bucketFacts)
+await check('the section-title tab bar switches sections IN PLACE (tap "What it\'s for" → card.bucket=purpose, no reopen)', async () => {
+  // The What card is still open. The header is now a row of SECTION-TITLE tabs (the redesign) — tapping one must
+  // switch the card's section without a close→reopen. All four buckets already polled active above.
+  const tabCount = await page.locator(`[data-testid="${ids.reveal.cardTab}"]`).count()
+  if (tabCount < 2) throw new Error('expected ≥2 section-title tabs on a CONFIDENT reveal, got ' + tabCount)
+  await page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="purpose"]`).click()
+  const deadline = Date.now() + 3000
+  let seen = ''
+  while (Date.now() < deadline) {
+    seen = (await d.state(ids.reveal.bucketCard)).attrs.bucket
+    if (seen === 'purpose') return
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('tab switch did not change the card to purpose in place; card.bucket=' + seen)
+})
+await check('the Curious-facts card (reached via its card TAB — Facts is hidden from the dock): ≥3 fact rows, each with its OWN source link showing a title (never a raw URL)', async () => {
+  // A card is open (Purpose) from the tab-switch test above. Facts has no dock icon (single flush row) — switch to
+  // its TAB in place; it appears once facts grounds to active (CONFIDENT).
+  const factsTab = page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="facts"]`)
+  const tabDeadline = Date.now() + 8000
+  while (Date.now() < tabDeadline && (await factsTab.count()) === 0) await new Promise((r) => setTimeout(r, 150))
+  if ((await factsTab.count()) === 0) throw new Error('the facts card tab never appeared (facts did not ground to active)')
+  await factsTab.first().click()
   await d.waitFor(ids.reveal.facts, { timeoutMs: 3000 })
   const deadline = Date.now() + 6000
   let n = 0

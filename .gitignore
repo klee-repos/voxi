@@ -77,3 +77,8 @@ scripts/icons/node_modules/
 
 # Museum eval fixtures — large binaries, re-fetched + sha1-verified via bun run museum:fixtures (manifest is committed)
 e2e/judge/museum/fixtures/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

@@ -21,6 +21,7 @@ import React, { useEffect, useState } from 'react'
 import { ThemeProvider } from '../../../app/src/lib/themeProvider'
 import { ApiProvider } from '../../../app/src/lib/api'
 import { useCaptureStore } from '../../../app/src/state/captureStore'
+import { useDeepDiveStore, cancelDeepDive } from '../../../app/src/state/deepDiveStore'
 import Reveal from '../../../app/app/reveal'
 import { SignedIn } from './auth-gate'
 import type { ConfidenceBand } from '../../../packages/shared/src/confidence'
@@ -66,6 +67,19 @@ function ConvergeRoot(): React.ReactElement {
       }
       const { threadId } = (await tr.json()) as { threadId: string }
       store.getState().setThread(threadId)
+
+      // Test-only control (this ENTRY is harness code, never shipped): drive the REAL deepDiveStore for this thread
+      // so the converge proof can assert the dock's generating/ready indicators. The store's own window seam is
+      // gated off here (esbuild defines NODE_ENV=production), so we expose it from the entry instead. The dock reads
+      // the SAME store, so what renders is the real code path.
+      ;(globalThis as unknown as { __deepDiveTest?: unknown }).__deepDiveTest = {
+        threadId,
+        composing: () => useDeepDiveStore.getState()._set(threadId, { state: 'composing', failReason: null, startedAt: Date.now() }),
+        ready: () => {
+          cancelDeepDive(threadId)
+          useDeepDiveStore.getState()._set(threadId, { state: 'ready', audioUrl: 'g/podcast/x.m4a', failReason: null, startedAt: null })
+        },
+      }
 
       // 2) consume the real NDJSON stream and drive the real store from real events
       const s = await fetch(`/api/v1/threads/${threadId}/stream`, {

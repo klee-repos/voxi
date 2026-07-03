@@ -29,11 +29,12 @@ import { RecentCard } from '../src/components/RecentCard'
 import { CameraView, type CameraViewHandle } from '../src/components/CameraView'
 import { SurfaceProvider, useTheme } from '../src/lib/themeProvider'
 import { ids, tid, tidWith } from '../src/lib/testid'
-import { radius, space, typeStyles, shadow, dark, scrim, hit } from '../src/lib/theme'
+import { radius, space, typeStyles, type, shadow, dark, scrim, hit } from '../src/lib/theme'
 import { useConnectivity } from '../src/lib/connectivity'
 import { useApi } from '../src/lib/api'
 import { ApiError } from '../src/lib/apiClient'
 import { useCaptureStore, deriveBucketStatus } from '../src/state/captureStore'
+import { useDeepDiveStatus, deepDiveIconState, cancelDeepDive } from '../src/state/deepDiveStore'
 import { threadsKey } from '../src/lib/queryKeys'
 import { pageableThreads } from '../src/lib/collectionOrder'
 import { beginThreadStream, consumeThreadStream, type StreamActions } from '../src/lib/threadStream'
@@ -88,6 +89,14 @@ function RevealBody(): React.ReactElement {
       enabled: !!threadId,
       staleTime: 30_000,
     }).data ?? false
+  // The dock's Deep Dive icon state: live generation status from the store (a compose in flight → a spinning
+  // "generating" ring; survives leaving the player), falling back to the durable-ready probe above for the green
+  // "ready" dot when no compose is tracked this session.
+  const deepDiveGen = useDeepDiveStatus(threadId)
+  const deepDiveState = ((): 'active' | 'generating' | 'ready' => {
+    const s = deepDiveIconState(deepDiveGen)
+    return s === 'active' && deepDiveReady ? 'ready' : s
+  })()
 
   // ---- VIEWFINDER (page 0): the live camera + capture, merged in so camera⇄item is ONE pager (no navigation). ----
   const queryClient = useQueryClient()
@@ -200,6 +209,27 @@ function RevealBody(): React.ReactElement {
   const [audioStates, setAudioStates] = useState<Partial<Record<AudioBucket, AudioState>>>({})
   const [playing, setPlaying] = useState<AudioBucket | null>(null)
   const pollRef = useRef<Partial<Record<AudioBucket, number>>>({})
+
+  // ---- Per-bucket READ / UNREAD (the dock badge). A research bucket is UNREAD once its content loads; it flips to
+  //      READ when you open it and either its audio plays OR you dwell ~2.5s on it (a quick open+close stays unread).
+  //      Keyed by threadId so each item tracks its own; survives paging (this screen stays mounted). ----
+  const [readMap, setReadMap] = useState<Record<string, boolean>>({})
+  const markRead = useCallback(
+    (b: ResearchKey): void => {
+      if (!threadId) return
+      const key = `${threadId}:${b}`
+      setReadMap((m) => (m[key] ? m : { ...m, [key]: true }))
+    },
+    [threadId],
+  )
+  // Audio started for the open bucket → read at once.
+  useEffect(() => { if (playing) markRead(playing as ResearchKey) }, [playing, markRead])
+  // Dwelled ~2.5s on an open bucket → read even without audio; the timer is cleared if you leave/switch first.
+  useEffect(() => {
+    if (!openBucket) return
+    const t = setTimeout(() => markRead(openBucket), 2500)
+    return () => clearTimeout(t)
+  }, [openBucket, markRead])
 
   const fetchAudio = useCallback(
     (bucket: AudioBucket): void => {
@@ -411,8 +441,26 @@ function RevealBody(): React.ReactElement {
   )
 
   // An item's "back" slides to the VIEWFINDER in place (page 0) — never a route change. The ⋯ opens the MORE sheet.
+  // Photo-detail bar: back / ⋯ ride glass discs in the corners, the object NAME rides a matching glass PILL in the
+  // same row. No full-width scrim band — each element wraps its own content (the pill hugs the text with side +
+  // vertical padding so nothing is capped), and the translucent glass shows the photo through rather than graying
+  // the whole top. Tapping the name still toggles the how-sure/correct/tip details below. `reveal.title` = name only.
   const mediaBackHeader = (
-    <AppHeader leading="back" onMedia onLeadingPress={toViewfinder} showMore={!!threadId} onMore={() => { haptics.tick(); setMenuOpen(true) }} />
+    <AppHeader
+      leading="back"
+      onMedia
+      onLeadingPress={toViewfinder}
+      showMore={!!threadId}
+      onMore={() => { haptics.tick(); setMenuOpen(true) }}
+      titleNode={
+        band ? (
+          <Pressable {...tidWith(ids.reveal.howSure, { band }, 'The name — tap for details')} accessibilityRole="button" onPress={() => setShowDetails((v) => !v)} style={styles.titlePill}>
+            <GlassFill radiusStyle={styles.titlePillRadius} />
+            <Text {...tid(ids.reveal.title)} numberOfLines={2} style={styles.headerTitle}>{title || 'An object of some interest'}</Text>
+          </Pressable>
+        ) : undefined
+      }
+    />
   )
   // Discard a failed capture and return to the viewfinder (clears the errored item from the store).
   const discardCapture = (): void => { reset(); setCurrentIndex(0) }
@@ -431,6 +479,7 @@ function RevealBody(): React.ReactElement {
       if (!(e instanceof ApiError && e.status === 404)) { haptics.error(); setActionBusy(false); setConfirm(null); return }
     }
     evictReveal(id)
+    cancelDeepDive(id) // stop tracking any in-flight Deep Dive generation for the deleted item
     reset()
     setConfirm(null); setActionBusy(false)
     toViewfinder()
@@ -502,6 +551,12 @@ function RevealBody(): React.ReactElement {
     maker: deriveBucketStatus('maker', statusSlice, offline),
     facts: deriveBucketStatus('facts', statusSlice, offline),
   }
+  const read: Record<ResearchKey, boolean> = {
+    what: !!(threadId && readMap[`${threadId}:what`]),
+    purpose: !!(threadId && readMap[`${threadId}:purpose`]),
+    maker: !!(threadId && readMap[`${threadId}:maker`]),
+    facts: !!(threadId && readMap[`${threadId}:facts`]),
+  }
 
   const openDock = (k: DockKey): void => {
     haptics.tick()
@@ -523,7 +578,9 @@ function RevealBody(): React.ReactElement {
   }
   const closeCard = (): void => { setPlaying(null); setOpenBucket(null) }
 
-  const activeTabs = (['what', 'purpose', 'maker', 'facts'] as const).filter((k) => statuses[k] === 'active')
+  // The card header tabs = the active research buckets, in canonical order, ALWAYS including the open bucket (even
+  // when it settled 'empty') so the header always shows a selected section title — the sole heading now (no eyebrow).
+  const cardTabs = (['what', 'purpose', 'maker', 'facts'] as const).filter((k) => statuses[k] === 'active' || k === openBucket)
   // Prose buckets show ONLY their grounded text (no source row, no quote); facts carry their own per-fact source
   // under each fact (via the `facts` prop). `what` rides `whatItIs`; purpose/maker ride their section text.
   const cardBody = (k: ResearchKey): { body: string } => {
@@ -596,12 +653,9 @@ function RevealBody(): React.ReactElement {
             <GlassFill radiusStyle={{ borderRadius: radius.xl }} />
             <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
               <SurfaceProvider surface="dark">
-                {/* Tapping the name reveals "how sure / correct + story + tip"; it carries the settled band as data. */}
-                <Pressable {...tidWith(ids.reveal.howSure, { band }, 'The name — tap for how-sure + details')} accessibilityRole="button" onPress={() => setShowDetails((v) => !v)}>
-                  <Title {...tid(ids.reveal.title)}>{title || 'An object of some interest'}</Title>
-                </Pressable>
-
-                <BucketDock statuses={statuses} factCount={facts.length} deepDiveReady={deepDiveReady} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
+                {/* The object NAME now rides the top bar (see mediaBackHeader) — the card holds only the dock + the
+                    tap-to-reveal how-sure details, so it stays short. */}
+                <BucketDock statuses={statuses} read={read} deepDiveState={deepDiveState} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
 
                 {showDetails ? (
                   <View style={styles.details}>
@@ -664,7 +718,7 @@ function RevealBody(): React.ReactElement {
           playing={playing === openAudio}
           reduceMotion={reduceMotion}
           surface={dark}
-          tabs={activeTabs}
+          tabs={cardTabs}
           onTab={switchTab}
           onPlayToggle={() => {
             if (audioUrls[openAudio]) setPlaying((p) => (p === openAudio ? null : openAudio))
@@ -782,9 +836,17 @@ export default function Reveal(): React.ReactElement {
 
 const styles = StyleSheet.create({
   headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-  // `floatWrap` anchors the card above the home indicator; `floatCard` is the card itself.
+  // A floating dock CARD (not flush): `floatWrap` anchors it above the home indicator with a side gap; `floatCard`
+  // is the rounded card itself. The bottom inset rides floatWrap's paddingBottom so the card floats clear of the
+  // home indicator, with a comfortable side + bottom margin (reads more elegant than an edge-to-edge bar).
   floatWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: space.md, alignItems: 'center' },
   floatCard: { width: '100%', maxWidth: 460, borderRadius: radius.xl, paddingHorizontal: space.lg, paddingVertical: space.lg },
+  // The object NAME rides a glass PILL (matching the corner discs), centered in the control row: the pill hugs the
+  // text with side + vertical padding (nothing capped/touching), translucent so the photo shows through instead of
+  // graying the whole top. GlassFill's warm tint keeps white text ≥AA over any photo (theme.test glass guard).
+  titlePill: { alignSelf: 'center', maxWidth: '100%', borderRadius: radius.lg, overflow: 'hidden', paddingHorizontal: space.md, paddingVertical: space.xs + 2 },
+  titlePillRadius: { borderRadius: radius.lg },
+  headerTitle: { fontFamily: type.family.sans['700'], fontSize: 21, lineHeight: 26, letterSpacing: -0.3, color: '#FFFFFF', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.35)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
   // While a morph card is open it fully replaces the dock — hide the dock so it doesn't bleed through the card's
   // translucent glass (and so the card's backdrop-filter isn't sampling a second glass layer beneath it).
   dockHidden: { opacity: 0 },

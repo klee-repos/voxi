@@ -15,7 +15,7 @@ export type PodcastVoices = Record<'arlo' | 'mave', string>
 
 export const DEFAULT_PODCAST_VOICES: PodcastVoices = {
   arlo: '6u6JbqKdaQy89ENzLSju',
-  mave: 'Q1QcmfZPmFDVUWmzASdy',
+  mave: 'q0IMILNRPxOgtBTS4taI', // "Matt" (user-chosen) — replaced the prior Q1Qc… voice
 }
 
 function concat(buffers: Uint8Array[]): Uint8Array {
@@ -51,28 +51,65 @@ export class ElevenLabsTts implements TtsProvider {
     private apiKey = process.env.ELEVENLABS_API_KEY ?? '',
     private voices: PodcastVoices = DEFAULT_PODCAST_VOICES,
     private fetchImpl: typeof fetch = fetch, // injectable so the vendor call is assertable without creds
+    private retryBackoffMs = 500, // 0 in tests; linear backoff between transient retries
   ) {}
 
+  /** One TTS turn, RETRIED on a TRANSIENT vendor error (network throw, HTTP 429, or 5xx). A render makes ~10 of
+   *  these; without a retry a single vendor blip on ANY turn failed the WHOLE Deep Dive (the reported "generation
+   *  failed"). A real client error (4xx other than 429 — bad voice/text) is NOT retried; it fails fast. */
   private async ttsMp3(text: string, voiceId: string): Promise<Uint8Array> {
-    const r = await this.fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': this.apiKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.2 } }),
-    })
-    if (!r.ok) throw new Error(`elevenlabs ${r.status}: ${(await r.text()).slice(0, 200)}`)
-    return new Uint8Array(await r.arrayBuffer())
+    const MAX = 3
+    let lastErr: Error | null = null
+    for (let attempt = 1; attempt <= MAX; attempt++) {
+      let retryable = true // a network throw is retryable; a non-retryable status flips this off before throwing
+      try {
+        const r = await this.fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+          method: 'POST',
+          headers: { 'xi-api-key': this.apiKey, 'content-type': 'application/json' },
+          body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.2 } }),
+        })
+        if (r.ok) return new Uint8Array(await r.arrayBuffer())
+        const err = new Error(`elevenlabs ${r.status}: ${(await r.text()).slice(0, 200)}`)
+        retryable = r.status === 429 || r.status >= 500 // rate-limit + server errors are transient
+        if (!retryable) throw err
+        lastErr = err
+      } catch (e) {
+        if (!retryable) throw e // a real 4xx — don't waste retries
+        lastErr = e instanceof Error ? e : new Error(String(e)) // network/transient — retry
+      }
+      if (attempt < MAX && this.retryBackoffMs > 0) await new Promise((res) => setTimeout(res, this.retryBackoffMs * attempt))
+    }
+    throw lastErr ?? new Error('elevenlabs: TTS failed')
   }
 
-  async synthesize(script: Script): Promise<{ audio: Uint8Array; durationSec: number }> {
+  async synthesize(script: Script): Promise<{ audio: Uint8Array; durationSec: number; clauseEndsSec: number[] }> {
     if (!this.apiKey) throw new Error('ELEVENLABS_API_KEY missing')
-    const turns = mergeTurns(script.clauses)
+    // Group consecutive same-speaker clauses into turns (one TTS call each), REMEMBERING each turn's per-clause
+    // char lengths so the turn's REAL byte-derived duration can be distributed back across ITS clauses. This yields
+    // accurate per-clause read-along timing (`clauseEndsSec`) — the client karaoke keys off it instead of a
+    // whole-episode char estimate that drifts. (mergeTurns stays for its own tests; this is the timed variant.)
+    const turns: { speaker: 'arlo' | 'mave'; text: string; clauseChars: number[] }[] = []
+    for (const c of script.clauses) {
+      const last = turns[turns.length - 1]
+      if (last && last.speaker === c.speaker) { last.text += ' ' + c.text; last.clauseChars.push(c.text.length) }
+      else turns.push({ speaker: c.speaker, text: c.text, clauseChars: [c.text.length] })
+    }
     const parts: Uint8Array[] = []
-    for (const turn of turns) {
+    const clauseEndsSec: number[] = []
+    let cumSec = 0
+    for (let t = 0; t < turns.length; t++) {
+      const turn = turns[t]!
       const mp3 = await this.ttsMp3(turn.text, this.voices[turn.speaker])
-      parts.push(parts.length === 0 ? mp3 : stripId3(mp3)) // keep the first tag; strip the rest → one stream
+      const frames = stripId3(mp3) // audio frames only → a consistent per-turn duration basis (128 kbps CBR)
+      parts.push(t === 0 ? mp3 : frames) // keep the first tag; strip the rest → one clean MP3 stream
+      const turnSec = frames.length / 16000 // 16 KB/s
+      const totalChars = turn.clauseChars.reduce((a, b) => a + b, 0) || 1
+      for (const ch of turn.clauseChars) {
+        cumSec += turnSec * (ch / totalChars)
+        clauseEndsSec.push(cumSec)
+      }
     }
     const audio = concat(parts)
-    // 128 kbps CBR MP3 = 16 KB/s → a real duration estimate from the byte length.
-    return { audio, durationSec: audio.length / 16000 }
+    return { audio, durationSec: audio.length / 16000, clauseEndsSec }
   }
 }

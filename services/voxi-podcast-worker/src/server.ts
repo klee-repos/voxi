@@ -67,7 +67,16 @@ Bun.serve({
         jobs.set(body.token, { catalogItemId: job.catalogItemId, version, subject: job.subject })
         // Fire-and-forget: the BFF's gate returns immediately; the app polls /status.
         renderPodcast(job, deps)
-          .then((o) => logger.info('podcast render complete', { subject: job.subject, version, kind: o.kind }))
+          .then((o) =>
+            logger.info('podcast render complete', {
+              subject: job.subject,
+              version,
+              kind: o.kind,
+              // surface WHY a render didn't ship (the old log dropped this — an RCA blind spot).
+              ...('reason' in o ? { reason: o.reason } : {}),
+              ...('details' in o && o.details ? { details: JSON.stringify(o.details).slice(0, 400) } : {}),
+            }),
+          )
           .catch((e) => logger.error('podcast render failed', e instanceof Error ? e : new Error(String(e)), { subject: job.subject, version }))
       }
       return Response.json({ ok: true }, { status: 202 })

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "react-native": ["../app/node_modules/react-native-web/dist/index.js"],
+      "react-native-safe-area-context": ["../e2e/web/converge/shims/safe-area.tsx"],
+      "lucide-react-native": ["../e2e/web/converge/shims/lucide.tsx"],
+      "expo-router": ["../e2e/web/converge/shims/expo-router.tsx"],
+      "expo-image": ["../e2e/web/converge/shims/expo-image.tsx"],
+      "expo-constants": ["../e2e/web/converge/shims/expo-constants.tsx"],
+      "expo-haptics": ["../e2e/web/converge/shims/expo-haptics.tsx"],
+      "@tanstack/react-query": ["../e2e/web/converge/shims/react-query.tsx"],
+      "@clerk/clerk-expo": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "expo-secure-store": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "expo-linking": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "react-native-vision-camera": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "@pipecat-ai/client-js": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "@pipecat-ai/react-native-small-webrtc-transport": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "react-native-reanimated": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "react-native-gesture-handler": ["../e2e/web/converge/shims/absent-native.tsx"],
+      "@shopify/react-native-skia": ["../e2e/web/converge/shims/absent-native.tsx"]
+    }
+  }
+}

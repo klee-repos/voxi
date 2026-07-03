@@ -37,6 +37,9 @@ async function deterministicGate(): Promise<void> {
   try {
     await page.goto(`${rig.base}/?scan=confident`)
     await d.waitFor(ids.reveal.card, { timeoutMs: 8000 })
+    // The dock-face title only mounts once the band SETTLES (band && !onViewfinder); wait for the element itself so
+    // the read can't race the mount and see an empty string (deterministic against the real settled reveal).
+    await d.waitFor(ids.reveal.title, { timeoutMs: 8000 })
 
     const title = (await d.state(ids.reveal.title)).text ?? ''
     const words = title.trim().split(/\s+/).filter(Boolean)

@@ -67,8 +67,9 @@ export interface PodcastAsset {
   playlistKey: string
   segmentKeys: string[]
   durationSec: number
-  /** the REAL two-host read-along transcript (the validated script), speaker-tagged, in order. */
-  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[]
+  /** the REAL two-host read-along transcript (the validated script), speaker-tagged, in order. `endSec` is the
+   *  clause's real cumulative END time (from per-turn TTS byte-durations) — the client karaoke syncs to it. */
+  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[]
 }
 
 // ---- pluggable providers (no creds; fakes in tests, real vendors in prod) ----
@@ -84,8 +85,9 @@ export interface ScriptProvider {
 }
 
 export interface TtsProvider {
-  /** ONE multi-speaker call for timbre consistency (D5). Returns the full episode's audio bytes + duration. */
-  synthesize(script: Script): Promise<{ audio: Uint8Array; durationSec: number }>
+  /** ONE multi-speaker call for timbre consistency (D5). Returns the full episode's audio bytes + duration, and
+   *  (when the provider can) the per-clause cumulative END times (seconds) for accurate karaoke sync. */
+  synthesize(script: Script): Promise<{ audio: Uint8Array; durationSec: number; clauseEndsSec?: number[] }>
 }
 
 export interface Muxer {
@@ -244,8 +246,12 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
   if (current === 'rendering') return { kind: 'in_progress' }
 
   // Compare-and-set the lease: only the worker that flips queued→rendering proceeds. A concurrent duplicate
-  // loses this CAS and bails — guaranteeing exactly one render for the (item, version).
-  const won = await deps.store.compareAndSetStatus(catalogItemId, version, 'queued', 'rendering')
+  // loses this CAS and bails — guaranteeing exactly one render for the (item, version). A previously FAILED item
+  // is ALSO claimable (failed→rendering), so a user's "try again" actually re-renders instead of dead-ending on
+  // the stale failure.
+  const won =
+    (await deps.store.compareAndSetStatus(catalogItemId, version, 'queued', 'rendering')) ||
+    (await deps.store.compareAndSetStatus(catalogItemId, version, 'failed', 'rendering'))
   if (!won) {
     // Someone else took (or already finished) the lease between our read and CAS. Re-resolve.
     const after = await deps.store.getStatus(catalogItemId, version)
@@ -278,7 +284,7 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
     const validated = verdict.script
 
     // 5. Only now — the VALIDATED (filtered) script → ONE multi-speaker TTS call → mux → HLS.
-    const { audio, durationSec } = await deps.tts.synthesize(validated)
+    const { audio, durationSec, clauseEndsSec } = await deps.tts.synthesize(validated)
     const { playlistKey, segmentKeys } = await deps.muxer.assemble({
       catalogItemId,
       version,
@@ -292,8 +298,13 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
       playlistKey,
       segmentKeys,
       durationSec,
-      // The VALIDATED (honesty-filtered + defamation-passed) script IS the read-along transcript — no separate source.
-      transcript: validated.clauses.map((c) => ({ speaker: c.speaker === 'arlo' ? 'ARLO' : 'MAVE', text: c.text })),
+      // The VALIDATED (honesty-filtered + defamation-passed) script IS the read-along transcript — no separate
+      // source. Each clause carries its real cumulative end time (when the TTS provided it) for karaoke sync.
+      transcript: validated.clauses.map((c, i) => ({
+        speaker: c.speaker === 'arlo' ? ('ARLO' as const) : ('MAVE' as const),
+        text: c.text,
+        ...(clauseEndsSec && Number.isFinite(clauseEndsSec[i]) ? { endSec: clauseEndsSec[i] } : {}),
+      })),
     }
     await deps.store.putAsset(asset)
 

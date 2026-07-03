@@ -12,7 +12,7 @@
  * drives the controller from ONE effect. `onPlayingChange` mirrors the web seam; `seekToStartOnPlay` restarts from
  * 0 so the button is a true "replay".
  */
-import React, { useEffect, useRef } from 'react'
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { View } from 'react-native'
 import TrackPlayer, { Event } from 'react-native-track-player'
 // SDK 57: the functional file API (cacheDirectory/writeAsStringAsync/getInfoAsync/EncodingType) lives at
@@ -20,6 +20,7 @@ import TrackPlayer, { Event } from 'react-native-track-player'
 import { cacheDirectory, getInfoAsync, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy'
 import { createRevealAudioController, type AudioPlayer } from '../lib/revealAudioController'
 import { tid } from '../lib/testid'
+import type { AudioHandle } from './AudioElement'
 
 export interface AudioElementProps {
   id: string
@@ -27,6 +28,9 @@ export interface AudioElementProps {
   playing: boolean
   onPlayingChange?: (playing: boolean) => void
   seekToStartOnPlay?: boolean
+  /** report playhead position + duration (seconds) — the Deep Dive scrubber + karaoke bind to this. Polled from
+   *  TrackPlayer.getProgress() (a READ; safe outside the controller's mutation chain). */
+  onProgress?: (positionSec: number, durationSec: number) => void
 }
 
 let setupPromise: Promise<void> | null = null
@@ -40,7 +44,7 @@ const ensureSetup = (): Promise<void> =>
 const realPlayer: AudioPlayer = {
   setup: () => ensureSetup(),
   reset: () => TrackPlayer.reset(),
-  add: (url) => TrackPlayer.add({ url, title: 'Voxi', artist: 'the Guide' }),
+  add: async (url) => { await TrackPlayer.add({ url, title: 'Voxi', artist: 'the Guide' }) },
   play: () => TrackPlayer.play(),
   pause: () => TrackPlayer.pause(),
   seekTo: (s) => TrackPlayer.seekTo(s),
@@ -108,13 +112,31 @@ function attachGlobalListeners(): void {
   })
 }
 
-export function AudioElement({ id, src, playing, onPlayingChange, seekToStartOnPlay }: AudioElementProps): React.ReactElement {
+export const AudioElement = forwardRef<AudioHandle, AudioElementProps>(function AudioElement(
+  { id, src, playing, onPlayingChange, seekToStartOnPlay, onProgress },
+  ref,
+): React.ReactElement {
   // Keep the latest callback + src in refs so the subscription stays STABLE (the old inline `()=>{}` re-subscribed
   // every render) and the unmount hook sees the current src.
   const cbRef = useRef(onPlayingChange)
   cbRef.current = onPlayingChange
   const srcRef = useRef(src)
   srcRef.current = src
+  const progressRef = useRef(onProgress)
+  progressRef.current = onProgress
+  // Last polled playhead so seekBy(delta) can compute an absolute target without another async read.
+  const posRef = useRef(0)
+
+  // Imperative transport for the Deep Dive scrubber + ±15. seek goes through the controller's SERIAL chain so it
+  // never races a load/reset (the AVFoundation-race invariant); seekBy resolves against the last polled position.
+  useImperativeHandle(
+    ref,
+    (): AudioHandle => ({
+      seekTo: (seconds) => controller.seek(seconds),
+      seekBy: (delta) => controller.seek(Math.max(0, posRef.current + delta)),
+    }),
+    [],
+  )
 
   // Report real playing state (register once — no per-render churn).
   useEffect(() => {
@@ -130,6 +152,29 @@ export function AudioElement({ id, src, playing, onPlayingChange, seekToStartOnP
     }
   }, [])
 
+  // Progress poll (only when a consumer wants it — the player). getProgress() is a READ, so it needs no serial
+  // chain; ~250ms matches the web <audio> ontimeupdate cadence. Feeds the scrubber + word-level karaoke.
+  useEffect(() => {
+    if (!onProgress) return
+    let alive = true
+    const tick = async (): Promise<void> => {
+      try {
+        const p = await TrackPlayer.getProgress()
+        if (!alive) return
+        posRef.current = p.position || 0
+        progressRef.current?.(p.position || 0, p.duration || 0)
+      } catch {
+        /* nothing loaded yet — ignore */
+      }
+    }
+    void tick()
+    const iv = setInterval(() => void tick(), 250)
+    return () => {
+      alive = false
+      clearInterval(iv)
+    }
+  }, [onProgress])
+
   // Single drive effect → the controller serializes reset/add/play internally (no more multi-effect race).
   useEffect(() => {
     controller.update({ src, playing, seekToStart: !!seekToStartOnPlay })
@@ -140,4 +185,4 @@ export function AudioElement({ id, src, playing, onPlayingChange, seekToStartOnP
   useEffect(() => () => controller.stopIfCurrent(srcRef.current), [])
 
   return <View {...tid(id)} accessibilityRole="none" style={{ width: 0, height: 0 }} />
-}
+})

@@ -24,6 +24,7 @@
     "@pipecat-ai/react-native-small-webrtc-transport": "^1.1.0",
     "@tanstack/react-query": "^5.66.0",
     "expo": "^57.0.0",
+    "expo-asset": "~57.0.0",
     "expo-audio": "~57.0.0",
     "expo-auth-session": "~57.0.1",
     "expo-blur": "~57.0.0",

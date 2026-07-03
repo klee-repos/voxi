@@ -11,8 +11,8 @@ import { BlurView } from 'expo-blur'
 import { glass } from '../lib/theme'
 import type { GlassFillProps } from './GlassFill'
 
-export function GlassFill({ radiusStyle, strong }: GlassFillProps): React.ReactElement {
-  const tint = strong ? glass.tintStrong : glass.tint
+export function GlassFill({ radiusStyle, strong, card }: GlassFillProps): React.ReactElement {
+  const tint = card ? glass.tintCard : strong ? glass.tintStrong : glass.tint
   const clip = [StyleSheet.absoluteFill, styles.clip, radiusStyle]
   // iOS 26: genuine UIGlassEffect. Pass the WARM tintColor — bare "regular" glass reads cold/off-brand (design.md).
   if (isLiquidGlassAvailable()) {

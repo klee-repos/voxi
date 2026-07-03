@@ -13,7 +13,7 @@ import { ids } from '../../framework/testids'
 import { standUp, makeChecker } from './harness'
 
 // Seed enough scans for the populated run's 3 real createThread calls.
-const rig = await standUp('threads-client.tsx', { seed: { converge: { scan: 9, podcast: 1, voiceMin: 10 } } })
+const rig = await standUp('threads-client.tsx', { seed: { converge: { scan: 12, podcast: 1, voiceMin: 10 } } })
 const { driver: d, page, errors } = rig
 const { check, fails } = makeChecker()
 
@@ -29,9 +29,11 @@ await check('real threads screen renders its screen container (data-testid from 
 await check('empty owner renders the designed empty state', () =>
   d.waitFor(ids.threads.emptyState, { timeoutMs: 8000 }),
 )
-await check('empty-state copy is the real "0 of ∞ catalogued" register', async () => {
+await check('empty-state copy is the warm first-run invite and drops the ∞ motif', async () => {
   const s = await d.state(ids.threads.emptyState)
-  if (!/0 of ∞ catalogued/i.test(s.text ?? '')) throw new Error('emptyState text=' + JSON.stringify(s.text?.slice(0, 80)))
+  const text = s.text ?? ''
+  if (/∞/.test(text)) throw new Error('empty state still shows the ∞ symbol: ' + JSON.stringify(text.slice(0, 80)))
+  if (!/awaits your first find|Nothing catalogued yet/i.test(text)) throw new Error('emptyState text=' + JSON.stringify(text.slice(0, 80)))
 })
 await check('empty state exposes the real capture CTA', () => d.waitFor(ids.threads.captureCta, { timeoutMs: 3000 }))
 await check('no threads.item rendered when the collection is empty', async () => {
@@ -61,6 +63,19 @@ await check('the real grid renders exactly the 3 seeded threads as threads.item 
     await new Promise((r) => setTimeout(r, 150))
   }
   throw new Error('expected exactly 3 threads.item tiles, got ' + n)
+})
+// The bottom "Capture another" button is GONE — the whole populated screen has no threads.captureCta (the empty +
+// error states keep theirs; here the tab/drawer is the capture entry). Assert it is absent, not just off-screen.
+await check('the populated collection has NO capture button (the bottom "Capture another" was removed)', async () => {
+  const n = await page.locator(`[data-testid="${ids.threads.captureCta}"]`).count()
+  if (n !== 0) throw new Error('expected 0 threads.captureCta on the populated grid, got ' + n)
+})
+// The count subtitle shows the real number of catalogued items and NO ∞ ("infinity" removed).
+await check('the count subtitle reads "3 catalogued" — a real number, no ∞', async () => {
+  const s = await d.state(ids.threads.count)
+  const text = s.text ?? ''
+  if (/∞/.test(text)) throw new Error('count still shows ∞: ' + JSON.stringify(text))
+  if (!/\b3\b/.test(text) || !/catalogued/i.test(text)) throw new Error('count text=' + JSON.stringify(text))
 })
 
 // Deterministic behavior: tapping a real tile does the canonical REVISIT — reset(); setThread(id);

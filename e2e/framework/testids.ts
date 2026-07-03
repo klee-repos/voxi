@@ -96,10 +96,11 @@ export const ids = {
     bucketPurpose: 'reveal.bucketPurpose', // "What it's for"
     bucketWho: 'reveal.bucketWho', // "Who made it" (maker)
     bucketFacts: 'reveal.bucketFacts', // "Curious facts" — carries a count badge
-    deepDiveIcon: 'reveal.deepDiveIcon', // green "Deep Dive" icon (after Facts, in the X-scroll row) → /podcast; state=ready when an episode exists
+    deepDiveIcon: 'reveal.deepDiveIcon', // green Deep Dive (Sparkles) icon, after Facts in the dock row → /podcast; carries state: active|generating|ready (generating = a compose is in flight; ready = a durable episode exists)
     bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
+    cardTab: 'reveal.cardTab', // a section-title tab in the morph card header; carries {bucket, selected} via tidWith — tap → switch section IN PLACE (replaces the old bottom tab strip)
     bucketCardScrim: 'reveal.bucketCardScrim', // tap-to-close scrim behind the morph card
-    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation — PINNED right of the divider, never scrolls (co-locates reveal.askVoxi)
+    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation — set off by the divider, the pinned people lane (co-locates reveal.askVoxi)
     // Swipe paging across catalogued items: a horizontal paging FlatList of the revealable collection. Swiping is
     // the native scroll paging; on settle the landed item loads in place (no /processing, no re-bill).
     pager: 'reveal.pager', // the horizontal paging FlatList (scroll container)
@@ -123,10 +124,18 @@ export const ids = {
     cover: 'podcast.cover',
     audio: 'podcast.audio', // the <audio> element — `expect.playing()` asserts currentTime advances
     playPause: 'podcast.playPause',
-    transcriptLine: 'podcast.transcriptLine', // carries speaker: ARLO|MAVE
+    transcriptLine: 'podcast.transcriptLine', // carries speaker: ARLO|MAVE, and karaoke `active` (true on the spoken word's line)
     composingState: 'podcast.composingState',
     reportEpisode: 'podcast.reportEpisode',
-    skip15: 'podcast.skip15',
+    skip15: 'podcast.skip15', // +15s (forward)
+    skipBack: 'podcast.skipBack', // −15s (back)
+    scrubber: 'podcast.scrubber', // the seekable progress track (tap-to-seek); carries scrubber.fraction
+    scrubberElapsed: 'podcast.scrubberElapsed', // elapsed clock (left of the scrubber)
+    scrubberDuration: 'podcast.scrubberDuration', // remaining/total clock (right of the scrubber)
+    activeWordIndex: 'podcast.activeWordIndex', // hidden anchor carrying the current karaoke word index (idx) — the COUPLING proof reads it advancing
+    playerState: 'podcast.playerState', // hidden anchor carrying transport state (playing, pos) — proves play/pause STICKS + seek moves the playhead (native-transport regression)
+    composeElapsed: 'podcast.composeElapsed', // the live "how long" elapsed clock shown while composing
+    progressHero: 'podcast.progressHero', // the large animated composing hero (orb + flat progress ring + orbiting disc)
     generate: 'podcast.generate', // the EXPLICIT "Generate a Deep Dive" CTA (idle state) — generation never auto-fires on mount
     stillComposing: 'podcast.stillComposing', // non-terminal "taking a while" state (poll budget exhausted, worker may still render) — never the "held it back" fail copy
   },
@@ -147,9 +156,12 @@ export const ids = {
     screen: 'threads.screen',
     emptyState: 'threads.emptyState',
     captureCta: 'threads.captureCta',
+    count: 'threads.count', // the "{n} catalogued" count subtitle (a real number, no ∞)
     grid: 'threads.grid',
     item: 'threads.item',
     itemPhoto: 'threads.itemPhoto', // the durable capture thumbnail on a collection tile (persisted photo)
+    loadingMore: 'threads.loadingMore', // footer spinner while the infinite-scroll window has more to reveal
+    window: 'threads.window', // hidden anchor carrying the infinite-scroll window (data-shown / data-total) for E2E reads
   },
   interview: {
     screen: 'interview.screen',
@@ -193,10 +205,10 @@ export const ids = {
     openConversation: 'nav.openConversation', // "Ask Voxi" entry into the full-screen conversation
     openPodcast: 'nav.openPodcast', // "Generate story" → podcast player
     openContribute: 'nav.openContribute', // "Add a tip" → contribute sheet
-    menuButton: 'nav.menuButton', // hamburger, top-left of camera, opens the drawer
+    menuButton: 'nav.menuButton', // hamburger, top-left of Capture + the Collection/Settings sections → opens the drawer
     more: 'nav.more', // ⋯ overflow, top-right of the reveal item header → opens the reveal MORE action sheet
     close: 'nav.close', // modal-dismiss X (podcast/conversation/contribute/paywall), top-right → guarded dismiss
-    back: 'nav.back', // back chevron, top-left (processing/reveal/threads/settings/interview) → guarded dismiss
+    back: 'nav.back', // back chevron, top-left (processing/reveal/interview/sign-in/sign-up) → guarded dismiss
     header: 'nav.header', // the universal AppHeader root View (the element measured for constant height)
   },
   // Left slide-out drawer — replaces the bottom tab bar; reachable from the camera shell only.

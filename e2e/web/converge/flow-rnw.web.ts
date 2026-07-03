@@ -148,7 +148,8 @@ const rigB = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, pod
   })
   await check('tapping an unavailable bucket routes to /processing WITHOUT wiping the store (threadId survives)', async () => {
     let tapped = ''
-    for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho, ids.reveal.bucketFacts]) {
+    // Facts (bucketFacts) is no longer a dock icon (single flush row) — probe the dock buckets that render.
+    for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho]) {
       if ((await db.state(b)).attrs.state === 'unavailable') { await db.tap(b); tapped = b; break }
     }
     if (!tapped) throw new Error('no bucket settled to `unavailable` after the forced research drop')

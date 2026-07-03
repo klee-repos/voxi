@@ -88,7 +88,7 @@ export default function Conversation(): React.ReactElement {
       .listMessages(threadId)
       .then(({ messages }) => {
         if (!messages.length) return
-        const prior: TranscriptTurn[] = messages.map((m) => ({ id: m.id, role: m.role === 'guide' ? 'voxi' : 'user', text: m.text }))
+        const prior: TranscriptTurn[] = messages.map((m) => ({ id: m.id, role: m.role === 'guide' ? 'voxi' : 'user', text: m.text, final: true }))
         setTurns((prev) => [...prior, ...prev])
       })
       .catch(() => {})

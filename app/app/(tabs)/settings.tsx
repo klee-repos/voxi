@@ -54,8 +54,10 @@ export default function Settings(): React.ReactElement {
     ])
   }
 
+  // Settings is a top-level drawer destination (a peer of Capture) → the header shows the menu hamburger that
+  // opens the drawer, not a back chevron.
   return (
-    <Screen id={ids.settings.screen} header={<AppHeader leading="back" onLeadingPress={() => router.navigate('/(tabs)/camera')} />}>
+    <Screen id={ids.settings.screen} header={<AppHeader leading="menu" />}>
       <OfflineBanner visible={offline} />
       <Title>Settings</Title>
 

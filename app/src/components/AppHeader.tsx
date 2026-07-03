@@ -3,7 +3,10 @@
  * BAR_H`) regardless of which controls it holds — only the glyphs swap, never the bar (validated against iOS
  * patterns in Mobbin; see docs/UNIVERSAL-HEADER-PLAN.md). Three regions:
  *   • LEFT   — `leading`: 'back' (lucide ChevronLeft) · 'menu' (hamburger, opens the drawer) · 'none'.
- *              Camera root pairs 'menu' with the left-aligned serif `voxi` wordmark (design.md nav-home).
+ *              Camera root + reveal-refusal card pair 'menu' with the left-aligned serif `voxi` wordmark
+ *              (design.md nav-home). The large-title drawer SECTIONS (Collection/Settings) use 'menu' with NO
+ *              wordmark (empty center; the in-body <Title> carries the screen name) — those get a small optical
+ *              nudge (`menuNudge`) so the hamburger's ink aligns to the body content gutter.
  *   • CENTER — optional `title` (Nunito 600 / headline — NEVER serif), truly centered when there's no wordmark
  *              (design.md nav-modal). Empty on the large-title screens (they keep their in-body <Title>).
  *   • RIGHT  — optional close X (`showClose`/`onClose`) — the modal dismiss, kept top-right by convention.
@@ -24,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, X, Menu, MoreHorizontal } from 'lucide-react-native'
 import { Wordmark } from './ui'
+import { GlassFill } from './GlassFill'
 import { ids, tid } from '../lib/testid'
 import { space, hit, typeStyles } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
@@ -37,6 +41,7 @@ export function AppHeader({
   onClose,
   onLeadingPress,
   title,
+  titleNode,
   showWordmark = false,
   onMedia = false,
   fallback = '/(tabs)/camera',
@@ -51,6 +56,8 @@ export function AppHeader({
   /** override the leading (back/menu) handler. */
   onLeadingPress?: () => void
   title?: string
+  /** A custom centered title node (the reveal supplies its own tappable, 2-line, over-photo title). Wins over `title`. */
+  titleNode?: React.ReactNode
   showWordmark?: boolean
   /** true over the camera viewfinder / a captured photo → white glyphs in a scrim circle. */
   onMedia?: boolean
@@ -82,6 +89,7 @@ export function AppHeader({
       <View style={styles.leftRow}>
         {leading === 'back' ? (
           <Pressable {...tid(ids.nav.back, 'Back')} accessibilityRole="button" onPress={leadingHandler} hitSlop={12} style={ctrlStyle}>
+            {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <ChevronLeft size={26} color={tint} strokeWidth={2.5} />
           </Pressable>
         ) : leading === 'menu' ? (
@@ -91,8 +99,9 @@ export function AppHeader({
             accessibilityState={{ expanded: isOpen }}
             onPress={leadingHandler}
             hitSlop={12}
-            style={ctrlStyle}
+            style={[ctrlStyle, !onMedia && !showWordmark && styles.menuNudge]}
           >
+            {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <Menu size={26} color={tint} strokeWidth={2} />
           </Pressable>
         ) : (
@@ -101,7 +110,9 @@ export function AppHeader({
         {showWordmark ? <Wordmark style={onMedia ? { color: '#FFFFFF' } : undefined} /> : null}
       </View>
 
-      {title && !showWordmark ? (
+      {titleNode && !showWordmark ? (
+        <View style={styles.titleSlot}>{titleNode}</View>
+      ) : title && !showWordmark ? (
         <Text accessibilityRole="header" numberOfLines={1} style={[styles.title, typeStyles.headline, { color: tint }]}>
           {title}
         </Text>
@@ -112,10 +123,12 @@ export function AppHeader({
       <View style={styles.rightSlot}>
         {showX ? (
           <Pressable {...tid(ids.nav.close, 'Close')} accessibilityRole="button" onPress={closeHandler} hitSlop={12} style={ctrlStyle}>
+            {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <X size={24} color={tint} strokeWidth={2.5} />
           </Pressable>
         ) : showMore ? (
           <Pressable {...tid(ids.nav.more, 'More actions')} accessibilityRole="button" onPress={onMore} hitSlop={12} style={ctrlStyle}>
+            {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <MoreHorizontal size={24} color={tint} strokeWidth={2.5} />
           </Pressable>
         ) : (
@@ -131,7 +144,18 @@ const styles = StyleSheet.create({
   leftRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   center: { flex: 1 },
   title: { flex: 1, textAlign: 'center' },
+  // Centered slot for a custom title node (reveal): fills the space between the leading + trailing controls. Default
+  // cross-axis stretch lets the node take the full width so a long title WRAPS (centered via its own textAlign)
+  // rather than sizing to content and overflowing; justifyContent centers the (1- or 2-line) block vertically.
+  titleSlot: { flex: 1, justifyContent: 'center', paddingHorizontal: space.sm },
   rightSlot: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
   ctrl: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
-  scrim: { width: 40, height: 40, borderRadius: 9999, backgroundColor: 'rgba(20,18,14,0.6)' },
+  // Over-media controls are Liquid-Glass discs (the dock's material) — GlassFill absolute-fills this rounded host,
+  // so it must clip (overflow) and keep a backgroundColor as the no-blur/no-module fallback.
+  scrim: { width: 42, height: 42, borderRadius: 9999, overflow: 'hidden', backgroundColor: 'rgba(20,18,14,0.6)' },
+  discRadius: { borderRadius: 9999 },
+  // Optical alignment (large-title section screens only — a wordmark-less menu header over a padded body, i.e.
+  // Collection/Settings): the hamburger is centered in a 44pt hit box, so its ink sits ~4pt right of the body
+  // content gutter (space.xl). Pull it back by space.xs so the glyph's left edge lines up with the <Title> below.
+  menuNudge: { marginLeft: -space.xs },
 })

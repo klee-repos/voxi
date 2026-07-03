@@ -3,13 +3,15 @@
  * voxi-api BFF. Nothing in app/ is edited; this is the converge mount point (the analogue of expo-router/entry,
  * scoped to one screen).
  *
- * The REAL component tree: Threads → Screen/Title/Body/Muted/Button/PressableTile (ui.tsx) + OfflineBanner +
- * useQuery (TanStack, shimmed in the converge scope) + useApi (real ApiClient → real BFF GET /v1/threads) +
- * useCaptureStore + useRouter. Two states are exercised against the real BFF, selected by `?state=`:
+ * The REAL component tree: Threads → Screen/Title/Body/Muted/Button (ui.tsx) + CatalogTile + FlatList +
+ * OfflineBanner + useQuery (TanStack, shimmed in the converge scope) + useApi (real ApiClient → real BFF GET
+ * /v1/threads) + useCaptureStore + useRouter. States selected by `?state=`:
  *   - empty (default): the owner has no threads → the designed empty state (threads.emptyState + captureCta).
- *   - populated (?state=populated): we first create N threads on the REAL BFF via the real ApiClient (real
- *     createThread, real owner-scoped persistence + metering), THEN render Threads, whose real useQuery lists
- *     them owner-scoped → the real grid (threads.grid + N × threads.item).
+ *   - populated (?state=populated): create 3 threads on the REAL BFF (confident/probable/unknown), THEN render.
+ *   - many (?state=many&count=N): create N (default 24) threads to exercise the virtualized infinite-scroll grid.
+ * Seeding is FAIL-LOUD (repo convention): if any create is rejected (e.g. a 402 once the scan entitlement is
+ * exhausted) or the created count falls short, we render `converge.seedError` so the test fails instead of
+ * silently under-seeding the grid and manufacturing a weak green.
  * Wrapped in the REAL ThemeProvider + REAL FakeAuth sign-in (→ a real bearer for useApi) + a QueryClientProvider.
  */
 import React, { useEffect, useState } from 'react'
@@ -21,33 +23,55 @@ import { QueryClient, QueryClientProvider } from './shims/react-query'
 
 const client = new QueryClient()
 
-function seededState(): string {
+function params(): { state: string; count: number } {
   const p = new URLSearchParams(globalThis.location?.search ?? '')
-  return p.get('state') ?? 'empty'
+  return { state: p.get('state') ?? 'empty', count: Number(p.get('count') ?? '24') }
 }
 
-/** For ?state=populated: create N threads on the REAL BFF before the screen's real useQuery runs. */
+/** The captures to seed for the current `?state=`. `many` → N confident tiles; `populated` → 3 mixed bands. */
+function seedPlan(state: string, count: number): { photoUrl: string; title: string }[] {
+  if (state === 'many') {
+    return Array.from({ length: count }, (_v, i) => ({ photoUrl: 'obj:confident', title: `Capture · item ${i + 1}` }))
+  }
+  if (state === 'populated') {
+    return ['confident', 'probable', 'unknown'].map((obj) => ({ photoUrl: `obj:${obj}`, title: `Capture · ${obj}` }))
+  }
+  return []
+}
+
+/** Create the seed captures on the REAL BFF before the screen's real useQuery runs; fail loud on any shortfall. */
 function SeedThenThreads(): React.ReactElement {
   const api = useApi()
-  const populated = seededState() === 'populated'
-  const [ready, setReady] = useState(!populated)
+  const { state, count } = params()
+  const plan = seedPlan(state, count)
+  const [ready, setReady] = useState(plan.length === 0)
+  const [seedError, setSeedError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!populated) return
+    if (plan.length === 0) return
     let cancelled = false
     void (async () => {
-      // Three real captures on the real BFF (charges scans from the seeded entitlement); each persists an
-      // owner-scoped thread the real GET /v1/threads will return.
-      for (const obj of ['confident', 'probable', 'unknown']) {
-        await api.createThread({ photoUrl: `obj:${obj}`, title: `Capture · ${obj}` }).catch(() => {})
+      let made = 0
+      for (const capture of plan) {
+        try {
+          await api.createThread(capture)
+          made++
+        } catch (e) {
+          if (!cancelled) setSeedError(`create failed after ${made}/${plan.length}: ${e instanceof Error ? e.message : String(e)}`)
+          return // stop on first failure — a 402 mid-seed means the entitlement is short; do NOT limp on and under-seed
+        }
       }
-      if (!cancelled) setReady(true)
+      if (cancelled) return
+      if (made !== plan.length) setSeedError(`seeded ${made}, expected ${plan.length}`)
+      setReady(true)
     })()
     return () => {
       cancelled = true
     }
-  }, [api, populated])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, state, count])
 
+  if (seedError) return <div data-testid="converge.seedError">{seedError}</div>
   if (!ready) return <div data-testid="converge.seeding" />
   return (
     <div data-testid="converge.root">

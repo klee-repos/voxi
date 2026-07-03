@@ -88,13 +88,16 @@ const routes: Record<string, React.ComponentType> = {
   '*': Camera,
 }
 
-/** Real DrawerHost + NavHost stack — the back control returns to the parent through a real (canGoBack) router. */
+/**
+ * Real DrawerHost + NavHost stack — the back control returns to the parent through a real (canGoBack) router.
+ * DrawerHost is passed as NavHost's `wrap` (NOT wrapped outside) so DrawerMenu's `useRouter()` resolves to the real
+ * NavHost router — a drawer row actually NAVIGATES (opens Collection/Settings), instead of only recording
+ * data-last-nav (shim docstring: shims/expo-router.tsx). The drawer stays mounted across screen swaps.
+ */
 function FlowRoot(): React.ReactElement {
   return (
     <div data-testid="converge.root" style={{ height: '100%' }}>
-      <DrawerHost>
-        <NavHost routes={routes} initial="/(tabs)/camera" />
-      </DrawerHost>
+      <NavHost routes={routes} initial="/(tabs)/camera" wrap={DrawerHost} />
     </div>
   )
 }

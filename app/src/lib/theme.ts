@@ -16,13 +16,15 @@
 
 // ---- raw palette (design.md → Colors) ----
 const palette = {
-  // Dark shell → design.md Dark theme
-  ink900: '#212325', // dark-background (app canvas)
-  ink800: '#2A2C2E', // dark-surface (raised)
-  ink700: '#2A2C2E', // dark-surface (cards — barely lighter than canvas by design)
+  // Dark shell → design.md Dark theme. Canvas darkened below the old #212325 (reconciled in design.md) on explicit
+  // product direction: the shell read "too light / hard to read"; a near-black canvas lifts light-text contrast AND
+  // widens the canvas↔card gap so cards read as raised (design.md's depth-from-separation, not shadow).
+  ink900: '#17181A', // dark-background (app canvas) — darker near-black charcoal
+  ink800: '#2A2C2E', // dark-surface (raised — now a clearer step above the canvas)
+  ink700: '#2A2C2E', // dark-surface (cards)
   ink600: '#343638', // dark-hairline (borders / dividers)
-  mist300: '#9D9E9E', // dark-text-secondary (≈ 5.8:1 on ink900 — AA)
-  mist100: '#ECEEEE', // dark-text-primary (≈ 13:1 on ink900 — AAA)
+  mist300: '#9D9E9E', // dark-text-secondary (≈ 6.7:1 on the darker ink900 — AA)
+  mist100: '#ECEEEE', // dark-text-primary (≈ 15:1 on the darker ink900 — AAA)
 
   // Parchment reading surface → design.md Warm theme
   parchment: '#F4F1E8', // background — warm cream
@@ -159,7 +161,8 @@ export const type = {
       '900': 'Fraunces_900Black',
     },
   } as const,
-  size: { xs: 12, sm: 14, base: 16, lg: 20, xl: 26, xxl: 34, display: 44 },
+  // Ramp nudged up ~1–2pt across the board (explicit product direction: text read too small on the dark shell).
+  size: { xs: 12, sm: 15, base: 17, lg: 21, xl: 28, xxl: 36, display: 46 },
   leading: { tight: 1.15, body: 1.5, loose: 1.7 },
   weight: { regular: '400', medium: '500', semibold: '600', bold: '700' } as const,
   clamp: { min: 0.85, max: 1.4 },
@@ -170,19 +173,20 @@ export const type = {
  * safe to pull into the react-native-web converge bundle, unlike `src/lib/fonts.ts`). Prefer these over composing
  * `type.family.*` + sizes by hand. `fonts.ts` re-exports this for back-compat.
  */
+// Sizes nudged up ~1–2pt across the board (readability direction); the `logo` wordmark stays 22 (design.md-pinned).
 export const typeStyles = {
   logo:         { fontFamily: type.family.serif['800'], fontSize: 22, letterSpacing: -0.22, lineHeight: 22 },
-  heading:      { fontFamily: type.family.sans['700'],  fontSize: 24, letterSpacing: -0.24, lineHeight: 28 },
-  display:      { fontFamily: type.family.sans['700'],  fontSize: 22, lineHeight: 26 },
-  headline:     { fontFamily: type.family.sans['600'],  fontSize: 17, lineHeight: 21 },
-  name:         { fontFamily: type.family.sans['600'],  fontSize: 16, lineHeight: 20 },
-  body:         { fontFamily: type.family.sans['400'],  fontSize: 16, lineHeight: 22 },
-  calloutBold:  { fontFamily: type.family.sans['700'],  fontSize: 15, lineHeight: 20 },
-  sectionLabel: { fontFamily: type.family.sans['500'],  fontSize: 15, lineHeight: 20 },
-  subhead:      { fontFamily: type.family.sans['500'],  fontSize: 15, lineHeight: 20 },
+  heading:      { fontFamily: type.family.sans['700'],  fontSize: 26, letterSpacing: -0.24, lineHeight: 30 },
+  display:      { fontFamily: type.family.sans['700'],  fontSize: 24, lineHeight: 28 },
+  headline:     { fontFamily: type.family.sans['600'],  fontSize: 18, lineHeight: 23 },
+  name:         { fontFamily: type.family.sans['600'],  fontSize: 17, lineHeight: 22 },
+  body:         { fontFamily: type.family.sans['400'],  fontSize: 17, lineHeight: 24 },
+  calloutBold:  { fontFamily: type.family.sans['700'],  fontSize: 16, lineHeight: 21 },
+  sectionLabel: { fontFamily: type.family.sans['500'],  fontSize: 16, lineHeight: 21 },
+  subhead:      { fontFamily: type.family.sans['500'],  fontSize: 16, lineHeight: 21 },
   overline:     { fontFamily: type.family.sans['600'],  fontSize: 13, letterSpacing: 0.78, lineHeight: 16, textTransform: 'uppercase' as const },
-  footnote:     { fontFamily: type.family.sans['400'],  fontSize: 13, lineHeight: 17 },
-  caption:      { fontFamily: type.family.sans['500'],  fontSize: 12, lineHeight: 14 },
+  footnote:     { fontFamily: type.family.sans['400'],  fontSize: 14, lineHeight: 18 },
+  caption:      { fontFamily: type.family.sans['500'],  fontSize: 13, lineHeight: 16 },
 } as const
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 48 } as const
@@ -220,12 +224,22 @@ export const shadow = {
  */
 export const glass = {
   tint: 'rgba(20,17,13,0.68)', // dock over the photo — dark warm frost; AA-guaranteed for LIGHT text (mist100)
-  tintStrong: 'rgba(20,17,13,0.84)', // morph card — denser (a "thick" modal material over the scrim)
+  tintStrong: 'rgba(20,17,13,0.84)', // ⋯ MORE action sheet — denser (a "thick" modal material over the scrim)
+  tintCard: 'rgba(20,17,13,0.90)', // reveal reading sheet — deepest, so enlarged prose stays crisp over a bright photo
   border: 'rgba(255,255,255,0.22)', // light specular rim (the Liquid-Glass edge catching light on a dark material)
   blur: 30, // px — web backdrop-filter blur radius
   saturate: 1.4, // web backdrop-filter saturation boost (photo colour still "pops" through the dark frost)
   intensity: 45, // native BlurView intensity (0–100)
 } as const
+
+/**
+ * Foot scrim behind the WHITE label on a Collection photo tile (CatalogTile `grid` variant over a capture photo).
+ * A SINGLE flat warm-dark band (design.md: no gradients) sized to cover the whole label block. Its alpha is
+ * contrast-load-bearing: `theme.test.ts` composites #FFFFFF over it on WHITE (worst-case bright photo) and asserts
+ * ≥ AA (4.5:1) — at 0.66 → ~6:1. Drop the alpha and the guard fails on purpose. CatalogTile imports THIS token so
+ * the tile and the guard can't drift.
+ */
+export const photoLabelScrim = 'rgba(20,17,13,0.66)' as const
 
 export const theme = { dark, parchment, bands, speakers, type, space, radius, hit, motion, orbGradient, scrim, shadow }
 export type Theme = typeof theme

@@ -8,7 +8,7 @@
  * sub-AA exception (white on the primary green, per design.md).
  */
 import { test, expect, describe } from 'bun:test'
-import { dark, parchment, bands, speakers, onColorInk, type, radius, scrim, shadow, glass } from './theme'
+import { dark, parchment, bands, speakers, onColorInk, type, radius, scrim, shadow, glass, photoLabelScrim } from './theme'
 
 // ---- WCAG relative luminance + contrast ----
 function luminance(hex: string): number {
@@ -50,7 +50,7 @@ describe('theme tokens — exact design.md values', () => {
     expect(dark.danger).toBe('#C56A3E') // terracotta
   })
   test('surfaces map to design.md themes', () => {
-    expect(dark.bg).toBe('#212325') // Dark theme
+    expect(dark.bg).toBe('#17181A') // Dark theme — darkened near-black canvas (reconciled in design.md)
     expect(parchment.bg).toBe('#F4F1E8') // Warm theme
     expect(bands.CONFIDENT.color).toBe('#29AB60') // harmonized to brand green
   })
@@ -147,22 +147,31 @@ describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.
   // light text still clears AA there, so a future alpha drop (glass too see-through → washes toward gray) fails CI.
   // Small muted captions are SUPPLEMENTARY (icon glyph + a11y label carry meaning); a translucent material can't keep
   // muted text AA over the brightest photo region without going opaque (see theme.ts `glass`).
-  test('light text ≥ 4.5:1 over glass.tint / glass.tintStrong composited on white', () => {
+  test('light text ≥ 4.5:1 over glass.tint / glass.tintStrong / glass.tintCard composited on white', () => {
     expect(contrast(dark.text, compositeOver(glass.tint, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
     expect(contrast(dark.text, compositeOver(glass.tintStrong, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(dark.text, compositeOver(glass.tintCard, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
   })
 
   // The reveal BucketCard's SOURCE TITLE is a blue link (dark.accentSecondary) — the load-bearing signifier of the
   // Sources list, so it must clear AA. It reads AA ONLY because the morph card always sits over CARD_SCRIM (the deep
-  // scrim behind the card, RevealDock.tsx CARD_SCRIM) UNDER the `strong` glass (tintStrong): that composite ≈ dark.bg,
-  // where blue is ~4.60:1. Guard it (the plain scrim-less form is ~3.43:1 and would FAIL) so removing the scrim behind
-  // the card, or lightening tintStrong, re-opens the issue in CI. (docs/REVEAL-CARD-CLEANUP-PLAN.md §2a/§6 R4.)
-  const CARD_SCRIM = 'rgba(20,18,14,0.55)' // = RevealDock.tsx CARD_SCRIM (scrim behind the morph card)
-  test('blue source-title link ≥ 4.5:1 on the card material (tintStrong over CARD_SCRIM over white)', () => {
-    const cardBackdrop = compositeOver(glass.tintStrong, compositeOver(CARD_SCRIM, '#FFFFFF'))
+  // scrim behind the card, RevealDock.tsx CARD_SCRIM) UNDER the card glass (tintCard): that composite ≈ dark.bg,
+  // where blue is ~5:1. Guard it (the plain scrim-less form is ~4.2:1 and would FAIL) so removing the scrim behind
+  // the card, or lightening tintCard, re-opens the issue in CI. (docs/REVEAL-CARD-CLEANUP-PLAN.md §2a/§6 R4.)
+  const CARD_SCRIM = 'rgba(20,18,14,0.60)' // = RevealDock.tsx CARD_SCRIM (scrim behind the morph card)
+  test('blue source-title link ≥ 4.5:1 on the card material (tintCard over CARD_SCRIM over white)', () => {
+    const cardBackdrop = compositeOver(glass.tintCard, compositeOver(CARD_SCRIM, '#FFFFFF'))
     expect(contrast(dark.accentSecondary, cardBackdrop)).toBeGreaterThanOrEqual(4.5)
     // Document the dependency on the scrim: bare glass over a white photo is sub-AA for this blue.
-    expect(contrast(dark.accentSecondary, compositeOver(glass.tintStrong, '#FFFFFF'))).toBeLessThan(4.5)
+    expect(contrast(dark.accentSecondary, compositeOver(glass.tintCard, '#FFFFFF'))).toBeLessThan(4.5)
+  })
+
+  // The Collection tile's WHITE label sits over a capture photo on a flat foot scrim (photoLabelScrim). Worst case
+  // for the white label = the scrim composited over the BRIGHTEST photo (a white pixel) → lightest composite →
+  // lowest contrast. Guard that WHITE still clears AA there, so dropping the scrim alpha (foot too see-through)
+  // fails CI. (The current shipping tile scrim rgba(20,18,14,0.42) is ~2.76:1 — sub-AA — hence this stronger foot.)
+  test('white label ≥ 4.5:1 over photoLabelScrim composited on white (Collection tile)', () => {
+    expect(contrast('#FFFFFF', compositeOver(photoLabelScrim, '#FFFFFF'))).toBeGreaterThanOrEqual(4.5)
   })
 
   // A DARK, warm, translucent frost (Control-Center style): dark so light text is legible + so a photo shows through
@@ -176,5 +185,19 @@ describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.
     expect(r).toBeLessThan(64) // DARK (a light tint here washes the photo to gray — the reported bug)
     expect(r).toBeGreaterThanOrEqual(g) // warm bias: red ≥ green ≥ blue
     expect(g).toBeGreaterThanOrEqual(b)
+  })
+})
+
+// ---- Deep Dive karaoke legibility (G-A3) — the word highlight must stay AA on the dark player ----
+describe('karaoke word highlight — AA on the dark Deep Dive player', () => {
+  // KaraokeTranscript.tsx: the ACTIVE word is bright text (mist100) over a translucent-green box; spoken words are
+  // mist100; UPCOMING words are mist300. All must clear AA on the darker canvas so the read-along stays legible.
+  const ACTIVE_BOX = 'rgba(41,171,96,0.38)' // = KaraokeTranscript styles.activeWord backgroundColor
+  test('active-word text (mist100) ≥ 4.5:1 over the highlight box on the dark canvas', () => {
+    const box = compositeOver(ACTIVE_BOX, dark.bg)
+    expect(contrast(dark.text, box)).toBeGreaterThanOrEqual(4.5)
+  })
+  test('upcoming-word text (mist300) ≥ 4.5:1 on the dark canvas (dimmed but still readable)', () => {
+    expect(contrast(dark.textMuted, dark.bg)).toBeGreaterThanOrEqual(4.5)
   })
 })

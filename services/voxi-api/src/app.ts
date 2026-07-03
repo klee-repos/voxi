@@ -131,7 +131,7 @@ export interface PodcastAssetRecord {
   version: number
   status: 'composing' | 'ready' | 'failed'
   audioUrl?: string | null
-  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[] | null
+  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[] | null
   createdAt: number
   updatedAt: number
 }
@@ -183,7 +183,7 @@ export interface PodcastStatusService {
   status(
     token: string,
     userId: string,
-  ): Promise<{ state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[] } | null>
+  ): Promise<{ state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[] } | null>
 }
 
 /** Trust + moderation surface for user contributions (TL0 → review queue; TL2+ → live). */
@@ -701,12 +701,21 @@ export function createApp(deps: Deps): Hono {
       mintToken: () => `gen_${crypto.randomUUID()}`,
     })
     if (!r.ok) return c.json({ error: r.reason }, 402)
+    // The prior durable episode, read BEFORE we (re)stamp it — a retry after a FAILED (or worker-orphaned) render
+    // must actually re-enqueue, not dead-end on an idempotent replay. A genuinely-ready episode is a true replay.
+    const prior = (await deps.podcasts?.getByItem(body.catalogItemId, version, userId).catch(() => null)) ?? null
+    const alreadyReady = prior?.status === 'ready' && !!prior.audioUrl
     // Record the item's episode durably (composing) so the collection item "remembers" it — owner-scoped keyspace.
-    await deps.podcasts
-      ?.upsert({ token: r.token, userId, catalogItemId: body.catalogItemId, version, status: 'composing', createdAt: now(), updatedAt: now() })
-      .catch(() => {})
-    // Only a FRESH gate (credit actually spent) enqueues a render; an idempotent replay is already composing/ready.
-    if (r.reason !== 'idempotent_replay') {
+    // Never downgrade a ready episode back to composing.
+    if (!alreadyReady) {
+      await deps.podcasts
+        ?.upsert({ token: r.token, userId, catalogItemId: body.catalogItemId, version, status: 'composing', createdAt: now(), updatedAt: now() })
+        .catch(() => {})
+    }
+    // Enqueue a render on a FRESH gate (credit spent), OR on an idempotent replay whose episode is NOT ready —
+    // i.e. a retry of a failed render, or one the worker lost (a restart). The worker's CAS makes a genuinely
+    // in-flight render a no-op, so a redundant enqueue is safe; a replay of a ready episode never re-renders.
+    if (r.reason !== 'idempotent_replay' || !alreadyReady) {
       await deps
         .podcastEnqueue?.({ token: r.token, catalogItemId: body.catalogItemId, version, subject: body.subject ?? body.catalogItemId, userId })
         .catch((e) =>

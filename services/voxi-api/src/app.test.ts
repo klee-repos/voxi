@@ -4,7 +4,7 @@
  * idempotent podcast gate, account deletion cascade.
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
-import { createApp, speechBucketText, buildItemContext, type Deps, type RevealRecord } from './app'
+import { createApp, speechBucketText, buildItemContext, type Deps, type RevealRecord, type PodcastAssetStore, type PodcastAssetRecord } from './app'
 import { testVerifier } from './auth'
 import { authorizeRead } from './signing'
 import { memoryStore } from './metering'
@@ -93,6 +93,47 @@ describe('BFF', () => {
     // B has 0 podcast entitlement
     const denied = await app.request('/v1/podcast', { method: 'POST', headers: { ...auth('B'), 'content-type': 'application/json' }, body: JSON.stringify({ catalogItemId: 'c9', version: 1 }) })
     expect(denied.status).toBe(402)
+  })
+
+  test('podcast retry: a failed/non-ready episode RE-ENQUEUES a render; a READY episode is a true replay', async () => {
+    // The reported bug: "try again" after a failed render failed INSTANTLY — the idempotent gate returned a replay
+    // token but the render was never re-enqueued, so the worker 404'd the poll. The fix re-enqueues any replay
+    // whose durable episode is not ready.
+    const records = new Map<string, PodcastAssetRecord>()
+    const kk = (i: string, v: number, u: string) => `${u}:${i}:${v}`
+    const podcasts: PodcastAssetStore = {
+      async upsert(rec) { records.set(kk(rec.catalogItemId, rec.version, rec.userId), rec) },
+      async getByToken() { return null },
+      async getByItem(i, v, u) { return records.get(kk(i, v, u)) ?? null },
+    }
+    const enqueued: string[] = []
+    const deps: Deps = {
+      verifier: testVerifier,
+      store: memoryStore({ A: { scan: 1, podcast: 5, voiceMin: 10 } }),
+      eve: { async createSession({ userId }) { return { sessionId: `s_${userId}`, continuationToken: 'ct' } }, async *stream() { /* unused here */ } },
+      deletion: { async cascade() { return { deleted: [] } } },
+      bucket: 'voxi-photos',
+      sessionOwner: new Map(),
+      appStore: { verify: fakeApple, entitlements: memoryEntitlementStore() },
+      podcasts,
+      podcastEnqueue: async (a) => { enqueued.push(a.token) },
+    }
+    const app2 = createApp(deps)
+    const gen = () => app2.request('/v1/podcast', { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ catalogItemId: 'c1', version: 1, subject: 'Thing' }) })
+
+    const t1 = (await (await gen()).json()).token
+    expect(enqueued).toEqual([t1]) // fresh gate → one render enqueued
+
+    // The render is still composing / failed (the durable record isn't ready) → a retry MUST re-enqueue.
+    const t2 = (await (await gen()).json()).token
+    expect(t2).toBe(t1) // idempotent token (no double-charge)
+    expect(enqueued).toEqual([t1, t1]) // …but the render WAS re-enqueued (the fix)
+
+    // Once the episode is READY, a replay is a TRUE replay — never re-rendered.
+    const rec = records.get(kk('c1', 1, 'A'))!
+    records.set(kk('c1', 1, 'A'), { ...rec, status: 'ready', audioUrl: 'g/x.m4a' })
+    await gen()
+    expect(enqueued).toEqual([t1, t1]) // unchanged — a ready episode is not re-rendered
   })
 
   test('account deletion cascades', async () => {

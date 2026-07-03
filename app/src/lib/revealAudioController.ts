@@ -57,6 +57,9 @@ export interface UpdateInput {
 export interface RevealAudioController {
   /** Idempotent: call from ONE effect on [src, playing, seekToStart]. Serialized internally. */
   update(input: UpdateInput): void
+  /** Seek to an ABSOLUTE position (seconds) on the SAME serial chain, so it never races a load/reset (the
+   *  Deep Dive scrubber + ±15). No-op unless the currently-loaded src is still the target one. */
+  seek(seconds: number): void
   /** Unmount hook. Pause ONLY if the player is still on `src` — so one element leaving the screen can't
    *  pause another screen's audio on the shared singleton (reveal-narration vs podcast). */
   stopIfCurrent(src: string | undefined): void
@@ -179,6 +182,19 @@ export function createRevealAudioController(deps: RevealAudioControllerDeps): Re
         // Same source, load already settled → apply play/pause on the SAME serial chain.
         enqueue(() => applyPlaying(seekToStart))
       }
+    },
+    seek(seconds: number): void {
+      if (disposed || !Number.isFinite(seconds)) return
+      const at = Math.max(0, seconds)
+      enqueue(async () => {
+        // Only seek what is actually loaded AND still the target (never seek a stale/other bucket's audio).
+        if (disposed || loadedSrc === undefined || loadedSrc !== targetSrc) return
+        try {
+          await player.seekTo(at)
+        } catch (err) {
+          onError?.('apply', err)
+        }
+      })
     },
     stopIfCurrent(src: string | undefined): void {
       if (disposed) return

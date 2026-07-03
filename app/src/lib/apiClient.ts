@@ -57,7 +57,7 @@ export interface ThreadDetail {
   resumes: boolean
   photoUrl?: string | null
   /** the item's durable podcast episode, if one was generated. */
-  podcast?: { state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[] } | null
+  podcast?: { state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[] } | null
   hasConversation?: boolean
 }
 /** A persisted conversation message (durable history replayed on revisit). */
@@ -82,7 +82,7 @@ export interface PodcastStatus {
   state: 'composing' | 'ready' | 'failed'
   audioUrl?: string
   /** the real two-host read-along transcript (speaker-tagged), returned once the episode is ready. */
-  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[]
+  transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[]
 }
 export interface InterviewBody {
   threadId: string

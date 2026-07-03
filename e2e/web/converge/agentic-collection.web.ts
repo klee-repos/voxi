@@ -68,6 +68,21 @@ await check('the captured item is listed in the real collection', async () => {
   if (n < 1) throw new Error('no threads.item tiles in the collection')
 })
 
+await check('the collection grid sits on the app-standard content gutter (space.xl), aligned under the header hamburger', async () => {
+  const hdr = await page.locator(`[data-testid="${ids.nav.header}"]`).first().boundingBox()
+  const titleX = await page.evaluate(() => {
+    const h = Array.from(document.querySelectorAll('[role="heading"]')).find((e) => /your collection/i.test((e as HTMLElement).innerText || ''))
+    return h ? h.getBoundingClientRect().x : null
+  })
+  if (!hdr || titleX == null) throw new Error('missing "Your collection" title or header bbox')
+  // The reported "Your Collection" misalignment was a GUTTER mismatch: the grid used the narrow space.lg (16) while
+  // the header hamburger + Settings + every padded screen sit on the app-standard space.xl (24). Measure the grid
+  // title RELATIVE to the header's left edge (cancels the harness's horizontal-scroll origin), so it reads the true
+  // gutter: space.xl → ~24, space.lg → ~16. Assert the wide standard gutter; a revert to space.lg goes red.
+  const gutter = titleX - hdr.x
+  if (gutter < 20) throw new Error(`grid gutter ${gutter.toFixed(1)}pt (title vs header) — narrower than space.xl (24): space.lg regression`)
+})
+
 // Reopen the persisted tile — the deterministic reopen of the specific past capture (the agent navigated here; the
 // value that matters, that the reveal REVISITS, is pinned below). A real DOM click on the real tile.
 await d.tap(ids.threads.item)
