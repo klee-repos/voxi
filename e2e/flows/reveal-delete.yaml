@@ -1,0 +1,65 @@
+# Maestro flow (iOS native, deterministic) — reveal-delete: the ⋯ MORE sheet → Delete → TWO-STEP confirm → the item
+# is genuinely removed. Capture (fixture shutter) → reveal.card, open the ⋯ sheet, tap Delete (step 1: opens the
+# confirmation dialog), tap the destructive Delete in the dialog (step 2: commits). Then PROVE the item is gone, not
+# merely that we navigated: open the drawer → Collection → assert the empty state (the one captured item is gone).
+# A "returned to camera" check would be false-green (the viewfinder is a client-side scroll, visible regardless).
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/reveal-delete.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+# Open the ⋯ overflow sheet.
+- tapOn:
+    id: "nav.more"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.menuDelete"
+    timeout: 10000
+# Step 1 of the two-step delete: the menu row opens the confirmation dialog (it does NOT delete yet).
+- tapOn:
+    id: "reveal.menuDelete"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.deleteConfirmAccept"
+    timeout: 10000
+# Step 2: the deliberate destructive confirm commits the delete.
+- tapOn:
+    id: "reveal.deleteConfirmAccept"
+# Back on the viewfinder in place… (the delete API round-trip + reset + pager slide can be slow under load).
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+# …and PROVE the item is gone: open the drawer → Collection → the empty state (the single captured item is deleted).
+- tapOn:
+    id: "nav.menuButton"
+- extendedWaitUntil:
+    visible:
+      id: "nav.threadsTab"
+    timeout: 30000
+- tapOn:
+    id: "nav.threadsTab"
+- extendedWaitUntil:
+    visible:
+      id: "threads.emptyState"
+    timeout: 30000

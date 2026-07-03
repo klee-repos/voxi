@@ -19,3 +19,10 @@ export function cacheReveal(threadId: string, data: CachedReveal): void {
 export function getCachedReveal(threadId: string): CachedReveal | undefined {
   return cache.get(threadId)
 }
+
+/** Drop a thread's cached content so a subsequent revisit re-streams instead of painting stale content. Called on
+ *  delete (the item is gone) and on regenerate (the content is being replaced) — without this a later swipe-back
+ *  would `hydrate()` the pre-regenerate reveal and silently mask the fresh result. */
+export function evictReveal(threadId: string): void {
+  cache.delete(threadId)
+}

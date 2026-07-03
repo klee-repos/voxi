@@ -30,15 +30,15 @@ async function check(name: string, fn: () => Promise<void>) {
 await page.goto(base)
 console.log('web E2E (real BFF + framework PlaywrightDriver):')
 
-// --- auth-01 ---
-await check('lands on welcome', () => d.waitFor(ids.welcome.emailInput))
-await d.type(ids.welcome.emailInput, 'qa@voxi.test')
-await d.tap(ids.welcome.eulaAccept)
-await d.tap(ids.welcome.ageConfirm)
-await d.tap(ids.welcome.continueBtn)
-await check('otp step appears', () => d.waitFor(ids.welcome.otpInput))
-await d.type(ids.welcome.otpInput, '424242')
-await d.tap(ids.welcome.continueBtn)
+// --- auth-01 (landing → sign-up → code → camera; no consent checkboxes) ---
+await check('lands on the landing', () => d.waitFor(ids.welcome.getStarted))
+await d.tap(ids.welcome.getStarted)
+await check('sign-up email step', () => d.waitFor(ids.auth.emailInput))
+await d.type(ids.auth.emailInput, 'qa@voxi.test')
+await d.tap(ids.auth.continue)
+await check('code step appears', () => d.waitFor(ids.auth.codeInput))
+await d.type(ids.auth.codeInput, '424242')
+await d.tap(ids.auth.continue)
 await check('auth-01: lands on camera', () => d.waitFor(ids.camera.screen))
 
 // --- id-03 (reveal driven by the real BFF NDJSON stream) ---

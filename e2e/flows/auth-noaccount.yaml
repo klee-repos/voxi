@@ -1,0 +1,55 @@
+# Maestro flow (iOS native, deterministic) — auth-noaccount: logging in with an email that has no account is
+# caught, and the screen offers the switch to create one. The `voxi://e2e?auth=noaccount` deep link makes
+# FakeAuth's startSignIn throw NoAccountError. (On a prod Clerk instance enumeration protection masks this at the
+# email stage; the code-stage "that code didn't match — create an account" switch is the always-on fallback.)
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-noaccount.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?auth=noaccount"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "welcome.getStarted"
+    timeout: 30000
+- tapOn:
+    id: "welcome.logIn"
+- extendedWaitUntil:
+    visible:
+      id: "auth.emailInput"
+    timeout: 15000
+- tapOn:
+    id: "auth.emailInput"
+- inputText: "ghost@voxi.test"
+- tapOn:
+    id: "auth.continue"
+# The no-account error is surfaced with the switch to /sign-up.
+- extendedWaitUntil:
+    visible:
+      id: "auth.error"
+    timeout: 15000
+- assertVisible:
+    id: "auth.switchLink"
+- assertNotVisible:
+    id: "auth.codeInput"

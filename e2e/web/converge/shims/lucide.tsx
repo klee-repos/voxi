@@ -37,6 +37,11 @@ export const BookOpen = Stub
 export const Target = Stub
 export const Stamp = Stub
 export const Lightbulb = Stub
+export const AudioLines = Stub
 export const MessageCircle = Stub
 export const RotateCcw = Stub
+// reveal ⋯ More-menu glyphs (header overflow + regenerate/delete rows)
+export const MoreHorizontal = Stub
+export const RotateCw = Stub
+export const Trash2 = Stub
 export default Stub

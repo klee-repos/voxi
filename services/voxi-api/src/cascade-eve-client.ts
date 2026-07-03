@@ -71,6 +71,21 @@ export class CascadeEveClient implements EveClient {
     return n
   }
 
+  /** Item-delete hook: drop the in-process photo + pinned narration for ONE session (owner already ACL'd upstream). */
+  purgeSession(sessionId: string): void {
+    this.photos.delete(sessionId)
+    this.narrations.purgeSession(sessionId)
+  }
+
+  /** Regenerate hook: optionally RE-SEED the session's photo (a cold client after a restart has an empty photos
+   *  Map → stream() would yield hard_failure; the route rebuilds a data: URI from the durable PhotoStore and hands
+   *  it here) and ALWAYS clear the pinned narration so the fresh run re-pins new clauses. Omit `photoUrl` to keep
+   *  any same-process in-memory photo intact. */
+  primeSession(sessionId: string, photoUrl?: string): void {
+    if (photoUrl) this.photos.set(sessionId, photoUrl)
+    this.narrations.purgeSession(sessionId)
+  }
+
   async *stream(sessionId: string, userId: string, startIndex = 0): AsyncIterable<string> {
     const photoUrl = this.photos.get(sessionId)
     if (!photoUrl) {

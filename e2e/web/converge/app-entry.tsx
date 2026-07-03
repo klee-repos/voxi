@@ -30,6 +30,8 @@ import {
   VoxiErrorBoundary,
 } from '../../../app/src/lib/observability'
 import Welcome from '../../../app/app/welcome'
+import SignUp from '../../../app/app/sign-up'
+import SignIn from '../../../app/app/sign-in'
 import FirstRun from '../../../app/app/first-run'
 import Camera from '../../../app/app/(tabs)/camera'
 import Threads from '../../../app/app/(tabs)/threads'
@@ -39,11 +41,14 @@ import Reveal from '../../../app/app/reveal'
 import Interview from '../../../app/app/interview'
 import Paywall from '../../../app/app/paywall'
 import Conversation from '../../../app/app/conversation'
+import Podcast from '../../../app/app/podcast'
 
 // The real router seam maps each path the app navigates to its REAL screen component. welcome.replace('/first-run')
 // and first-run.replace('/(tabs)/camera') are the genuine post-auth hops; the drawer navigates to threads/settings.
 const routes: Record<string, React.ComponentType> = {
   '/welcome': Welcome,
+  '/sign-up': SignUp,
+  '/sign-in': SignIn,
   '/first-run': FirstRun,
   '/(tabs)/camera': Camera,
   '/(tabs)/threads': Threads,
@@ -53,6 +58,7 @@ const routes: Record<string, React.ComponentType> = {
   '/interview': Interview,
   '/paywall': Paywall,
   '/conversation': Conversation,
+  '/podcast': Podcast, // the Deep Dive player — reached from the reveal dock's Deep Dive icon
   '*': Welcome,
 }
 

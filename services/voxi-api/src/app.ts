@@ -36,6 +36,13 @@ export interface EveClient {
    * `/v1/threads/:id/speech` voices this — the client never supplies the text (the BFF never trusts the client).
    */
   narrationText?(sessionId: string, userId: string, bucket?: AudioBucket): Promise<string | null>
+  /** Delete-cascade hook: drop the per-session captured photo + pinned narration held in-process. The caller has
+   *  already ACL'd the owner; this only clears the in-memory scan artifacts a durable purge can't reach. */
+  purgeSession?(sessionId: string): void
+  /** Regenerate hook: optionally RE-SEED the session's photo (so a cold client after a restart re-reads the image
+   *  instead of a hard_failure) and ALWAYS clear the session's pinned narration so the fresh run re-pins new
+   *  clauses. Omit `photoUrl` to leave the in-process photo untouched (clear narration only). */
+  primeSession?(sessionId: string, photoUrl?: string): void
 }
 
 /** Single-voice TTS seam for the spoken reveal (ElevenLabs in prod, a deterministic fake in tests). */
@@ -80,6 +87,11 @@ export interface ThreadStore {
   applyReveal?(threadId: string, r: { revealTitle: string; band: string }): Promise<void>
   /** Flag that a durable photo exists for this thread (records its mime). Optional per A7. */
   markPhoto?(threadId: string, mime: string): Promise<void>
+  /** Delete the caller's own thread row (owner-scoped). The item-delete cascade's LAST step (the ACL anchor). */
+  deleteOwned?(threadId: string, ownerUserId: string): Promise<void>
+  /** Clear the denormalized band + reveal_title (regenerate) so the collection tile isn't stuck on the old label
+   *  until the fresh reveal re-pins. NEVER touches `title`. Owner-scoped. */
+  resetReveal?(threadId: string, ownerUserId: string): Promise<void>
 }
 
 /** Durable captured-photo bytes, keyed by thread. Local stand-in for GCS behind app.threads.photo_url. */
@@ -87,6 +99,8 @@ export interface PhotoStore {
   put(rec: { threadId: string; ownerUserId: string; mime: string; bytes: Uint8Array }): Promise<void>
   get(threadId: string): Promise<{ ownerUserId: string; mime: string; bytes: Uint8Array } | null>
   has(threadId: string): Promise<boolean>
+  /** Delete the captured photo bytes for this thread (item-delete cascade). */
+  delete?(threadId: string): Promise<void>
 }
 
 /** The durable projection of the generated reveal (== app.turns). `events` is the source of truth for replay. */
@@ -104,6 +118,9 @@ export interface RevealStore {
   /** First successful drain wins (ON CONFLICT DO NOTHING). Returns whether this call actually wrote the row. */
   put(rec: RevealRecord): Promise<{ inserted: boolean }>
   get(threadId: string): Promise<RevealRecord | null>
+  /** Delete the durable reveal for this thread. Item-delete removes it; regenerate clears it so the next /stream
+   *  leaves the replay branch, re-runs the live cascade, and re-pins a fresh reveal (first-write-wins is unblocked). */
+  delete?(threadId: string): Promise<void>
 }
 
 /** The item's durable podcast episode (== app.podcast_assets). Owner-scoped (adversarial A9). */
@@ -122,6 +139,9 @@ export interface PodcastAssetStore {
   upsert(rec: PodcastAssetRecord): Promise<void>
   getByToken(token: string, userId: string): Promise<PodcastAssetRecord | null>
   getByItem(catalogItemId: string, version: number, userId: string): Promise<PodcastAssetRecord | null>
+  /** Delete every episode (all versions) for a catalog item, OWNER-SCOPED — catalog_item_id is not user-unique
+   *  for a global catalog id, so the user_id predicate is required to avoid wiping another user's episodes. */
+  deleteByItem?(catalogItemId: string, userId: string): Promise<void>
 }
 
 /** Durable conversation history (== app.messages). The single writer is idempotent on (threadId, clientKey). */
@@ -145,12 +165,16 @@ export interface MessageStore {
     clientKey?: string | null
   }): Promise<{ id: string; duplicate: boolean }>
   listByThread(threadId: string): Promise<MessageRecord[]>
+  /** Delete all conversation messages for this thread (item-delete cascade). */
+  deleteByThread?(threadId: string): Promise<void>
 }
 
 /** Durable, once-ever refund guard (adversarial A15): a refused/failed scan credits back exactly once. */
 export interface RefundStore {
   /** Atomically mark this thread refunded; returns true only the FIRST time (i.e. proceed with the credit). */
   markRefunded(threadId: string): Promise<boolean>
+  /** Drop the refund guard row (item-delete cascade). Regenerate does NOT call this — it LATCHES the guard. */
+  delete?(threadId: string): Promise<void>
 }
 
 /** Worker-reported status of a paid podcast render (the BFF polls/proxies; it never fabricates "ready"). */
@@ -341,6 +365,9 @@ export function createApp(deps: Deps): Hono {
   const now = deps.now ?? Date.now
   // Threads whose scan was already refunded (terminal refusal/hard-fail) — keeps refunds idempotent across reconnects.
   const refundedThreads = new Set<string>()
+  // D5: regenerate is FREE in v1 (re-running a bad identification shouldn't cost the user a scan). Flip to true to
+  // meter it exactly like a fresh capture — the ONLY charge site for regenerate, so the toggle is self-contained.
+  const REGEN_CHARGES_SCAN = false
 
   // Auth middleware — every route requires a valid principal.
   app.use('/v1/*', async (c, next) => {
@@ -445,6 +472,58 @@ export function createApp(deps: Deps): Hono {
       podcast: podcast ? { state: podcast.status, audioUrl: podcast.audioUrl ?? undefined, transcript: podcast.transcript ?? undefined } : null,
       hasConversation: convo.length > 0,
     })
+  })
+
+  // Delete a cataloged item — the owner-scoped per-thread cascade (mirrors the account purge, scoped to one
+  // thread). ORDER MATTERS: the durable `threads` row (the ACL anchor) is deleted LAST, so a mid-cascade failure
+  // leaves the item still owner-resolvable and a retry self-heals — there is no cross-table transaction on the
+  // PgLike seam (a child-delete throw surfaces as a 500 with the thread intact, never a half-deleted item).
+  app.delete('/v1/threads/:id', async (c) => {
+    const userId = uid(c)
+    const id = c.req.param('id')
+    const acl = await threadOwnerVerdict(deps, id, userId)
+    if (!acl.ok) return c.json({ error: acl.error }, acl.status)
+    // Children first (independent tables, any order among them); the threads row LAST (see above).
+    await deps.reveals?.delete?.(id)
+    await deps.messages?.deleteByThread?.(id)
+    await deps.refunds?.delete?.(id)
+    await deps.podcasts?.deleteByItem?.(id, userId)
+    await deps.photos?.delete?.(id)
+    await deps.threads?.deleteOwned?.(id, userId)
+    // In-process scan artifacts a durable purge can't reach: the eve client's photo+narration, the ownership map,
+    // and the in-memory refund latch (so a later thread that somehow reused the id can't inherit a stale guard).
+    deps.eve.purgeSession?.(id)
+    deps.sessionOwner.delete(id)
+    refundedThreads.delete(id)
+    return c.body(null, 204)
+  })
+
+  // Regenerate a cataloged item's identification — re-run the live cascade for the SAME thread. Clearing the durable
+  // reveal makes the next GET /stream leave the replay branch and re-run live + re-pin (first-write-wins unblocked);
+  // resetting the denorm stops the tile showing the old label mid-run; re-seeding the cascade's in-process photo from
+  // the durable store lets a cold post-restart client re-settle instead of hard_failure; clearing the pinned
+  // narration forces a fresh re-pin. FREE in v1 (D5). We LATCH the refund guard shut first so the reused /stream
+  // refund tap can't credit a scan on a should-not-happen pre-band failure of this free re-run (the tap has no
+  // notion of "this run charged nothing").
+  app.post('/v1/threads/:id/regenerate', async (c) => {
+    const userId = uid(c)
+    const id = c.req.param('id')
+    const acl = await threadOwnerVerdict(deps, id, userId)
+    if (!acl.ok) return c.json({ error: acl.error }, acl.status)
+    if (REGEN_CHARGES_SCAN && !(await charge(deps.store, userId, 'scan'))) return c.json({ error: 'scan_limit_reached' }, 402)
+    if (deps.refunds) await deps.refunds.markRefunded(id) // latch the durable guard shut (never credits on this re-run)
+    refundedThreads.add(id) // and the in-memory fallback guard
+    await deps.reveals?.delete?.(id)
+    await deps.threads?.resetReveal?.(id, userId)
+    // Re-seed the in-process photo from durable bytes (cold-client safety) + clear the pinned narration. Omitting the
+    // photoUrl (no durable bytes) still clears narration but leaves any same-process in-memory photo intact.
+    let dataUri: string | undefined
+    if (deps.photos) {
+      const p = await deps.photos.get(id)
+      if (p && p.ownerUserId === userId) dataUri = `data:${p.mime};base64,${Buffer.from(p.bytes).toString('base64')}`
+    }
+    deps.eve.primeSession?.(id, dataUri)
+    return c.json({ ok: true })
   })
 
   // Serve a persisted photo. OUTSIDE the /v1/* Clerk middleware so a browser <img>/<Image> can load it WITHOUT

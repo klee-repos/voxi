@@ -19,10 +19,10 @@ export const did = (h: PlannedAction[], kind: PlannedAction['kind'], id: string)
 export const CONVERGE_EMAIL = 'converge@voxi.dev'
 
 /**
- * Drive the REAL sign-in the way a user does — welcome (email → the two consent toggles → Continue → OTP → Verify)
- * then the REAL first-run onboarding (meet → allow camera → allow mic → finish) — landing on the REAL camera. The
- * agent perceives one screen at a time and taps what it sees; the OTP `000000` is the FakeAuth seam's accepted code
- * (same as the harness auth-gate). `achieve()` ends when the camera screen is perceived.
+ * Drive the REAL new-user journey the way a person does — the LANDING ("Get started") → /sign-up (email →
+ * Continue → 6-digit code → Verify, NO consent checkboxes) → the REAL first-run onboarding (meet → allow camera →
+ * allow mic → finish) — landing on the REAL camera. The agent perceives one screen at a time and taps what it
+ * sees; the code `000000` is the FakeAuth seam's accepted value. `achieve()` ends when the camera is perceived.
  */
 export function makeSignInPlanner(email: string): Planner {
   return async (_goal, obs, history) => {
@@ -30,7 +30,7 @@ export function makeSignInPlanner(email: string): Planner {
     const tap = (id: TestId, rationale: string): PlannedAction => ({ kind: 'tap', id, rationale })
     const type = (id: TestId, text: string, rationale: string): PlannedAction => ({ kind: 'type', id, text, rationale })
 
-    // reached the camera → sign-in journey complete.
+    // reached the camera → journey complete.
     if (v(ids.camera.screen)) return { kind: 'done', rationale: 'arrived at the camera' }
 
     // first-run onboarding steps — each renders one at a time; tap the one on screen.
@@ -39,22 +39,22 @@ export function makeSignInPlanner(email: string): Planner {
     if (v(ids.firstRun.cameraPrimeAllow)) return tap(ids.firstRun.cameraPrimeAllow, 'allow camera')
     if (v(ids.firstRun.meetVoxiNext)) return tap(ids.firstRun.meetVoxiNext, 'past the hello')
 
-    // welcome — OTP phase (the code field is only present after Continue sends the code). Verify may need a second
-    // tap: the FakeAuth seam's token becomes live only on the render after verifyCode, so the first tap's api.me()
-    // can 401 ("that sign-in didn't take") — exactly as a real user re-taps. The loop re-issues the tap (the code
-    // field is still on screen) until it navigates off welcome; Agent.achieve's settleMs paces the retry.
-    if (v(ids.welcome.otpInput)) {
-      if (!did(history, 'type', ids.welcome.otpInput)) return type(ids.welcome.otpInput, '000000', 'enter the code')
-      return tap(ids.welcome.continueBtn, 'verify and enter')
+    // sign-up — CODE phase (the field is present after Continue sends the code). Verify may need a second tap:
+    // the FakeAuth token becomes live only on the render after verifyCode, so the first api.me() can 401 — exactly
+    // as a real user re-taps. The loop re-issues the tap until it navigates off; Agent.achieve's settleMs paces it.
+    if (v(ids.auth.codeInput)) {
+      if (!did(history, 'type', ids.auth.codeInput)) return type(ids.auth.codeInput, '000000', 'enter the code')
+      return tap(ids.auth.continue, 'verify and enter')
     }
 
-    // welcome — email phase: fill email, accept both gates, then Continue (the CTA enables once all three are set).
-    if (v(ids.welcome.emailInput)) {
-      if (!did(history, 'type', ids.welcome.emailInput)) return type(ids.welcome.emailInput, email, 'enter email')
-      if (!did(history, 'tap', ids.welcome.eulaAccept)) return tap(ids.welcome.eulaAccept, 'accept terms')
-      if (!did(history, 'tap', ids.welcome.ageConfirm)) return tap(ids.welcome.ageConfirm, 'confirm 16+')
-      return tap(ids.welcome.continueBtn, 'send the code')
+    // sign-up — EMAIL phase: fill email, then Continue (no checkboxes — agreement is implicit on the tap).
+    if (v(ids.auth.emailInput)) {
+      if (!did(history, 'type', ids.auth.emailInput)) return type(ids.auth.emailInput, email, 'enter email')
+      return tap(ids.auth.continue, 'send the code')
     }
+
+    // landing — start account creation.
+    if (v(ids.welcome.getStarted)) return tap(ids.welcome.getStarted, 'get started → create account')
 
     return { kind: 'done', rationale: 'no sign-in affordance on screen' }
   }

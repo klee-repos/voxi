@@ -187,6 +187,15 @@ function memThreadStore(): ThreadStore {
     async get(threadId) {
       return rows.get(threadId) ?? null
     },
+    // Item-delete cascade + regenerate denorm reset — owner-scoped, mirroring pg-stores.
+    async deleteOwned(threadId, ownerUserId) {
+      const r = rows.get(threadId)
+      if (r && r.ownerUserId === ownerUserId) rows.delete(threadId)
+    },
+    async resetReveal(threadId, ownerUserId) {
+      const r = rows.get(threadId)
+      if (r && r.ownerUserId === ownerUserId) rows.set(threadId, { ...r, band: null, revealTitle: null })
+    },
   }
 }
 
@@ -290,14 +299,24 @@ label{display:block;margin:6px 0}
 <body>
 <div data-testid="global.offlineBanner">You are offline. The Guide will reconnect.</div>
 
-<!-- ===================== WELCOME ===================== -->
+<!-- ===================== WELCOME (LANDING — no form) ===================== -->
 <div id="welcome" class="screen active" data-testid="welcome.screen">
-  <h2>the Guide</h2>
-  <input data-testid="welcome.emailInput" placeholder="email"/>
-  <label><input type="checkbox" data-testid="welcome.eulaAccept"/> accept terms</label>
-  <label><input type="checkbox" data-testid="welcome.ageConfirm"/> I am 16+</label>
-  <input data-testid="welcome.otpInput" placeholder="code" style="display:none"/>
-  <button class="primary" data-testid="welcome.continueBtn">Continue</button>
+  <div class="orb"></div>
+  <h2>voxi</h2>
+  <h3>What is that, exactly?</h3>
+  <button class="primary" data-testid="welcome.getStarted">Get started</button>
+  <button data-testid="welcome.logIn">Log in</button>
+  <p class="muted">By continuing you confirm you're 16 or older and agree to Voxi's
+    <span data-testid="welcome.terms">Terms</span> and <span data-testid="welcome.privacy">Privacy Policy</span>.</p>
+</div>
+
+<!-- ===================== SIGN-UP / SIGN-IN (email → code) ===================== -->
+<div id="signup" class="screen" data-testid="signUp.screen">
+  <h3 id="authTitle">Let's get you set up.</h3>
+  <input data-testid="auth.emailInput" placeholder="email"/>
+  <input data-testid="auth.codeInput" placeholder="code" style="display:none"/>
+  <button class="primary" data-testid="auth.continue">Continue</button>
+  <button data-testid="auth.switchLink">Log in</button>
 </div>
 
 <!-- ===================== CAMERA ===================== -->
@@ -431,17 +450,19 @@ const show=id=>{
   $('#tabbar').style.display=token?'flex':'none';
 };
 
-// ---- welcome / auth ----
-$('[data-testid="welcome.continueBtn"]').onclick=()=>{
+// ---- landing → sign-up/sign-in (email → code, no checkboxes) ----
+$('[data-testid="welcome.getStarted"]').onclick=()=>{show('signup');};
+$('[data-testid="welcome.logIn"]').onclick=()=>{show('signup');};
+$('[data-testid="auth.continue"]').onclick=()=>{
   if(!otpShown){
-    if(!$('[data-testid="welcome.emailInput"]').value||!$('[data-testid="welcome.eulaAccept"]').checked||!$('[data-testid="welcome.ageConfirm"]').checked)return;
-    $('[data-testid="welcome.otpInput"]').style.display='block';otpShown=true;return;
+    if(!$('[data-testid="auth.emailInput"]').value)return;
+    $('[data-testid="auth.codeInput"]').style.display='block';otpShown=true;return;
   }
-  const email=$('[data-testid="welcome.emailInput"]').value;token='test:'+email.split('@')[0];
+  const email=$('[data-testid="auth.emailInput"]').value;token='test:'+email.split('@')[0];
   $('#cameraObj').textContent='(seeded object: '+scanObj+')';
   if(startScreen)route(startScreen);else show('camera');
 };
-$('[data-testid="settings.signOut"]').onclick=()=>{token=null;otpShown=false;$('[data-testid="welcome.otpInput"]').style.display='none';show('welcome');};
+$('[data-testid="settings.signOut"]').onclick=()=>{token=null;otpShown=false;$('[data-testid="auth.codeInput"]').style.display='none';show('welcome');};
 
 // ---- scan → processing → terminal outcome ----
 async function scan(){
@@ -733,9 +754,13 @@ export function createWebHarness(
     async get(id) {
       return revealRows.get(id) ?? null
     },
+    async delete(id) { revealRows.delete(id) }, // item-delete / regenerate (unblocks first-write-wins re-pin)
   }
   const refundedSet = new Set<string>()
-  const refunds: RefundStore = { async markRefunded(id) { if (refundedSet.has(id)) return false; refundedSet.add(id); return true } }
+  const refunds: RefundStore = {
+    async markRefunded(id) { if (refundedSet.has(id)) return false; refundedSet.add(id); return true },
+    async delete(id) { refundedSet.delete(id) },
+  }
   // Durable photo/podcast/conversation stores (in-memory here; PGlite-backed in the assembled server). Harmless
   // for the deterministic runners: they send `obj:<x>` (not data: URIs) so no photo is stored, and they never
   // touch the messages routes; the podcast gate/poll transitions are unchanged (composing → ready).
@@ -744,12 +769,14 @@ export function createWebHarness(
     async put(rec) { photoRows.set(rec.threadId, { ownerUserId: rec.ownerUserId, mime: rec.mime, bytes: rec.bytes }) },
     async get(id) { return photoRows.get(id) ?? null },
     async has(id) { return photoRows.has(id) },
+    async delete(id) { photoRows.delete(id) },
   }
   const podcastRows = new Map<string, PodcastAssetRecord>()
   const podcasts: PodcastAssetStore = {
     async upsert(rec) { podcastRows.set(rec.token, rec) },
     async getByToken(t, u) { const a = podcastRows.get(t); return a && a.userId === u ? a : null },
     async getByItem(item, v, u) { return [...podcastRows.values()].find((a) => a.catalogItemId === item && a.version === v && a.userId === u) ?? null },
+    async deleteByItem(item, u) { for (const [k, a] of podcastRows) if (a.catalogItemId === item && a.userId === u) podcastRows.delete(k) },
   }
   const messageRows: MessageRecord[] = []
   const messages: MessageStore = {
@@ -763,6 +790,7 @@ export function createWebHarness(
       return { id, duplicate: false }
     },
     async listByThread(id) { return messageRows.filter((m) => m.threadId === id).sort((a, b) => a.createdAt - b.createdAt) },
+    async deleteByThread(id) { for (let i = messageRows.length - 1; i >= 0; i--) if (messageRows[i]!.threadId === id) messageRows.splice(i, 1) },
   }
 
   const deps: Deps = {
@@ -808,6 +836,12 @@ export function createWebHarness(
       async narrationText(sessionId, userId, bucket) {
         return narrations.get(sessionId, userId, bucket ?? 'what')
       },
+      // Item-delete: drop the live session (models purging the in-process photo) + its pinned narration.
+      purgeSession(sessionId) { liveSessions.delete(sessionId); narrations.purgeSession(sessionId) },
+      // Regenerate: RE-ADD the live session (models re-seeding the photo so a cold re-stream re-settles instead of
+      // "session expired") + clear the pinned narration so the fresh run re-pins. (photoUrl unused — the harness
+      // recovers the seeded object from the sessionId, so re-adding the session is the analog of re-seeding bytes.)
+      primeSession(sessionId) { liveSessions.add(sessionId); narrations.purgeSession(sessionId) },
     },
     deletion: {
       async cascade(userId) {

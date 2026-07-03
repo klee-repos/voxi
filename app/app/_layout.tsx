@@ -70,6 +70,10 @@ function AppShell(): React.ReactElement {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="welcome" />
+        {/* Auth screens are PUSHED from the landing → slide in (the global default is 'fade', which would
+            cross-fade under a back chevron and read as a broken transition). */}
+        <Stack.Screen name="sign-up" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="sign-in" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="first-run" />
         {/* camera ⇄ reveal is a SWIPE between the same cached photo — NO screen cross-fade (that read as a "weird
             fade in / fade out" / a phantom loading state). Instant nav; the photo is identical, so the dock simply

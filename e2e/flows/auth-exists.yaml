@@ -1,0 +1,56 @@
+# Maestro flow (iOS native, deterministic) — auth-exists: sign-up with an email that already has an account is
+# caught, and the screen offers the switch to log in. The `voxi://e2e?auth=exists` deep link makes FakeAuth's
+# startSignUp throw EmailExistsError (the enumeration-reliable branch). Proves the "that email's registered → log
+# in instead" recovery, not a dead end.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-exists.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?auth=exists"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "welcome.getStarted"
+    timeout: 30000
+- tapOn:
+    id: "welcome.getStarted"
+- extendedWaitUntil:
+    visible:
+      id: "auth.emailInput"
+    timeout: 15000
+- tapOn:
+    id: "auth.emailInput"
+- inputText: "taken@voxi.test"
+- tapOn:
+    id: "auth.continue"
+# The account-exists error is surfaced with the switch to /sign-in — a recovery, not a dead end.
+- extendedWaitUntil:
+    visible:
+      id: "auth.error"
+    timeout: 15000
+- assertVisible:
+    id: "auth.switchLink"
+# Still on sign-up (never advanced to the code field).
+- assertNotVisible:
+    id: "auth.codeInput"

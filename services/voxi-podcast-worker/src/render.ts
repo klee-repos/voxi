@@ -146,64 +146,83 @@ export type RenderOutcome =
   | { kind: 'replayed'; asset: PodcastAsset } // duplicate job; already ready — no second render
   | { kind: 'in_progress' } // another worker holds the rendering lease
   | {
+      // The honesty gate now DROPS clauses (never rejects the whole episode); an episode is only blocked by
+      // defamation or a degenerate/over-thin length AFTER dropping.
       kind: 'rejected_validation'
-      reason: 'ungrounded_claim' | 'defamation'
+      reason: 'defamation' | 'degenerate_length'
       details: string[]
       audioProduced: false
     }
   | { kind: 'failed'; reason: string }
 
+// Duration is only known POST-TTS (live-tts derives it from the audio bytes), so we steer + fail-closed on a
+// SCRIPT-WORD proxy BEFORE the paid ElevenLabs call. At a conversational ~150 wpm this band brackets roughly
+// 1–~6 min, rejecting only degenerate 2-liners and runaways — the Deep Dive target is ~2.5–3.5 min (§F3).
+export const MIN_SCRIPT_WORDS = 120
+export const MAX_SCRIPT_WORDS = 900
+
+/** Pure word estimate over the spoken clauses (the pre-synthesis duration proxy). */
+export function estimateWords(script: Script): number {
+  return script.clauses.reduce((n, c) => {
+    const t = c.text.trim()
+    return n + (t ? t.split(/\s+/).length : 0)
+  }, 0)
+}
+
 /**
- * Run the validators on the script BEFORE any synthesis. Returns null if clean; otherwise the rejection.
- * Fail-closed: any ungrounded falsifiable clause OR any defamatory clause lacking ≥2 independent sources
- * blocks the whole episode (we drop, never ship unvalidated audio — §6.2).
+ * Run the validators on the script BEFORE any synthesis, and return the VALIDATED (filtered) script to synthesize.
+ *
+ * The honesty gate is DROP-and-KEEP — the same contract the shipped reveal narrator uses (live-narrator's
+ * `gateNarration`, `failClosed:false`): a clause that fails the gate (an ungrounded falsifiable claim, or a
+ * `flavor` line the independent auditor flags for smuggling a name/superlative/date) is CUT from the episode. It
+ * never reaches audio, so NO unvalidated claim ever ships — the honesty guarantee holds by construction — while
+ * the validated clauses carry on, so a single conversational aside can't sink the whole Serial-length episode
+ * (the failure the episode-level fail-closed produced once the interview reformat + auditor were both live).
+ * The episode still HARD-FAILS on defamation (a negative claim about an identifiable entity is not a droppable
+ * aside) and on a degenerate length AFTER dropping (which doubles as the drop-floor: if the gate cut so much that
+ * too little remains, ship nothing rather than a stub).
  */
 export function validateScript(
   script: Script,
   deps: Pick<RenderDeps, 'judge' | 'detectNamedClaim' | 'classify'>,
-): { ok: true } | { reason: 'ungrounded_claim' | 'defamation'; details: string[] } {
-  // 1. Claim-structured honesty gate — FAIL-CLOSED (audio path).
+): { ok: true; script: Script } | { reason: 'defamation' | 'degenerate_length'; details: string[] } {
   const evidence: Evidence[] = script.facts.map((f) => ({
     ref: f.sourceUrl, // refs are the closed source URLs
     sourceUrl: f.sourceUrl,
     claim: f.claim,
   }))
-  const clauses: Clause[] = script.clauses.map((c) => ({
-    text: c.text,
-    claimType: c.claimType,
-    evidenceRef: c.evidenceRef,
-  }))
-  const honesty = validateClaims(clauses, evidence, {
+  // 1. Honesty gate — DROP the rejected clauses, KEEP the validated ones. `validateClaims` returns the SAME clause
+  //    objects in `approved`, so the `speaker` field survives (cast back to ScriptClause). Nothing rejected is
+  //    synthesized, so no unvalidated claim ships.
+  const honesty = validateClaims(script.clauses, evidence, {
     judge: deps.judge,
     detectNamedClaim: deps.detectNamedClaim,
-    failClosed: true,
+    failClosed: false,
   })
-  if (!honesty.ok) {
-    return {
-      reason: 'ungrounded_claim',
-      details: honesty.rejected.map((r) => `${r.clause.text} — ${r.reason}`),
-    }
-  }
+  const kept = honesty.approved as ScriptClause[]
+  const filtered: Script = { facts: script.facts, clauses: kept }
 
-  // 2. Defamation gate — every clause carrying a negative claim about an identifiable entity needs ≥2
-  //    independent sources, else it routes to human review (which on the cache path means: do not ship).
+  // 2. Defamation gate (HARD-fail) — a negative claim about an identifiable entity needs ≥2 independent sources,
+  //    else it routes to human review (on the cache path: do not ship). Judged over the KEPT clauses.
   const defamatory: string[] = []
-  for (const c of script.clauses) {
-    // The sources available to a clause are the closed facts it is grounded in (plus, for context, all facts
-    // — but a negative claim's support is judged against its OWN cited evidence first).
+  for (const c of kept) {
     const cited: Source[] = c.evidenceRef
       ? script.facts.filter((f) => f.sourceUrl === c.evidenceRef).map((f) => ({ url: f.sourceUrl }))
       : []
     const verdict = gateClaim(c.text, cited, deps.classify)
-    if (verdict.action !== 'allow') {
-      defamatory.push(`${c.text} — ${verdict.reason}`)
-    }
+    if (verdict.action !== 'allow') defamatory.push(`${c.text} — ${verdict.reason}`)
   }
-  if (defamatory.length > 0) {
-    return { reason: 'defamation', details: defamatory }
+  if (defamatory.length > 0) return { reason: 'defamation', details: defamatory }
+
+  // 3. Length proxy on the KEPT script — the drop-floor + the cost bound, checked BEFORE the paid TTS call. If the
+  //    honesty gate cut so much (or the model produced a degenerate/runaway) that the kept words fall outside the
+  //    band, ship nothing rather than a stub.
+  const words = estimateWords(filtered)
+  if (words < MIN_SCRIPT_WORDS || words > MAX_SCRIPT_WORDS) {
+    return { reason: 'degenerate_length', details: [`kept ${kept.length}/${script.clauses.length} clauses = ${words} words (band ${MIN_SCRIPT_WORDS}–${MAX_SCRIPT_WORDS})`] }
   }
 
-  return { ok: true }
+  return { ok: true, script: filtered }
 }
 
 /**
@@ -243,7 +262,8 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
     // 2. Claim-structured script over the closed facts[].
     const script = await deps.script.writeScript(job, facts)
 
-    // 3+4. HONESTY + DEFAMATION gates BEFORE any synthesis. Fail-closed: drop the episode, no audio.
+    // 3+4. HONESTY (drop-and-keep) + DEFAMATION gates BEFORE any synthesis. On a defamation / degenerate-length
+    //      block, ship NOTHING. Otherwise `validated` is the honesty-filtered script — ONLY its clauses are voiced.
     const verdict = validateScript(script, deps)
     if ('reason' in verdict) {
       // Mark failed so the lease isn't stuck; never publish an asset; never call TTS/Muxer.
@@ -255,9 +275,10 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
         audioProduced: false,
       }
     }
+    const validated = verdict.script
 
-    // 5. Only now — validated script → ONE multi-speaker TTS call → mux → HLS.
-    const { audio, durationSec } = await deps.tts.synthesize(script)
+    // 5. Only now — the VALIDATED (filtered) script → ONE multi-speaker TTS call → mux → HLS.
+    const { audio, durationSec } = await deps.tts.synthesize(validated)
     const { playlistKey, segmentKeys } = await deps.muxer.assemble({
       catalogItemId,
       version,
@@ -271,8 +292,8 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
       playlistKey,
       segmentKeys,
       durationSec,
-      // The validated (honesty+defamation-passed) script IS the read-along transcript — no separate source.
-      transcript: script.clauses.map((c) => ({ speaker: c.speaker === 'arlo' ? 'ARLO' : 'MAVE', text: c.text })),
+      // The VALIDATED (honesty-filtered + defamation-passed) script IS the read-along transcript — no separate source.
+      transcript: validated.clauses.map((c) => ({ speaker: c.speaker === 'arlo' ? 'ARLO' : 'MAVE', text: c.text })),
     }
     await deps.store.putAsset(asset)
 

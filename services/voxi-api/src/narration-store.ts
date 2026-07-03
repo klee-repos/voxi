@@ -37,4 +37,10 @@ export class NarrationStore {
     const prefix = `sess_${userId}_`
     for (const sid of [...this.byId.keys()]) if (sid.startsWith(prefix)) this.byId.delete(sid)
   }
+
+  /** Delete/regenerate hygiene for ONE session: drop its pinned buckets so a fresh re-run re-pins new text
+   *  (pin-once would otherwise keep voicing the stale narration after a regenerate re-identifies the object). */
+  purgeSession(sessionId: string): void {
+    this.byId.delete(sessionId)
+  }
 }

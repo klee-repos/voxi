@@ -10,9 +10,8 @@
  *
  * Run: `bun services/voxi-podcast-worker/src/server.ts` (from repo root so .env.local loads the vendor keys).
  */
-import { renderPodcast, memoryAssetStore, type PodcastJob, type RenderDeps } from './render'
-import { ElevenLabsTts } from './live-tts'
-import { GeminiResearchProvider, GeminiScriptProvider, FfmpegMuxer } from './providers'
+import { renderPodcast, memoryAssetStore, type PodcastJob } from './render'
+import { buildProductionDeps } from './production-deps'
 import { mkdirSync } from 'node:fs'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 
@@ -28,13 +27,9 @@ mkdirSync(OUT_DIR, { recursive: true })
 
 const store = memoryAssetStore()
 const jobs = new Map<string, { catalogItemId: string; version: number; subject: string }>() // token → job
-const deps: RenderDeps = {
-  research: new GeminiResearchProvider(),
-  script: new GeminiScriptProvider(),
-  tts: new ElevenLabsTts(),
-  muxer: new FfmpegMuxer(OUT_DIR),
-  store,
-}
+// Assembled via the testable factory so the flavor-auditor wiring (detectNamedClaim) is asserted in tests, not
+// silently dropped here as it was before (the honesty hole D1 fixed).
+const deps = buildProductionDeps({ outDir: OUT_DIR, store })
 
 const fileFor = (item: string, version: number) => `${OUT_DIR}/${item.replace(/[^\w.-]/g, '_')}__v${version}.mp3`
 const audioUrlFor = (item: string, version: number) => `${PUBLIC_BASE}/audio/${encodeURIComponent(item)}/v${version}/episode.mp3`

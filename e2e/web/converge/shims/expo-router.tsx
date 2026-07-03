@@ -61,7 +61,12 @@ export function Redirect(): null {
   return null
 }
 
-const norm = (h: string): string => String(h).split('?')[0] ?? String(h)
+// Accept both string hrefs and expo-router object hrefs (`{ pathname, params }`) — the auth screens use the
+// object form for the sign-up↔sign-in switch (email prefill). Extract the pathname; drop the query.
+const norm = (h: unknown): string => {
+  const raw = typeof h === 'string' ? h : ((h as { pathname?: string } | null)?.pathname ?? '/')
+  return raw.split('?')[0] ?? raw
+}
 
 /**
  * Minimal real router for the flow harness: swaps the rendered screen on navigation.

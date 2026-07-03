@@ -9,11 +9,29 @@ import { test, expect, describe } from 'bun:test'
 import { loadPrompt, renderPrompt } from './prompts'
 import { researchPrompt, type ResearchInput } from './providers/live-research'
 
-// ── identify_object (VLM) — a static prompt ──────────────────────────────────────────────────────────────
-test('identify-object.md matches the single-primary + display_title prompt verbatim', () => {
-  const original =
-    `Identify the SINGLE most prominent human-made object in this image — the subject in focus, in the foreground, largest, or what a person would say the photo is "of". Ignore background and incidental objects. Identify THAT object AS SPECIFICALLY AS POSSIBLE — exact make, model, and year/generation if determinable (e.g. '2008 Cannondale SuperSix EVO', NOT 'bike'). Read any badges, logos, stamps, or text on it EXACTLY as written — letter by letter, even when the text is curved around a logo, rotated, or sideways — and never GUESS a word from the object's category (a coffee mug may be branded by a record label or a shop, not a coffee brand). Also return display_title: the ONE object as a clean, confident human noun phrase (2–5 words, Title Case) — what a person would call it. Name the OBJECT, never its colour, material, or pattern (a blue plywood board is 'Plywood Board', NOT 'Parliament Blue'). NEVER use filler or non-answer words (unspecified, unknown, generic, assorted, various, possibly, unbranded, N/A) and NEVER a hedged 'X or Y'; if you cannot identify a specific make/model, name it at the CATEGORY level as a real noun phrase (e.g. 'Plywood Board', 'Ceramic Mug', 'Office Chair'). No size/spec/quantity noise (e.g. 'La Croix Sparkling Water', 'Canon AE-1', NOT 'aluminium beverage can'). Also return subject_note: a short phrase naming which object you chose if the scene has several. Set fine_confidence 0..1 for how sure you are of the exact make+model. Return JSON only.`
-  expect(loadPrompt('identify-object.md')).toBe(original)
+// ── identify_object (VLM) — a static prompt. The byte-exact golden was retired when the ARTWORK & ARTIFACT LANE
+//    was added (§F5, museum eval); we now pin the load-bearing INVARIANTS so a future edit can't silently drop the
+//    make/model, OCR, filler-ban, JSON, or art-lane guidance (the drift-guard survives, the brittleness doesn't). ──
+describe('identify-object.md — load-bearing invariants', () => {
+  const p = loadPrompt('identify-object.md')
+  test('keeps the exact make/model/year guidance', () => {
+    expect(p).toContain('exact make, model, and year/generation')
+    expect(p).toContain('2008 Cannondale SuperSix EVO')
+  })
+  test('keeps the OCR (read text exactly) guidance', () => {
+    expect(p).toMatch(/Read any badges, logos, stamps, or text on it EXACTLY/)
+  })
+  test('keeps the filler-word ban and the JSON contract', () => {
+    expect(p).toMatch(/NEVER use filler or non-answer words/)
+    expect(p).toContain('Return JSON only')
+    expect(p).toContain('display_title')
+  })
+  test('adds the ARTWORK & ARTIFACT LANE (a painting is the work, not a thing depicted in it)', () => {
+    expect(p).toContain('ARTWORK & ARTIFACT LANE')
+    expect(p).toMatch(/the painting is/i)
+    expect(p).toContain('The Starry Night')
+    expect(p).toMatch(/artist \/ maker \/ culture/i)
+  })
 })
 
 // ── narration.system — the original array build, reproduced exactly ──────────────────────────────────────

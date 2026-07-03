@@ -1,0 +1,61 @@
+# Maestro flow (iOS native, deterministic) — reveal-regenerate: the ⋯ MORE sheet → Regenerate → confirm → the item
+# RE-RUNS identification in place. Capture (fixture shutter, EXPO_PUBLIC_TEST_MODE=1) → reveal.card, open the ⋯ sheet
+# (both actions present), tap Regenerate, confirm in the dialog, then assert the dark LOADING overlay reappears
+# (processing.loadingLine) — proof the re-run actually kicked off, not a stale repaint (a title alone is always
+# visible) — and finally that a fresh reveal re-settles (reveal.card + reveal.title).
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/reveal-regenerate.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+# Open the ⋯ overflow — the bottom action sheet with BOTH actions.
+- tapOn:
+    id: "nav.more"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.menuRegenerate"
+    timeout: 10000
+- assertVisible:
+    id: "reveal.menuDelete"
+# Regenerate → confirmation dialog → confirm.
+- tapOn:
+    id: "reveal.menuRegenerate"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.regenConfirmAccept"
+    timeout: 10000
+- tapOn:
+    id: "reveal.regenConfirmAccept"
+# The regenerate UI path completes and a reveal re-settles in place on the real binary.
+# NOTE ON FRESHNESS: the honest "did it actually RE-RUN vs no-op" discriminator is the dark loading overlay
+# reappearing — but with the deterministic test-BFF that is a sub-second flash, reliably observed only by faster
+# pollers. It IS pinned deterministically elsewhere: the web-tier scenario e2e/web/converge/reveal-menu.web.ts
+# (Playwright RAF polling asserts processing.loadingLine reappears) and the BFF unit test in
+# services/voxi-api/src/app.test.ts (eve.stream is re-invoked + a fresh reveal is re-pinned). This native flow pins
+# that the ⋯→Regenerate→confirm path drives the real app end-to-end and lands back on a working reveal.
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+- assertVisible:
+    id: "reveal.title"

@@ -268,6 +268,17 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
     async markPhoto(threadId, mime) {
       await db.query(`UPDATE threads SET photo_mime = $2 WHERE thread_id = $1`, [threadId, mime])
     },
+
+    // Owner-scoped delete (item-delete cascade, LAST step / the ACL anchor).
+    async deleteOwned(threadId, ownerUserId) {
+      await db.query(`DELETE FROM threads WHERE thread_id = $1 AND owner_user_id = $2`, [threadId, ownerUserId])
+    },
+
+    // Regenerate: clear the denormalized band + reveal_title so the tile isn't stuck on the old label until the
+    // fresh reveal re-pins. NEVER touches `title` (the auto-title), mirroring applyReveal (A8). Owner-scoped.
+    async resetReveal(threadId, ownerUserId) {
+      await db.query(`UPDATE threads SET band = NULL, reveal_title = NULL WHERE thread_id = $1 AND owner_user_id = $2`, [threadId, ownerUserId])
+    },
   }
 
   const photos: PhotoStore = {
@@ -291,6 +302,9 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
     async has(threadId) {
       const res = await db.query<{ one: number }>(`SELECT 1 AS one FROM thread_photos WHERE thread_id = $1`, [threadId])
       return res.rows.length > 0
+    },
+    async delete(threadId) {
+      await db.query(`DELETE FROM thread_photos WHERE thread_id = $1`, [threadId])
     },
   }
 
@@ -342,6 +356,9 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
         createdAt: 0,
       }
     },
+    async delete(threadId) {
+      await db.query(`DELETE FROM reveals WHERE thread_id = $1`, [threadId])
+    },
   }
 
   const podcasts: PodcastAssetStore = {
@@ -381,6 +398,10 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
       )
       return res.rows[0] ? rowToPodcast(res.rows[0]) : null
     },
+    // OWNER-SCOPED (catalog_item_id is not user-unique for a global id) — deletes every version for this item.
+    async deleteByItem(catalogItemId, userId) {
+      await db.query(`DELETE FROM podcast_assets WHERE catalog_item_id = $1 AND user_id = $2`, [catalogItemId, userId])
+    },
   }
 
   const messages: MessageStore = {
@@ -411,6 +432,9 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
       )
       return res.rows.map(rowToMessage)
     },
+    async deleteByThread(threadId) {
+      await db.query(`DELETE FROM messages WHERE thread_id = $1`, [threadId])
+    },
   }
 
   const refunds: RefundStore = {
@@ -420,6 +444,9 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
         [threadId, Date.now()],
       )
       return res.rows.length > 0 // true only the FIRST time → the caller proceeds with the credit
+    },
+    async delete(threadId) {
+      await db.query(`DELETE FROM refunds WHERE thread_id = $1`, [threadId])
     },
   }
 

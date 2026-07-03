@@ -74,3 +74,6 @@ CLAUDE.md
 
 # Isolated app-icon generator deps (scripts/icons is not a workspace)
 scripts/icons/node_modules/
+
+# Museum eval fixtures — large binaries, re-fetched + sha1-verified via bun run museum:fixtures (manifest is committed)
+e2e/judge/museum/fixtures/

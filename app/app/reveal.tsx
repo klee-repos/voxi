@@ -20,6 +20,8 @@ import { AppHeader } from '../src/components/AppHeader'
 import { Orb } from '../src/components/Orb'
 import { OfflineBanner, SafetyRefusal } from '../src/components/Banners'
 import { BucketDock, BucketCard, type DockKey, type AudioState } from '../src/components/RevealDock'
+import { RevealMoreMenu } from '../src/components/RevealMoreMenu'
+import { ConfirmDialog } from '../src/components/ConfirmDialog'
 import { GlassFill } from '../src/components/GlassFill'
 import { LoadingOverlay } from '../src/components/LoadingOverlay'
 import { CaptureOrb } from '../src/components/CaptureOrb'
@@ -36,7 +38,7 @@ import { threadsKey } from '../src/lib/queryKeys'
 import { pageableThreads } from '../src/lib/collectionOrder'
 import { beginThreadStream, consumeThreadStream, type StreamActions } from '../src/lib/threadStream'
 import { useThreadStreamRun } from '../src/lib/useThreadStreamRun'
-import { cacheReveal, getCachedReveal } from '../src/lib/revealCache'
+import { cacheReveal, getCachedReveal, evictReveal } from '../src/lib/revealCache'
 import { createCameraPermission, type CameraPermissionStatus } from '../src/lib/cameraPermission'
 import { toDataUri } from '../src/lib/photo'
 import { isTestMode, getTestSeed } from '../src/lib/testSeed'
@@ -51,8 +53,9 @@ import type { Edge } from 'react-native-safe-area-context'
 // Screen must NOT also inset the bottom — otherwise a strip of photo shows beneath the dock (the "gap").
 const FULL_BLEED_EDGES: readonly Edge[] = ['top', 'left', 'right']
 
-/** A research bucket maps 1:1 to its audio bucket (DockKey minus the conversation icon, which navigates). */
-type ResearchKey = Exclude<DockKey, 'conversation'>
+/** A research bucket maps 1:1 to its audio bucket — the morph buckets only (both `conversation` and `deepdive`
+ *  NAVIGATE, so neither leaks into the morph-card / audio-bucket / deriveBucketStatus paths; adversarial D4). */
+type ResearchKey = Exclude<DockKey, 'conversation' | 'deepdive'>
 
 // Page 0 of the ONE home pager is the LIVE VIEWFINDER (the fixed CameraView shows through a transparent page).
 // Pages 1..N are the catalogued items. Sliding viewfinder⇄item is pure scrolling — no navigation, no screen
@@ -74,6 +77,17 @@ function RevealBody(): React.ReactElement {
   const isRevisit = useCaptureStore((s) => s.isRevisit)
   const reset = useCaptureStore((s) => s.reset)
   const setError = useCaptureStore((s) => s.setError)
+
+  // A durable Deep Dive episode already? → the dock icon shows a "ready" dot so a tap reads as replay (free), not
+  // generate (spends a credit) — cost transparency (adversarial D7). Fires GET /v1/threads/:id (the podcast field,
+  // uncalled elsewhere in the app) once we're on an item; staleTime avoids refetch spam.
+  const deepDiveReady =
+    useQuery({
+      queryKey: ['deepDiveReady', threadId],
+      queryFn: async () => (threadId ? (await api.getThread(threadId)).podcast?.state === 'ready' : false),
+      enabled: !!threadId,
+      staleTime: 30_000,
+    }).data ?? false
 
   // ---- VIEWFINDER (page 0): the live camera + capture, merged in so camera⇄item is ONE pager (no navigation). ----
   const queryClient = useQueryClient()
@@ -173,6 +187,11 @@ function RevealBody(): React.ReactElement {
   // The "how sure / correct + generate story + add a tip" details are one tap away, never a default panel.
   const [showDetails, setShowDetails] = useState(false)
   const [correction, setCorrection] = useState('')
+  // ⋯ MORE menu (item pages): the sheet, its two confirm dialogs, and an in-flight guard so a slow delete/regen
+  // can't be double-submitted.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirm, setConfirm] = useState<null | 'delete' | 'regenerate'>(null)
+  const [actionBusy, setActionBusy] = useState(false)
 
   // ---- Per-bucket audio (ANALYSIS-UX §5.C). Each clip is server-owned + synthesized lazily on first open (never
   //      pre-fetched for all four). Autoplay is best-effort, gated on the "Speak results aloud" pref. ----
@@ -391,10 +410,60 @@ function RevealBody(): React.ReactElement {
     [winW, winH, curIdx, threadId, photoUri, surface.card, surface.bg, surface.textMuted],
   )
 
-  // An item's "back" slides to the VIEWFINDER in place (page 0) — never a route change.
-  const mediaBackHeader = <AppHeader leading="back" onMedia onLeadingPress={toViewfinder} />
+  // An item's "back" slides to the VIEWFINDER in place (page 0) — never a route change. The ⋯ opens the MORE sheet.
+  const mediaBackHeader = (
+    <AppHeader leading="back" onMedia onLeadingPress={toViewfinder} showMore={!!threadId} onMore={() => { haptics.tick(); setMenuOpen(true) }} />
+  )
   // Discard a failed capture and return to the viewfinder (clears the errored item from the store).
   const discardCapture = (): void => { reset(); setCurrentIndex(0) }
+
+  // ⋯ DELETE (two-step: the menu row opened the confirm dialog; only the dialog's destructive button reaches here).
+  // Clear the store threadId (else the synthetic-current pager page at `pages` resurrects the just-deleted item) and
+  // slide to the viewfinder IN PLACE — the reveal IS the camera tab, so there is no back stack on a fresh capture and
+  // router.back would dead-click. A 404 (already gone) is success-equivalent; any other error keeps the item.
+  const onConfirmDelete = useCallback(async (): Promise<void> => {
+    const id = useCaptureStore.getState().threadId
+    if (!id) { setConfirm(null); return }
+    setActionBusy(true)
+    try {
+      await api.deleteThread(id)
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) { haptics.error(); setActionBusy(false); setConfirm(null); return }
+    }
+    evictReveal(id)
+    reset()
+    setConfirm(null); setActionBusy(false)
+    toViewfinder()
+    // Collection hygiene AFTER leaving the item (doing it before would shrink the pager list mid-scroll and break the
+    // viewfinder transition): optimistically drop the item from the collection cache — the tile disappears instantly
+    // and the collection reads empty deterministically (no refetch race) — then invalidate for server-truth.
+    queryClient.setQueryData<{ threads: ThreadSummary[] }>(threadsKey, (old) => (old ? { threads: old.threads.filter((t) => t.threadId !== id) } : old))
+    void queryClient.invalidateQueries({ queryKey: threadsKey })
+    haptics.tick()
+  }, [api, queryClient, reset, toViewfinder])
+
+  // ⋯ REGENERATE: re-run identification for the SAME thread. Evict the in-session cache (else a swipe-back re-hydrates
+  // the stale reveal), reset the reveal slice while KEEPING the photo (startCapture clears band/researchComplete and
+  // isRevisit), then FORCE a fresh stream — threadId is unchanged so the run effect won't re-fire on its own, so
+  // run.retry() drives the live cascade and the dark LoadingOverlay reappears (proof the re-run actually happened).
+  const onConfirmRegenerate = useCallback(async (): Promise<void> => {
+    const id = useCaptureStore.getState().threadId
+    const photo = useCaptureStore.getState().photoUri
+    if (!id) { setConfirm(null); return }
+    setActionBusy(true)
+    try {
+      await api.regenerateThread(id)
+    } catch {
+      haptics.error(); setActionBusy(false); setConfirm(null); return
+    }
+    evictReveal(id)
+    void queryClient.invalidateQueries({ queryKey: threadsKey })
+    startCapture(photo)
+    setThread(id)
+    setConfirm(null); setActionBusy(false)
+    run.retry()
+    haptics.tick()
+  }, [api, queryClient, startCapture, setThread, run])
 
   // ---- ERROR / REFUSAL: a failed capture → a full-screen apology + "Try another photo" back to the viewfinder. ----
   if (outcome === 'failure' || outcome === 'refusal') {
@@ -437,6 +506,7 @@ function RevealBody(): React.ReactElement {
   const openDock = (k: DockKey): void => {
     haptics.tick()
     if (k === 'conversation') { router.push('/conversation'); return } // blue lane → the full conversation screen
+    if (k === 'deepdive') { router.push('/podcast'); return } // green audio lane → the on-demand Deep Dive player
     const status = statuses[k]
     if (status === 'hidden' || status === 'loading') return // nothing to open yet
     if (status === 'unavailable') { router.replace('/processing') ; return } // resume the dropped research stream
@@ -531,7 +601,7 @@ function RevealBody(): React.ReactElement {
                   <Title {...tid(ids.reveal.title)}>{title || 'An object of some interest'}</Title>
                 </Pressable>
 
-                <BucketDock statuses={statuses} factCount={facts.length} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
+                <BucketDock statuses={statuses} factCount={facts.length} deepDiveReady={deepDiveReady} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
 
                 {showDetails ? (
                   <View style={styles.details}>
@@ -657,6 +727,47 @@ function RevealBody(): React.ReactElement {
           </>
         )
       ) : null}
+
+      {/* ⋯ MORE sheet + its two confirm dialogs — overlays on a cataloged item page (never the viewfinder). Delete
+          is a TWO-STEP destructive flow: the sheet's Delete row opens the confirm dialog; only its destructive
+          button commits. Both sit above every other layer via their own zIndex. */}
+      <RevealMoreMenu
+        visible={menuOpen && !onViewfinder}
+        surface={dark}
+        reduceMotion={reduceMotion}
+        onRegenerate={() => { setMenuOpen(false); setConfirm('regenerate') }}
+        onDelete={() => { setMenuOpen(false); setConfirm('delete') }}
+        onClose={() => setMenuOpen(false)}
+      />
+      <ConfirmDialog
+        visible={confirm === 'regenerate'}
+        surface={dark}
+        reduceMotion={reduceMotion}
+        title="Regenerate this identification?"
+        message="I'll take a fresh look. The current write-up and narration will be replaced."
+        confirmLabel="Regenerate"
+        busy={actionBusy}
+        onConfirm={() => void onConfirmRegenerate()}
+        onCancel={() => setConfirm(null)}
+        dialogTestId={ids.reveal.regenConfirm}
+        cancelTestId={ids.reveal.regenConfirmCancel}
+        confirmTestId={ids.reveal.regenConfirmAccept}
+      />
+      <ConfirmDialog
+        visible={confirm === 'delete'}
+        surface={dark}
+        reduceMotion={reduceMotion}
+        title="Delete this item?"
+        message="This removes the photo, the identification, and any story or conversation. It can't be undone."
+        confirmLabel="Delete"
+        destructive
+        busy={actionBusy}
+        onConfirm={() => void onConfirmDelete()}
+        onCancel={() => setConfirm(null)}
+        dialogTestId={ids.reveal.deleteConfirm}
+        cancelTestId={ids.reveal.deleteConfirmCancel}
+        confirmTestId={ids.reveal.deleteConfirmAccept}
+      />
     </Screen>
   )
 }

@@ -1,0 +1,98 @@
+# Maestro flow (iOS native, deterministic) — auth-signup: the full account-creation journey on the native binary.
+# Landing → "Get started" → /sign-up (email → 6-digit code, NO consent checkboxes) → the real first-run onboarding
+# (meet → allow camera → allow mic → finish) → the camera. The FakeAuth seam accepts any code; a NEW email lands on
+# first-run (sign-up is the only path that onboards). Proves the separated create-account flow end to end.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-signup.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?auth=fresh"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "welcome.getStarted"
+    timeout: 30000
+# --- create the account ---
+- tapOn:
+    id: "welcome.getStarted"
+- extendedWaitUntil:
+    visible:
+      id: "auth.emailInput"
+    timeout: 15000
+- tapOn:
+    id: "auth.emailInput"
+- inputText: "newcomer@voxi.test"
+- tapOn:
+    id: "auth.continue"
+# The code screen's CodeInput auto-focuses, so type straight into it — no tapOn (the iOS-26.3 XCUITest driver
+# can't introspect the hierarchy while the number-pad is up). The 6th digit auto-submits (onComplete) and the
+# post-verify effect navigates. Reaching first-run below is the end-to-end proof the code verified + signed in.
+- waitForAnimationToEnd:
+    timeout: 5000
+- inputText: "424242"
+- waitForAnimationToEnd:
+    timeout: 5000
+# --- first-run onboarding (keyboard dismissed here → the driver can introspect again) ---
+- extendedWaitUntil:
+    visible:
+      id: "firstRun.meetVoxiNext"
+    timeout: 30000
+- tapOn:
+    id: "firstRun.meetVoxiNext"
+- extendedWaitUntil:
+    visible:
+      id: "firstRun.cameraPrimeAllow"
+    timeout: 15000
+- tapOn:
+    id: "firstRun.cameraPrimeAllow"
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "firstRun.micPrimeAllow"
+    timeout: 15000
+- tapOn:
+    id: "firstRun.micPrimeAllow"
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "firstRun.privacyAck"
+    timeout: 15000
+- tapOn:
+    id: "firstRun.privacyAck"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 30000

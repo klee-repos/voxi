@@ -67,6 +67,8 @@ export function buildLocalCollaborators(opts: { photoPurge?: (userId: string) =>
     async put(r) { threadRows.set(r.threadId, r) },
     async listByOwner(u) { return [...threadRows.values()].filter((r) => r.ownerUserId === u).sort((a, b) => b.createdAt - a.createdAt) },
     async get(id) { return threadRows.get(id) ?? null },
+    async deleteOwned(id, ownerUserId) { const r = threadRows.get(id); if (r && r.ownerUserId === ownerUserId) threadRows.delete(id) },
+    async resetReveal(id, ownerUserId) { const r = threadRows.get(id); if (r && r.ownerUserId === ownerUserId) threadRows.set(id, { ...r, band: null, revealTitle: null }) },
   }
   const store = opts.durable?.store ?? inMemStore
   const threads = opts.durable?.threads ?? inMemThreads

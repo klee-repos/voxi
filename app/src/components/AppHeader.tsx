@@ -22,7 +22,7 @@ import React from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronLeft, X, Menu } from 'lucide-react-native'
+import { ChevronLeft, X, Menu, MoreHorizontal } from 'lucide-react-native'
 import { Wordmark } from './ui'
 import { ids, tid } from '../lib/testid'
 import { space, hit, typeStyles } from '../lib/theme'
@@ -40,6 +40,8 @@ export function AppHeader({
   showWordmark = false,
   onMedia = false,
   fallback = '/(tabs)/camera',
+  showMore = false,
+  onMore,
 }: {
   leading?: 'back' | 'menu' | 'none'
   /** render the dismiss X in the right slot (modals). */
@@ -54,6 +56,10 @@ export function AppHeader({
   onMedia?: boolean
   /** guarded-dismiss target when there's no back-stack (deep-link / web reload). */
   fallback?: string
+  /** render the ⋯ overflow in the right slot (the reveal item header → opens the MORE action sheet). Mutually
+   *  exclusive with the close X in practice (a media/back header has no X). */
+  showMore?: boolean
+  onMore?: () => void
 }): React.ReactElement {
   const { surface } = useTheme()
   const { open, isOpen } = useDrawer()
@@ -107,6 +113,10 @@ export function AppHeader({
         {showX ? (
           <Pressable {...tid(ids.nav.close, 'Close')} accessibilityRole="button" onPress={closeHandler} hitSlop={12} style={ctrlStyle}>
             <X size={24} color={tint} strokeWidth={2.5} />
+          </Pressable>
+        ) : showMore ? (
+          <Pressable {...tid(ids.nav.more, 'More actions')} accessibilityRole="button" onPress={onMore} hitSlop={12} style={ctrlStyle}>
+            <MoreHorizontal size={24} color={tint} strokeWidth={2.5} />
           </Pressable>
         ) : (
           <View style={styles.ctrl} />

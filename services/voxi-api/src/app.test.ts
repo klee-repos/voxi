@@ -9,6 +9,8 @@ import { testVerifier } from './auth'
 import { authorizeRead } from './signing'
 import { memoryStore } from './metering'
 import { memoryEntitlementStore, type AppleJwsVerifier } from './appstore'
+import { buildPgStores, type PgStores } from './pg-stores'
+import { PGlite } from '@electric-sql/pglite'
 
 process.env.VOXI_TEST_MODE = '1'
 
@@ -252,5 +254,146 @@ describe('BFF — spoken reveal /v1/threads/:id/speech', () => {
   })
   test('403 owner ACL applies to a bucket route too (no per-bucket leak)', async () => {
     expect((await postBucket(buildSpeech().app, 'facts', 'B')).status).toBe(403)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// DELETE /v1/threads/:id + POST /v1/threads/:id/regenerate — the item lifecycle. Wired against REAL pg-stores (an
+// in-memory PGlite) so the cascade + first-write-wins reveal semantics are exercised for real, with a controllable
+// fake eve that (a) streams a CONFIDENT reveal so it PERSISTS, (b) counts stream() calls so we can prove regenerate
+// RE-RUNS the cascade vs a revisit that REPLAYS, and (c) can be flipped to a pre-band hard_failure to prove the free
+// re-run never CREDITS a scan. Corrections from the adversarial review are encoded as assertions: same-process
+// non-owner is 403 (not 404); a failed free regenerate must not credit; regenerate re-pins fresh, observable content.
+// ---------------------------------------------------------------------------
+describe('BFF — delete + regenerate a cataloged item', () => {
+  async function buildLifecycle() {
+    const db = await PGlite.create() // ephemeral in-memory DB per test
+    const durable: PgStores = await buildPgStores(db)
+    let streamCalls = 0
+    let titleN = 0
+    let failMode = false
+    const purged: string[] = []
+    const primed: string[] = []
+    const eve = {
+      async createSession({ userId }: { userId: string }) { return { sessionId: `sess_${userId}_1`, continuationToken: 'ct' } },
+      async *stream(sessionId: string): AsyncIterable<string> {
+        streamCalls++
+        if (failMode) {
+          yield JSON.stringify({ type: 'error', index: 0, code: 'hard_failure', message: 'boom' })
+          yield JSON.stringify({ type: 'done', index: 1, sessionId })
+          return
+        }
+        titleN++
+        yield JSON.stringify({ type: 'token', index: 0, text: 'A bicycle.' })
+        yield JSON.stringify({ type: 'confidence_band', index: 1, band: 'CONFIDENT', title: `Cannondale v${titleN}`, candidates: [] })
+        yield JSON.stringify({ type: 'done', index: 2, sessionId })
+      },
+      purgeSession(sid: string) { purged.push(sid) },
+      primeSession(sid: string) { primed.push(sid) },
+    }
+    const deps: Deps = {
+      verifier: testVerifier,
+      store: durable.store,
+      eve,
+      deletion: { async cascade() { return { deleted: [] } } },
+      bucket: 'voxi-photos',
+      sessionOwner: new Map<string, string>(),
+      threads: durable.threads,
+      photos: durable.photos,
+      reveals: durable.reveals,
+      podcasts: durable.podcasts,
+      messages: durable.messages,
+      refunds: durable.refunds,
+    }
+    return {
+      app: createApp(deps),
+      durable,
+      close: () => db.close(),
+      streamCalls: () => streamCalls,
+      setFail: (v: boolean) => { failMode = v },
+      purged,
+      primed,
+    }
+  }
+  const create = async (app: ReturnType<typeof createApp>, u: string) => {
+    const r = await app.request('/v1/threads', { method: 'POST', headers: { ...auth(u), 'content-type': 'application/json' }, body: JSON.stringify({ photoUrl: 'data:image/jpeg;base64,AAAA' }) })
+    return (await r.json()).threadId as string
+  }
+  const drain = (app: ReturnType<typeof createApp>, id: string, u: string) => app.request(`/v1/threads/${id}/stream`, { headers: auth(u) }).then((r) => r.text())
+  const scanRemaining = async (app: ReturnType<typeof createApp>, u: string) => (await (await app.request('/v1/me', { headers: auth(u) })).json()).remaining.scan as number
+
+  test('delete: owner → 204 with item + children gone; non-owner same-process → 403; repeat delete → 404', async () => {
+    const h = await buildLifecycle()
+    const id = await create(h.app, 'A')
+    await drain(h.app, id, 'A') // pins the durable reveal
+    await h.app.request(`/v1/threads/${id}/messages`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ role: 'user', text: 'hi' }) })
+    expect((await h.durable.messages.listByThread(id)).length).toBe(1)
+    expect((await h.app.request(`/v1/threads/${id}`, { headers: auth('A') })).status).toBe(200)
+
+    // Adversarial correction: a same-process non-owner is 403 (sessionOwner map knows A), NOT 404.
+    expect((await h.app.request(`/v1/threads/${id}`, { method: 'DELETE', headers: auth('B') })).status).toBe(403)
+
+    // Owner delete → 204, and every per-item trace is gone.
+    expect((await h.app.request(`/v1/threads/${id}`, { method: 'DELETE', headers: auth('A') })).status).toBe(204)
+    expect((await h.app.request(`/v1/threads/${id}`, { headers: auth('A') })).status).toBe(404) // detail gone
+    const list = await (await h.app.request('/v1/threads', { headers: auth('A') })).json()
+    expect(list.threads.find((t: { threadId: string }) => t.threadId === id)).toBeUndefined() // list excludes it
+    expect(await h.durable.reveals.get(id)).toBeNull() // reveal cleared
+    expect(await h.durable.photos.get(id)).toBeNull() // photo bytes gone
+    expect((await h.durable.messages.listByThread(id)).length).toBe(0) // conversation gone
+    expect(h.purged).toContain(id) // eve in-process photo + narration purged
+
+    // Idempotent: deleting again is a 404 (thread row + ownership map entry are gone).
+    expect((await h.app.request(`/v1/threads/${id}`, { method: 'DELETE', headers: auth('A') })).status).toBe(404)
+    await h.close()
+  })
+
+  test('delete: an unknown id → 404 (never leaks / never-existed)', async () => {
+    const h = await buildLifecycle()
+    expect((await h.app.request('/v1/threads/sess_A_nope/', { method: 'DELETE', headers: auth('A') })).status).toBe(404)
+    expect((await h.app.request('/v1/threads/sess_A_nope', { method: 'DELETE', headers: auth('A') })).status).toBe(404)
+    await h.close()
+  })
+
+  test('regenerate: owner → 200 clears the reveal so the next /stream RE-RUNS (not replay) + re-pins fresh; non-owner → 403', async () => {
+    const h = await buildLifecycle()
+    const id = await create(h.app, 'A')
+    await drain(h.app, id, 'A')
+    expect(h.streamCalls()).toBe(1) // first drain ran the cascade + pinned "Cannondale v1"
+    await drain(h.app, id, 'A')
+    expect(h.streamCalls()).toBe(1) // a plain revisit REPLAYS the durable reveal — eve.stream NOT called again
+
+    expect((await h.app.request(`/v1/threads/${id}/regenerate`, { method: 'POST', headers: auth('B') })).status).toBe(403) // non-owner
+    expect((await h.app.request(`/v1/threads/${id}/regenerate`, { method: 'POST', headers: auth('A') })).status).toBe(200)
+    expect(await h.durable.reveals.get(id)).toBeNull() // durable reveal cleared (first-write-wins unblocked)
+    expect(h.primed).toContain(id) // photo re-seeded + narration pin cleared
+
+    await drain(h.app, id, 'A')
+    expect(h.streamCalls()).toBe(2) // the reveal was gone → eve.stream RE-RAN the live cascade (not a replay)
+    const fresh = await h.durable.reveals.get(id)
+    expect(fresh?.title).toBe('Cannondale v2') // a genuinely fresh reveal was re-pinned (observable delta)
+    await h.close()
+  })
+
+  test('regenerate is FREE: the scan meter is not decremented (locks D5)', async () => {
+    const h = await buildLifecycle()
+    const id = await create(h.app, 'A')
+    await drain(h.app, id, 'A')
+    const before = await scanRemaining(h.app, 'A')
+    expect((await h.app.request(`/v1/threads/${id}/regenerate`, { method: 'POST', headers: auth('A') })).status).toBe(200)
+    expect(await scanRemaining(h.app, 'A')).toBe(before) // no charge
+    await h.close()
+  })
+
+  test('regenerate that hard-fails does NOT credit a scan (refund latch pre-consumed — the free-money bug)', async () => {
+    const h = await buildLifecycle()
+    const id = await create(h.app, 'A')
+    await drain(h.app, id, 'A') // original scan succeeded → its refund slot was never consumed
+    const before = await scanRemaining(h.app, 'A')
+    await h.app.request(`/v1/threads/${id}/regenerate`, { method: 'POST', headers: auth('A') }) // latches the refund guard
+    h.setFail(true) // the re-run will emit a pre-band hard_failure
+    await drain(h.app, id, 'A') // the /stream refund tap would credit +1 here WITHOUT the latch
+    expect(await scanRemaining(h.app, 'A')).toBe(before) // meter unchanged — neither charged nor spuriously credited
+    await h.close()
   })
 })

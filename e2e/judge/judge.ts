@@ -29,7 +29,7 @@ const SCHEMA = {
   required: ['score', 'reasons'],
 }
 
-export type RubricKey = 'title' | 'description' | 'facts' | 'what' | 'purpose' | 'maker'
+export type RubricKey = 'title' | 'description' | 'facts' | 'what' | 'purpose' | 'maker' | 'museum_identity' | 'museum_enrichment'
 
 const RUBRICS: Record<RubricKey, string> = {
   title:
@@ -62,6 +62,22 @@ const RUBRICS: Record<RubricKey, string> = {
     'RELATIONSHIP the evidence supports (branded by / merch from / released by) and must NOT over-claim manufacture ' +
     '("made by X") of a merch/branded item unless a real manufacturer is named — penalise an unsupported "made by". An ' +
     'honest empty ("the maker keeps their counsel") ≈ 0.5; a generic/wrong maker is 0. Score 0..1.',
+  // Museum eval (§F4). The sample carries the GROUND TRUTH so the judge scores correctness against a known answer.
+  museum_identity:
+    'You are grading whether a real-world-object identifier CORRECTLY IDENTIFIED a famous museum object from a photo. ' +
+    'The sample gives you the GROUND TRUTH (title, maker, year, category) AND the identifier\'s output (band, title, ' +
+    'what-it-is). A great score (1.0) = it named THIS specific work/object AND its maker correctly and confidently. ' +
+    'Partial credit for the right object but a missing/vague maker or an over-hedge. Score 0 for a WRONG object or a ' +
+    'bare category ("a painting", "a statue"). An honest "I don\'t recognise this" on a genuinely obscure/anonymous ' +
+    'item ≈ 0.3 — better than a confident WRONG answer, which is 0. Reward specificity that matches the truth; never ' +
+    'reward a confident fabrication. Score 0..1.',
+  museum_enrichment:
+    'You are grading the ENRICHMENT (what-it-is / purpose / maker / curious-facts) a catalog identifier produced for a ' +
+    'photographed museum object, spoken by "Voxi" — a dry, witty British narrator. The sample gives the GROUND TRUTH ' +
+    'and the produced buckets. A great score (1.0) = SPECIFIC and FAITHFUL to THIS actual object (its real medium, ' +
+    'creator, history, why it matters), grounded, in Voxi\'s voice — not generic category filler and not fabricated ' +
+    'detail. Penalise fabricated or wrong specifics HEAVILY (an honest gap beats a confident fabrication). An empty ' +
+    'bucket ≈ 0.4. Score 0..1.',
 }
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n))

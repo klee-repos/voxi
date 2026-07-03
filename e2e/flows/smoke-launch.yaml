@@ -1,11 +1,13 @@
 # SPIKE smoke: prove Maestro can launch the real native app and read a testID.
 # Not part of the deterministic tier — just the build+drive gate. clearState:false so the
 # dev-client keeps its Metro URL (a Release/standalone build is used for the real flows later).
+# The maestro build auto-signs-in (FakeAuth + TEST_USER) and lands on the camera, so the shutter is the
+# first stable testID (the welcome screen is now the pre-auth LANDING, only reachable via ?auth= — see auth-landing).
 appId: com.kvnlee.voxi
 ---
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible:
-      id: "welcome.emailInput"
+      id: "camera.shutter"
     timeout: 60000

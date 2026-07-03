@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useRef } from 'react'
 import { View, Text, Pressable, Animated, Easing, StyleSheet, ScrollView, Linking, type ViewStyle } from 'react-native'
-import { BookOpen, Target, Stamp, Lightbulb, MessageCircle, Play, Pause, RotateCcw, X } from 'lucide-react-native'
+import { BookOpen, Target, Stamp, Lightbulb, AudioLines, MessageCircle, Play, Pause, RotateCcw, X } from 'lucide-react-native'
 import { AudioElement } from './AudioElement'
 import { GlassFill } from './GlassFill'
 import { ids, tid, tidWith } from '../lib/testid'
@@ -19,8 +19,13 @@ import { useTheme } from '../lib/themeProvider'
 import { sourceLabel } from '../lib/sourceLabel'
 import type { BucketStatus, RevealFact } from '../state/captureStore'
 
-/** The five dock affordances. The four research buckets play audio (green lane); `conversation` navigates (blue). */
-export type DockKey = 'what' | 'purpose' | 'maker' | 'facts' | 'conversation'
+/** Dock affordances. The four research buckets morph into a card (green lane); `deepdive` navigates to the Deep
+ *  Dive player (green audio lane, on-demand); `conversation` navigates (blue people lane, pinned). */
+export type DockKey = 'what' | 'purpose' | 'maker' | 'facts' | 'deepdive' | 'conversation'
+/** The morph/audio buckets — the ones that open a `BucketCard` + have per-bucket status/audio. Excludes the two
+ *  NAV affordances (`deepdive` opens the Deep Dive screen; `conversation` opens the chat), so their union never
+ *  leaks into the morph-card / audio-bucket / deriveBucketStatus paths (adversarial D4). */
+export type MorphKey = 'what' | 'purpose' | 'maker' | 'facts'
 
 type Surface = ReturnType<typeof useTheme>['surface']
 
@@ -37,26 +42,30 @@ const CARD_RADIUS: ViewStyle = { borderTopLeftRadius: radius.xl, borderTopRightR
 // behind it must be dimmed enough that it doesn't bleed through the material.
 const CARD_SCRIM = 'rgba(20,18,14,0.55)'
 
-const ICON = { what: BookOpen, purpose: Target, maker: Stamp, facts: Lightbulb, conversation: MessageCircle } as const
-const CAPTION: Record<DockKey, string> = { what: 'What', purpose: 'Purpose', maker: 'Maker', facts: 'Facts', conversation: 'Ask' }
+const ICON = { what: BookOpen, purpose: Target, maker: Stamp, facts: Lightbulb, deepdive: AudioLines, conversation: MessageCircle } as const
+const CAPTION: Record<DockKey, string> = { what: 'What', purpose: 'Purpose', maker: 'Maker', facts: 'Facts', deepdive: 'Deep Dive', conversation: 'Ask' }
 const TEST_ID: Record<DockKey, string> = {
   what: ids.reveal.bucketWhat,
   purpose: ids.reveal.bucketPurpose,
   maker: ids.reveal.bucketWho,
   facts: ids.reveal.bucketFacts,
+  deepdive: ids.reveal.deepDiveIcon,
   conversation: ids.reveal.conversationIcon,
 }
-/** The full question a bucket's card announces as its eyebrow (dock captions are short; no meaning lost). */
-export const CARD_EYEBROW: Record<Exclude<DockKey, 'conversation'>, string> = {
+/** The full question a morph bucket's card announces as its eyebrow (dock captions are short; no meaning lost). */
+export const CARD_EYEBROW: Record<MorphKey, string> = {
   what: 'What it is',
   purpose: "What it's for",
   maker: 'Who made it',
   facts: 'Curious facts',
 }
 
-/** Accessible, state-bearing label for a research icon (never colour/motion alone — a11y §4.9). */
-function a11yLabel(key: DockKey, status: BucketStatus): string {
+/** Accessible, state-bearing label for a dock icon (never colour/motion alone — a11y §4.9). */
+function a11yLabel(key: DockKey, status: BucketStatus, ready?: boolean): string {
   if (key === 'conversation') return 'Ask Voxi about this'
+  // Deep Dive is a nav affordance, not a research bucket — its label states the COST outcome a tap triggers
+  // (generate vs replay), so the user knows before tapping (adversarial D7 / cost transparency).
+  if (key === 'deepdive') return ready ? 'Deep Dive — ready to play its story' : 'Deep Dive — tap to generate its story'
   const q = CARD_EYEBROW[key]
   if (status === 'loading') return `${q} — still researching`
   if (status === 'empty') return `${q} — nothing grounded to add`
@@ -71,6 +80,7 @@ function BucketIcon({
   dkey,
   status,
   count,
+  ready,
   pulse,
   reduceMotion,
   surface,
@@ -79,6 +89,8 @@ function BucketIcon({
   dkey: DockKey
   status: BucketStatus
   count?: number
+  /** Deep Dive only: a durable episode already exists → show the green ready dot + "ready to play" a11y. */
+  ready?: boolean
   pulse: Animated.Value
   reduceMotion: boolean
   surface: Surface
@@ -87,6 +99,9 @@ function BucketIcon({
   if (status === 'hidden') return null
   const Glyph = ICON[dkey]
   const isConv = dkey === 'conversation'
+  // Deep Dive rides the same active-ink treatment as an answered research bucket (green stays the play control);
+  // its state carries `ready` so the agentic proof can assert generate-vs-replay deterministically.
+  const iconState = isConv ? 'active' : dkey === 'deepdive' ? (ready ? 'ready' : 'active') : status
   const glyphColor = isConv
     ? surface.accentSecondary // blue people lane
     : status === 'active'
@@ -98,7 +113,7 @@ function BucketIcon({
 
   return (
     <Pressable
-      {...tidWith(TEST_ID[dkey], { state: isConv ? 'active' : status }, a11yLabel(dkey, status))}
+      {...tidWith(TEST_ID[dkey], { state: iconState }, a11yLabel(dkey, status, ready))}
       accessibilityRole="button"
       accessibilityState={{ busy: status === 'loading', disabled: false }}
       onPress={onPress}
@@ -125,6 +140,7 @@ function BucketIcon({
           </View>
         ) : null}
         {status === 'empty' ? <View style={[styles.dot, { backgroundColor: surface.textTertiary }]} /> : null}
+        {dkey === 'deepdive' && ready ? <View style={[styles.dot, { backgroundColor: surface.accent }]} /> : null}
         {status === 'unavailable' ? (
           <View style={[styles.badge, { backgroundColor: surface.sunken, borderColor: surface.border, borderWidth: 1 }]}>
             <RotateCcw size={11} color={surface.textTertiary} strokeWidth={2.5} />
@@ -141,12 +157,15 @@ function BucketIcon({
 export function BucketDock({
   statuses,
   factCount,
+  deepDiveReady,
   reduceMotion,
   surface,
   onOpen,
 }: {
-  statuses: Record<Exclude<DockKey, 'conversation'>, BucketStatus>
+  statuses: Record<MorphKey, BucketStatus>
   factCount: number
+  /** A durable Deep Dive episode already exists → the Deep Dive icon shows a green "ready" dot (cost transparency). */
+  deepDiveReady?: boolean
   reduceMotion: boolean
   surface: Surface
   onOpen: (k: DockKey) => void
@@ -168,19 +187,46 @@ export function BucketDock({
     return () => loop.stop()
   }, [anyLoading, reduceMotion, pulse])
 
+  // One-time NUDGE (reduce-motion-gated): flick the content row ~16px and settle so the horizontal-scroll
+  // affordance is discoverable — the Deep Dive icon is the trailing item and can sit past the edge on a narrow
+  // screen. With reduce-motion, the natural half-cut peek of the trailing icon is the static affordance instead.
+  const scrollRef = useRef<ScrollView>(null)
+  const nudged = useRef(false)
+  useEffect(() => {
+    if (reduceMotion || nudged.current) return
+    nudged.current = true
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollTo({ x: 16, animated: true })
+      setTimeout(() => scrollRef.current?.scrollTo({ x: 0, animated: true }), 320)
+    }, 420)
+    return () => clearTimeout(t)
+  }, [reduceMotion])
+
   return (
     <View {...tid(ids.reveal.buckets)} style={styles.dock}>
-      {/* Fixed 5-slot grid: a HIDDEN research bucket (legacy revisit with no `section` events) renders an INVISIBLE
-          spacer, not null, so space-between always distributes the SAME five slots — What stays flush-left and Ask
-          flush-right in every state, never a scattered 3-icon row (adversarial AF5). */}
-      {(['what', 'purpose', 'maker', 'facts'] as const).map((k) =>
-        statuses[k] === 'hidden' ? (
-          <View key={k} style={styles.slotSpacer} aria-hidden accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-        ) : (
-          <BucketIcon key={k} dkey={k} status={statuses[k]} count={k === 'facts' ? factCount : undefined} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen(k)} />
-        ),
-      )}
-      <BucketIcon dkey="conversation" status="active" pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('conversation')} />
+      {/* The CONTENT icons scroll horizontally (What · Purpose · Maker · Facts · Deep Dive). On a narrow screen the
+          trailing Deep Dive icon half-cuts at the scroll edge — the affordance — while the pinned Ask icon (right of
+          the divider) never scrolls. Hidden buckets render null: the row scrolls, so no column-holding spacers. */}
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {(['what', 'purpose', 'maker', 'facts'] as const).map((k) =>
+          statuses[k] === 'hidden' ? null : (
+            <BucketIcon key={k} dkey={k} status={statuses[k]} count={k === 'facts' ? factCount : undefined} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen(k)} />
+          ),
+        )}
+        <BucketIcon dkey="deepdive" status="active" ready={deepDiveReady} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('deepdive')} />
+      </ScrollView>
+      {/* A hairline sets the special, always-present chat lane apart from the scrollable content icons (Marvin's
+          scroll-tools-with-a-pinned-action pattern). Aria-hidden — decorative. */}
+      <View style={[styles.divider, { backgroundColor: surface.border }]} aria-hidden accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
+      <View style={styles.pinned}>
+        <BucketIcon dkey="conversation" status="active" pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('conversation')} />
+      </View>
     </View>
   )
 }
@@ -227,7 +273,7 @@ export function BucketCard({
   onPlayToggle,
   onClose,
 }: {
-  bucket: Exclude<DockKey, 'conversation'>
+  bucket: MorphKey
   body: string
   facts?: RevealFact[]
   audioUrl: string | null
@@ -235,8 +281,8 @@ export function BucketCard({
   playing: boolean
   reduceMotion: boolean
   surface: Surface
-  tabs: Exclude<DockKey, 'conversation'>[]
-  onTab: (k: Exclude<DockKey, 'conversation'>) => void
+  tabs: MorphKey[]
+  onTab: (k: MorphKey) => void
   onPlayToggle: () => void
   onClose: () => void
 }): React.ReactElement {
@@ -323,9 +369,13 @@ export function BucketCard({
 }
 
 const styles = StyleSheet.create({
-  dock: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginTop: space.md, marginHorizontal: DOCK_EDGE_INSET, flexWrap: 'nowrap' },
+  // The content icons scroll (flexShrink so they yield room to the pinned lane); the divider + Ask are fixed-width.
+  dock: { flexDirection: 'row', alignItems: 'flex-start', marginTop: space.md },
+  scroll: { flexShrink: 1 }, // shrinks + scrolls its overflow, leaving the divider + pinned Ask always visible
+  scrollContent: { flexDirection: 'row', alignItems: 'flex-start', marginLeft: DOCK_EDGE_INSET, paddingRight: space.xs }, // leading inset flushes What's CIRCLE to the title's left edge
+  divider: { width: 1, height: ICON_CIRCLE, alignSelf: 'flex-start', marginTop: Math.max(0, (hit.min - ICON_CIRCLE) / 2), marginHorizontal: space.sm }, // centered on the 44px circle band, not the caption
+  pinned: { marginRight: DOCK_EDGE_INSET }, // trailing inset flushes Ask's CIRCLE to the title's right edge
   iconWrap: { alignItems: 'center', width: ICON_WRAP },
-  slotSpacer: { width: ICON_WRAP }, // holds a HIDDEN bucket's slot so space-between keeps five even columns
   iconCircleWrap: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
   iconCircle: { width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radius.pill, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radius.pill, borderWidth: 2, backgroundColor: 'transparent' },

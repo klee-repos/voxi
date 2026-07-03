@@ -8,12 +8,18 @@
  * so production deep-linking is untouched.
  */
 import { setTestSeed } from '../src/lib/testSeed'
+import { setAuthMode } from '../src/lib/testAuth'
 
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
   try {
     if (process.env.EXPO_PUBLIC_TEST_MODE === '1' && /(?:^|[/:])e2e\b/.test(path)) {
       const seed = /[?&]seed=([a-z]+)/.exec(path)?.[1] ?? null
       setTestSeed(seed)
+      // `?auth=fresh|exists|noaccount` — steer FakeAuth to a signed-out landing (+ error-branch) for the auth
+      // E2E. Cold-launched first, redirectSystemPath({initial:true}) fires before FakeAuth mounts, so init reads
+      // the mode and starts signed-out. Returning '/' routes through index → welcome (the landing).
+      const auth = /[?&]auth=([a-z]+)/.exec(path)?.[1] ?? null
+      setAuthMode(auth)
       return '/'
     }
   } catch {

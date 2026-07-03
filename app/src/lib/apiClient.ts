@@ -316,6 +316,18 @@ export class ApiClient {
     return this.json<DeleteAccountResult>('/v1/account', { method: 'DELETE' })
   }
 
+  // DELETE /v1/threads/:id — remove ONE cataloged item (owner-scoped cascade). 204 → void; a 404 (already gone)
+  // is surfaced as an ApiError the caller treats as success-equivalent (the item is absent either way).
+  deleteThread(threadId: string): Promise<void> {
+    return this.json<void>(`/v1/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE' })
+  }
+
+  // POST /v1/threads/:id/regenerate — re-run identification for an item. Clears the durable reveal server-side so
+  // the caller's subsequent stream re-runs the live cascade and re-pins a fresh reveal. Free in v1 (no scan).
+  regenerateThread(threadId: string): Promise<{ ok: boolean }> {
+    return this.json<{ ok: boolean }>(`/v1/threads/${encodeURIComponent(threadId)}/regenerate`, { method: 'POST' })
+  }
+
   /**
    * POST /v1/threads/:id/speech[/:bucket] — hear a reveal bucket in Voxi's British voice. The text is SERVER-OWNED
    * (the BFF voices the honesty-gated clauses it produced; the client sends no text — only names WHICH bucket via a

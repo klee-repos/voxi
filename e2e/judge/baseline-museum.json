@@ -1,0 +1,50 @@
+{
+  "starry-night": {
+    "scores": {
+      "museum_identity": 0,
+      "museum_enrichment": 0
+    }
+  },
+  "campbells-soup-cans": {
+    "scores": {
+      "museum_identity": 1,
+      "museum_enrichment": 0.95
+    }
+  },
+  "temple-of-dendur": {
+    "scores": {
+      "museum_identity": 0,
+      "museum_enrichment": 0
+    }
+  },
+  "unicorn-in-captivity": {
+    "scores": {
+      "museum_identity": 0.75,
+      "museum_enrichment": 0.32
+    }
+  },
+  "met-kouros": {
+    "scores": {
+      "museum_identity": 0,
+      "museum_enrichment": 0.4
+    }
+  },
+  "guggenheim-museum-exterior": {
+    "scores": {
+      "museum_identity": 1,
+      "museum_enrichment": 0.95
+    }
+  },
+  "macintosh-128k": {
+    "scores": {
+      "museum_identity": 0.5,
+      "museum_enrichment": 0.15
+    }
+  },
+  "lockheed-a12-blackbird": {
+    "scores": {
+      "museum_identity": 0.85,
+      "museum_enrichment": 0.4
+    }
+  }
+}

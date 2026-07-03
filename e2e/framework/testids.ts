@@ -8,13 +8,34 @@
  * Convention: `screen.element`, lowerCamel, stable across redesigns. New screens append; never renumber.
  */
 export const ids = {
+  // welcome is now the LANDING (no form): brand + value prop + Get started / Log in + legal microcopy.
   welcome: {
     screen: 'welcome.screen',
+    getStarted: 'welcome.getStarted', // green primary → /sign-up
+    logIn: 'welcome.logIn', // blue link → /sign-in
+    terms: 'welcome.terms', // legal microcopy link
+    privacy: 'welcome.privacy',
+    // @deprecated — the combined email/OTP/consent controls moved to /sign-up + /sign-in (see `auth`). These ids
+    // are RETAINED as vocabulary so the legacy hardware-only Maestro flows + non-CI web scenarios that still
+    // reference them stay lint- and tsc-valid; the app renders none of them on the landing.
     emailInput: 'welcome.emailInput',
     continueBtn: 'welcome.continueBtn',
     otpInput: 'welcome.otpInput',
     eulaAccept: 'welcome.eulaAccept',
     ageConfirm: 'welcome.ageConfirm',
+  },
+  // Separated account creation (/sign-up) vs login (/sign-in). Both are email→code; the shared controls carry the
+  // `auth.*` ids (only one screen renders at a time), each screen's root carries its own `signUp`/`signIn` id.
+  signUp: { screen: 'signUp.screen' },
+  signIn: { screen: 'signIn.screen' },
+  auth: {
+    emailInput: 'auth.emailInput',
+    codeInput: 'auth.codeInput', // the 6-cell code field (one logical value; directly Maestro-driveable)
+    continue: 'auth.continue', // green primary — "Continue" (email phase) / "Verify" (code phase)
+    resend: 'auth.resend', // "Resend code" (disabled during cooldown)
+    changeEmail: 'auth.changeEmail', // back to the email phase (email prefilled)
+    switchLink: 'auth.switchLink', // "Already have an account? Log in" / "No account? Create one" cross-link
+    error: 'auth.error', // in-line error surface (exists / no-account / bad-code)
   },
   firstRun: {
     meetVoxiNext: 'firstRun.meetVoxiNext',
@@ -75,14 +96,27 @@ export const ids = {
     bucketPurpose: 'reveal.bucketPurpose', // "What it's for"
     bucketWho: 'reveal.bucketWho', // "Who made it" (maker)
     bucketFacts: 'reveal.bucketFacts', // "Curious facts" — carries a count badge
+    deepDiveIcon: 'reveal.deepDiveIcon', // green "Deep Dive" icon (after Facts, in the X-scroll row) → /podcast; state=ready when an episode exists
     bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
     bucketCardScrim: 'reveal.bucketCardScrim', // tap-to-close scrim behind the morph card
-    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation (co-locates reveal.askVoxi)
+    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation — PINNED right of the divider, never scrolls (co-locates reveal.askVoxi)
     // Swipe paging across catalogued items: a horizontal paging FlatList of the revealable collection. Swiping is
     // the native scroll paging; on settle the landed item loads in place (no /processing, no re-bill).
     pager: 'reveal.pager', // the horizontal paging FlatList (scroll container)
     pagerCamera: 'reveal.pagerCamera', // the leading "camera" page — swiping past the newest item opens capture
     position: 'reveal.position', // hidden anchor carrying index/count + openedvia (analyze|revisit) for E2E reads
+    // ⋯ MORE menu (item pages only): the header ⋯ (nav.more) opens a bottom action sheet with two actions.
+    // Delete is a TWO-STEP destructive flow (menu → confirmation dialog → destructive confirm).
+    moreMenu: 'reveal.moreMenu', // the bottom action sheet container
+    moreMenuScrim: 'reveal.moreMenuScrim', // tap-away scrim behind the sheet
+    menuRegenerate: 'reveal.menuRegenerate', // "Regenerate" row → regen confirm dialog
+    menuDelete: 'reveal.menuDelete', // "Delete" row (destructive, last) → delete confirm dialog
+    regenConfirm: 'reveal.regenConfirm', // regenerate confirmation dialog container
+    regenConfirmCancel: 'reveal.regenConfirmCancel',
+    regenConfirmAccept: 'reveal.regenConfirmAccept', // "Regenerate" — re-runs identification in place
+    deleteConfirm: 'reveal.deleteConfirm', // delete confirmation dialog container (step 2 of the two-step delete)
+    deleteConfirmCancel: 'reveal.deleteConfirmCancel',
+    deleteConfirmAccept: 'reveal.deleteConfirmAccept', // destructive "Delete" — the deliberate second tap
   },
   podcast: {
     player: 'podcast.player',
@@ -93,6 +127,8 @@ export const ids = {
     composingState: 'podcast.composingState',
     reportEpisode: 'podcast.reportEpisode',
     skip15: 'podcast.skip15',
+    generate: 'podcast.generate', // the EXPLICIT "Generate a Deep Dive" CTA (idle state) — generation never auto-fires on mount
+    stillComposing: 'podcast.stillComposing', // non-terminal "taking a while" state (poll budget exhausted, worker may still render) — never the "held it back" fail copy
   },
   conversation: {
     orb: 'conversation.orb', // the full-screen voice surface (container)
@@ -158,6 +194,7 @@ export const ids = {
     openPodcast: 'nav.openPodcast', // "Generate story" → podcast player
     openContribute: 'nav.openContribute', // "Add a tip" → contribute sheet
     menuButton: 'nav.menuButton', // hamburger, top-left of camera, opens the drawer
+    more: 'nav.more', // ⋯ overflow, top-right of the reveal item header → opens the reveal MORE action sheet
     close: 'nav.close', // modal-dismiss X (podcast/conversation/contribute/paywall), top-right → guarded dismiss
     back: 'nav.back', // back chevron, top-left (processing/reveal/threads/settings/interview) → guarded dismiss
     header: 'nav.header', // the universal AppHeader root View (the element measured for constant height)

@@ -1,0 +1,58 @@
+# Maestro flow (iOS native, deterministic) — auth-signin: the LOGIN journey, separated from account creation.
+# Landing → "Log in" → /sign-in (email → 6-digit code) → straight to the camera (a returning user skips first-run;
+# index sends signed-in users to the camera, so onboarding is a sign-up-only step). Proves the separated login flow.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-signin.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?auth=fresh"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "welcome.getStarted"
+    timeout: 30000
+# --- log in ---
+- tapOn:
+    id: "welcome.logIn"
+- extendedWaitUntil:
+    visible:
+      id: "auth.emailInput"
+    timeout: 15000
+- tapOn:
+    id: "auth.emailInput"
+- inputText: "returning@voxi.test"
+- tapOn:
+    id: "auth.continue"
+# The code field auto-focuses → type straight in (the driver can't introspect with the number-pad up). Reaching
+# the camera below is the end-to-end proof the code verified + the returning user signed in.
+- waitForAnimationToEnd:
+    timeout: 5000
+- inputText: "424242"
+- waitForAnimationToEnd:
+    timeout: 5000
+# Returning user → straight to the camera (no first-run; keyboard dismissed → the driver can introspect again).
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 30000

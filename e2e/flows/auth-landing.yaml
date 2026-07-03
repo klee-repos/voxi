@@ -1,0 +1,44 @@
+# Maestro flow (iOS native, deterministic) — auth-landing: the NEW welcome is a compelling LANDING, not a form.
+# The maestro build auto-signs-in via TEST_USER; the `voxi://e2e?auth=fresh` deep link drops that session
+# (FakeAuth reads the mode → signed-out; the index warm-net backstops) so the real landing renders. Proves: the
+# landing shows "Get started" + "Log in" and has NO email field / consent checkboxes on it (the user's complaint).
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-landing.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+# Drop the auto-signed-in session → land on the real welcome (the custom-scheme "Open" prompt is the only
+# sanctioned non-testID matcher — system UI outside our app).
+- openLink: "voxi://e2e?auth=fresh"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "welcome.getStarted"
+    timeout: 30000
+- assertVisible:
+    id: "welcome.logIn"
+# The landing is NOT a form — no email field, no consent checkbox on it.
+- assertNotVisible:
+    id: "auth.emailInput"
+- assertNotVisible:
+    id: "welcome.eulaAccept"

@@ -1,0 +1,607 @@
+[
+  {
+    "id": "starry-night",
+    "file": "starry-night.jpg",
+    "museum": "MoMA",
+    "title": "The Starry Night",
+    "maker": "Vincent van Gogh",
+    "year": "1889",
+    "category": "painting",
+    "medium": "oil on canvas",
+    "expected_facts": [
+      "Painted in June 1889 from the window of his asylum room at Saint-Rémy-de-Provence",
+      "Depicts a swirling, turbulent night sky over a village with a prominent cypress tree",
+      "Acquired by the Museum of Modern Art in 1941"
+    ],
+    "difficulty": "easy",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg",
+    "license": "Public domain",
+    "expected_id_tokens": [
+      "starry night"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "717c36252ec7331f1d811a0de2dde5aa43c6202e"
+  },
+  {
+    "id": "campbells-soup-cans",
+    "file": "campbells-soup-cans.jpg",
+    "museum": "MoMA",
+    "title": "Campbell's Soup Cans",
+    "maker": "Andy Warhol",
+    "year": "1962",
+    "category": "painting",
+    "medium": "synthetic polymer paint on 32 canvases",
+    "expected_facts": [
+      "Consists of 32 canvases, one for each of the soup varieties Campbell's sold at the time",
+      "A foundational work of American Pop Art",
+      "Held by the Museum of Modern Art in New York"
+    ],
+    "difficulty": "easy",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Andy_Warhol_Campbell's_Soup_Cans_(MoMA_-_New_York).jpg",
+    "license": "CC BY-SA (photo of installation); underlying artwork by Andy Warhol",
+    "expected_id_tokens": [
+      "campbell"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "6a526d804f910259a6f2fc8312066ca3623db2e6"
+  },
+  {
+    "id": "water-lilies-monet",
+    "file": "water-lilies-monet.jpg",
+    "museum": "MoMA",
+    "title": "Water Lilies",
+    "maker": "Claude Monet",
+    "year": "1914-1926",
+    "category": "painting",
+    "medium": "oil on canvas (triptych)",
+    "expected_facts": [
+      "A large three-panel mural-scale depiction of Monet's water-lily pond at Giverny",
+      "Part of Monet's late Nymphéas series, painted at Giverny",
+      "In the collection of the Museum of Modern Art (accession 712.1959)"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Monet_-_Water_Lilies,_1914-26,_712.1959.jpg",
+    "license": "Public domain",
+    "expected_id_tokens": [
+      "monet"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "4c7520ad8378aea05838d60eed151a0249bb2a61"
+  },
+  {
+    "id": "temple-of-dendur",
+    "file": "temple-of-dendur.jpg",
+    "museum": "The Met",
+    "title": "The Temple of Dendur",
+    "maker": "Ancient Egypt / Roman Egypt (commissioned by Emperor Augustus)",
+    "year": "c. 15 BC",
+    "category": "architecture",
+    "medium": "Aeolian sandstone",
+    "expected_facts": [
+      "A Roman-period Egyptian temple built around 15 BC under Emperor Augustus, dedicated to Isis",
+      "Originally stood in Nubia; given to the United States by Egypt in 1965 and reassembled at the Met",
+      "Housed in the Sackler Wing of the Metropolitan Museum of Art since 1978"
+    ],
+    "difficulty": "medium",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Temple_of_Dendur,_Metropolitan_Museum_of_Art_(6387519473).jpg",
+    "license": "CC BY-SA 2.0",
+    "expected_id_tokens": [
+      "dendur"
+    ],
+    "expected_band": null,
+    "sha1": "8167d2d9154f023f716c3212bf34d8fccf33a675"
+  },
+  {
+    "id": "unicorn-in-captivity",
+    "file": "unicorn-in-captivity.jpg",
+    "museum": "The Cloisters (The Met)",
+    "title": "The Unicorn in Captivity (The Unicorn Rests in a Garden)",
+    "maker": "Unknown (South Netherlandish workshop)",
+    "year": "1495-1505",
+    "category": "textile",
+    "medium": "wool warp with wool, silk, silver, and gilt wefts (tapestry)",
+    "expected_facts": [
+      "The seventh and final tapestry of the Unicorn Tapestries (Hunt of the Unicorn) series",
+      "Depicts a unicorn chained to a pomegranate tree within a low round fence, on a millefleur flowered ground",
+      "Woven in the Southern Netherlands around 1495-1505; now at The Met Cloisters"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:The_Unicorn_in_Captivity_(from_the_Unicorn_Tapestries)_MET_DP101275.jpg",
+    "license": "Public domain (CC0, Met Open Access)",
+    "expected_id_tokens": [
+      "unicorn"
+    ],
+    "expected_band": null,
+    "sha1": "996eceec41aa959b6f7d3fd8365f7708296eebd5"
+  },
+  {
+    "id": "washington-crossing-delaware",
+    "file": "washington-crossing-delaware.jpg",
+    "museum": "The Met",
+    "title": "Washington Crossing the Delaware",
+    "maker": "Emanuel Leutze",
+    "year": "1851",
+    "category": "painting",
+    "medium": "oil on canvas",
+    "expected_facts": [
+      "Depicts George Washington leading troops across the ice-filled Delaware River on the night of December 25-26, 1776",
+      "A monumental history painting, roughly 12 by 21 feet",
+      "In the collection of the Metropolitan Museum of Art"
+    ],
+    "difficulty": "easy",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Washington_Crossing_the_Delaware_by_Emanuel_Leutze,_MMA-NYC,_1851.jpg",
+    "license": "Public domain",
+    "expected_id_tokens": [
+      "crossing the delaware"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "1be632b4f18ed8bfb901cc847c0048f2ee564155"
+  },
+  {
+    "id": "death-of-socrates",
+    "file": "death-of-socrates.jpg",
+    "museum": "The Met",
+    "title": "The Death of Socrates",
+    "maker": "Jacques-Louis David",
+    "year": "1787",
+    "category": "painting",
+    "medium": "oil on canvas",
+    "expected_facts": [
+      "A Neoclassical painting depicting Socrates about to drink hemlock while gesturing and discoursing to his grieving disciples",
+      "Painted by Jacques-Louis David in 1787",
+      "In the collection of the Metropolitan Museum of Art (accession 31.45)"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:David_-_The_Death_of_Socrates.jpg",
+    "license": "Public domain",
+    "expected_id_tokens": [
+      "socrates"
+    ],
+    "expected_band": null,
+    "sha1": "123655f981b1c75909a596816e28ca33b091440c"
+  },
+  {
+    "id": "bruegel-harvesters",
+    "file": "bruegel-harvesters.jpg",
+    "museum": "The Met",
+    "title": "The Harvesters",
+    "maker": "Pieter Bruegel the Elder",
+    "year": "1565",
+    "category": "painting",
+    "medium": "oil on wood panel",
+    "expected_facts": [
+      "One of a series of six panels depicting the times of the year; this one represents late summer (July-August)",
+      "Shows peasants harvesting and resting under a tree in a golden wheat landscape",
+      "In the collection of the Metropolitan Museum of Art"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Pieter_Bruegel_the_Elder-_The_Harvesters_-_Google_Art_Project.jpg",
+    "license": "Public domain",
+    "expected_id_tokens": [
+      "harvesters"
+    ],
+    "expected_band": null,
+    "sha1": "97ff98cb916842c26b0c81de0420dad9096f1dd2"
+  },
+  {
+    "id": "tiffany-autumn-landscape",
+    "file": "tiffany-autumn-landscape.jpg",
+    "museum": "The Met",
+    "title": "Autumn Landscape (The River of Life window)",
+    "maker": "Tiffany Studios (designed by Agnes F. Northrop)",
+    "year": "1923-1924",
+    "category": "design-object",
+    "medium": "leaded Favrile glass",
+    "expected_facts": [
+      "A large leaded-glass landscape window made by Tiffany Studios",
+      "Designed by Agnes F. Northrop, one of Tiffany's leading female designers",
+      "In the collection of the Metropolitan Museum of Art"
+    ],
+    "difficulty": "hard",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:At_the_Metropolitan_Museum_of_Art,_New_York_2017_06_-_Autumn_Landscape.jpg",
+    "license": "CC BY-SA (photo); underlying window is public domain",
+    "expected_id_tokens": [
+      "tiffany"
+    ],
+    "expected_band": null,
+    "sha1": "00154a936e7f2ecc00845d18916a5ab76470220f"
+  },
+  {
+    "id": "henry-viii-field-armor",
+    "file": "henry-viii-field-armor.jpg",
+    "museum": "The Met",
+    "title": "Field Armor of King Henry VIII of England",
+    "maker": "Italian (Milan or Brescia) armorers",
+    "year": "c. 1544",
+    "category": "armor",
+    "medium": "steel, gold, leather, copper alloys",
+    "expected_facts": [
+      "Made for King Henry VIII near the end of his life, constructed for use on horse and on foot",
+      "An early example of the flexible overlapping-plate 'anime' breastplate construction",
+      "Probably worn at the siege of Boulogne in 1544; now in the Met's Arms and Armor collection"
+    ],
+    "difficulty": "medium",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Field_Armor_of_King_Henry_VIII_of_England_(reigned_1509%E2%80%9347)_MET_DT205963.jpg",
+    "license": "Public domain (CC0, Met Open Access)",
+    "expected_id_tokens": [
+      "armor"
+    ],
+    "expected_band": null,
+    "safety_expected": true,
+    "sha1": "126854087404c454450f9ed9fee86ea131d613a0"
+  },
+  {
+    "id": "met-kouros",
+    "file": "met-kouros.jpg",
+    "museum": "The Met",
+    "title": "Marble statue of a kouros (youth) — the New York Kouros",
+    "maker": "Greek, Attic (Archaic period)",
+    "year": "c. 590-580 BC",
+    "category": "sculpture",
+    "medium": "Naxian marble",
+    "expected_facts": [
+      "One of the earliest surviving marble statues of a human figure carved in Attica",
+      "Depicts a nude standing youth (kouros) in a rigid frontal pose adapted from Egyptian sculpture",
+      "In the Met's Greek and Roman art collection (accession 32.11.1)"
+    ],
+    "difficulty": "hard",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Marble_statue_of_a_kouros_(youth)_MET_DT247656.jpg",
+    "license": "Public domain (CC0, Met Open Access)",
+    "expected_id_tokens": [
+      "kouros"
+    ],
+    "expected_band": null,
+    "safety_expected": true,
+    "sha1": "6e9bd2036a90ee054afee6271799b85d2d26d4e8"
+  },
+  {
+    "id": "met-william-hippo",
+    "file": "met-william-hippo.jpg",
+    "museum": "The Met",
+    "title": "Hippopotamus (\"William\")",
+    "maker": "Ancient Egypt (Middle Kingdom)",
+    "year": "c. 1961-1878 BC",
+    "category": "artifact",
+    "medium": "faience (glazed quartz ceramic)",
+    "expected_facts": [
+      "A small blue faience hippopotamus figurine painted with lotus and marsh plants",
+      "Dates to the Egyptian Middle Kingdom (reigns of Senusret I-II); found near Meir",
+      "An informal mascot of the Metropolitan Museum of Art, nicknamed 'William'"
+    ],
+    "difficulty": "hard",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Standing_Hippopotamus_MET_DP345114.jpg",
+    "license": "Public domain (CC0, Met Open Access)",
+    "expected_id_tokens": [
+      "hippopotamus"
+    ],
+    "expected_band": null,
+    "sha1": "c1fd23d1a6d97ad8e47cbb698c76356e17b85253"
+  },
+  {
+    "id": "met-aquamanile-aristotle",
+    "file": "met-aquamanile-aristotle.jpg",
+    "museum": "The Met",
+    "title": "Aquamanile in the Form of Aristotle and Phyllis",
+    "maker": "South Netherlandish (Mosan)",
+    "year": "late 14th-early 15th century",
+    "category": "artifact",
+    "medium": "copper alloy (bronze)",
+    "expected_facts": [
+      "A medieval water vessel (aquamanile) used for washing hands, cast in bronze",
+      "Depicts the legend of the philosopher Aristotle being ridden by Phyllis",
+      "In the Met's medieval art collection"
+    ],
+    "difficulty": "hard",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Aquamanile_in_the_Form_of_Aristotle_and_Phyllis_MET_DP122652.jpg",
+    "license": "Public domain (CC0, Met Open Access)",
+    "expected_id_tokens": [
+      "aquamanile"
+    ],
+    "expected_band": null,
+    "sha1": "93d094c77bc75ad9617fcdc7764967fa00d74df0"
+  },
+  {
+    "id": "kandinsky-composition-8",
+    "file": "kandinsky-composition-8.jpg",
+    "museum": "Guggenheim",
+    "title": "Composition 8 (Komposition 8)",
+    "maker": "Wassily Kandinsky",
+    "year": "1923",
+    "category": "painting",
+    "medium": "oil on canvas",
+    "expected_facts": [
+      "A geometric-abstract composition of circles, lines, grids, and angular forms",
+      "Painted in 1923 during Kandinsky's Bauhaus period",
+      "In the Solomon R. Guggenheim Museum collection"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Vassily_Kandinsky,_1923_-_Composition_8,_huile_sur_toile,_140_cm_x_201_cm,_Mus%C3%A9e_Guggenheim,_New_York.jpg",
+    "license": "Public domain (per Commons; work is faithful reproduction)",
+    "expected_id_tokens": [
+      "kandinsky"
+    ],
+    "expected_band": null,
+    "sha1": "d9139754123f13af3916ea798f6c4e5122d6980b"
+  },
+  {
+    "id": "guggenheim-museum-exterior",
+    "file": "guggenheim-museum-exterior.jpg",
+    "museum": "Guggenheim",
+    "title": "Solomon R. Guggenheim Museum (building)",
+    "maker": "Frank Lloyd Wright",
+    "year": "1959",
+    "category": "architecture",
+    "medium": "reinforced concrete",
+    "expected_facts": [
+      "Designed by architect Frank Lloyd Wright; completed and opened in 1959",
+      "Famous for its white spiral rotunda that widens as it rises, on Fifth Avenue in Manhattan",
+      "A landmark of 20th-century modern architecture"
+    ],
+    "difficulty": "medium",
+    "image_type": "architecture-exterior",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Solomon_R._Guggenheim_Museum_(48059131351).jpg",
+    "license": "CC BY-SA (photo)",
+    "expected_id_tokens": [
+      "guggenheim"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "ab2455d9a3f312375c310e20e3e10eee4ecf8996"
+  },
+  {
+    "id": "hopper-early-sunday-morning",
+    "file": "hopper-early-sunday-morning.jpg",
+    "museum": "Whitney",
+    "title": "Early Sunday Morning",
+    "maker": "Edward Hopper",
+    "year": "1930",
+    "category": "painting",
+    "medium": "oil on canvas",
+    "expected_facts": [
+      "Depicts a quiet, sunlit row of storefronts and second-story windows along a deserted street",
+      "Painted by Edward Hopper in 1930",
+      "In the collection of the Whitney Museum of American Art"
+    ],
+    "difficulty": "medium",
+    "image_type": "flat-reproduction",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Early-sunday-morning-edward-hopper-1930.jpg",
+    "license": "Public domain (per Commons)",
+    "expected_id_tokens": [
+      "hopper"
+    ],
+    "expected_band": null,
+    "sha1": "5321f7d36cba9db17d46b97e7e48aa126f3af956"
+  },
+  {
+    "id": "macintosh-128k",
+    "file": "macintosh-128k.jpg",
+    "museum": "MoMA (design collection)",
+    "title": "Macintosh 128K personal computer",
+    "maker": "Apple Computer (design led by Hartmut Esslinger / frog design; Apple industrial design)",
+    "year": "1984",
+    "category": "design-object",
+    "medium": "molded plastic case, CRT display",
+    "expected_facts": [
+      "The original Apple Macintosh, introduced in January 1984",
+      "An all-in-one beige computer with a built-in 9-inch monochrome CRT and a separate mouse",
+      "Represented in the design collection of the Museum of Modern Art"
+    ],
+    "difficulty": "medium",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Macintosh_128k_computer,_January_1984,_by_Bernard_Gotfryd_-_(cropped_to_remove_individual).jpg",
+    "license": "Public domain (Bernard Gotfryd photo, Library of Congress)",
+    "expected_id_tokens": [
+      "macintosh"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "610b11192de011047a4420edf3d1c366f10236e6"
+  },
+  {
+    "id": "eames-lounge-chair",
+    "file": "eames-lounge-chair.jpg",
+    "museum": "MoMA (design collection)",
+    "title": "Lounge Chair (model 670) and Ottoman",
+    "maker": "Charles and Ray Eames (mfr. Herman Miller)",
+    "year": "1956",
+    "category": "design-object",
+    "medium": "molded rosewood plywood and leather",
+    "expected_facts": [
+      "An iconic mid-century modern lounge chair of molded plywood shells and leather cushions",
+      "Designed by Charles and Ray Eames in 1956, manufactured by Herman Miller",
+      "The design is in the permanent collection of the Museum of Modern Art"
+    ],
+    "difficulty": "medium",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Ngv_design,_charles_eames_and_herman_miller,_lounge_chair_670,_1956.JPG",
+    "license": "CC BY-SA (photo of an example of the same design; NGV)",
+    "expected_id_tokens": [
+      "eames"
+    ],
+    "expected_band": "PROBABLE",
+    "same_design": true,
+    "sha1": "053c3e85559fd17e37cdf32c348fd5ec00c4bebb"
+  },
+  {
+    "id": "braun-sk4",
+    "file": "braun-sk4.jpg",
+    "museum": "MoMA (design collection)",
+    "title": "Radio-Phonograph (model SK 4/10) — 'Phonosuper', a.k.a. 'Snow White's Coffin'",
+    "maker": "Dieter Rams and Hans Gugelot (mfr. Braun AG)",
+    "year": "1956",
+    "category": "design-object",
+    "medium": "painted metal, wood, and acrylic (Plexiglas) lid",
+    "expected_facts": [
+      "A combined valve radio and record player in a closed housing with a clear acrylic lid",
+      "Designed by Dieter Rams and Hans Gugelot for Braun in 1956; nicknamed 'Snow White's Coffin'",
+      "The design is in the collection of the Museum of Modern Art"
+    ],
+    "difficulty": "hard",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:1956_Braun_Phonosuper_SK4_Schneewittchensarg.JPG",
+    "license": "CC BY-SA (photo of an example of the same design)",
+    "expected_id_tokens": [
+      "braun"
+    ],
+    "expected_band": null,
+    "same_design": true,
+    "sha1": "dade96a6d7ac81373737265345aaea3c3d008c8f"
+  },
+  {
+    "id": "sony-walkman-tps-l2",
+    "file": "sony-walkman-tps-l2.jpg",
+    "museum": "MoMA (design collection)",
+    "title": "Walkman TPS-L2 portable cassette player",
+    "maker": "Sony Corporation",
+    "year": "1979",
+    "category": "design-object",
+    "medium": "blue-and-silver metal and plastic housing",
+    "expected_facts": [
+      "The first Sony Walkman, a portable personal cassette player released in 1979",
+      "Blue and silver body with two headphone jacks; pioneered personal portable music",
+      "The design is represented in the Museum of Modern Art collection"
+    ],
+    "difficulty": "hard",
+    "image_type": "studio-object",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Original_Sony_Walkman_TPS-L2.JPG",
+    "license": "CC BY-SA (photo of an example of the same design)",
+    "expected_id_tokens": [
+      "walkman"
+    ],
+    "expected_band": "PROBABLE",
+    "same_design": true,
+    "sha1": "857dd9a9a7b9911006ab77f3d92cc37fc7c96a0a"
+  },
+  {
+    "id": "amnh-great-canoe",
+    "file": "amnh-great-canoe.jpg",
+    "museum": "AMNH",
+    "title": "The Great Canoe (Northwest Coast dugout canoe)",
+    "maker": "Haida and Heiltsuk (Haíɫzaqv) artists",
+    "year": "carved c. 1870s",
+    "category": "artifact",
+    "medium": "carved and painted western red cedar",
+    "expected_facts": [
+      "A 63-foot sea-going dugout canoe carved from a single western red cedar log",
+      "Made by Northwest Coast Haida and Heiltsuk artists; acquired by the museum around 1883",
+      "Displayed in the Northwest Coast Hall of the American Museum of Natural History"
+    ],
+    "difficulty": "hard",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Great_Canoe_1_(4690478993).jpg",
+    "license": "CC BY-SA 2.0 (Tony Hisgett)",
+    "expected_id_tokens": [
+      "canoe"
+    ],
+    "expected_band": null,
+    "sha1": "c266256813e4606ecbaea471f6a4eb691ec73ea1"
+  },
+  {
+    "id": "amnh-totem-poles",
+    "file": "amnh-totem-poles.jpg",
+    "museum": "AMNH",
+    "title": "Northwest Coast totem poles",
+    "maker": "Northwest Coast Indigenous artists (Haida and neighboring nations)",
+    "year": "19th century",
+    "category": "artifact",
+    "medium": "carved and painted cedar",
+    "expected_facts": [
+      "Carved and painted cedar totem poles from Northwest Coast Indigenous cultures",
+      "Displayed in the Northwest Coast Hall of the American Museum of Natural History",
+      "The hall's collection includes dozens of poles alongside the Great Canoe"
+    ],
+    "difficulty": "hard",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Totem_poles_(23393831139).jpg",
+    "license": "CC BY-SA (photo)",
+    "expected_id_tokens": [
+      "totem"
+    ],
+    "expected_band": null,
+    "sha1": "f071f2317ab1616e92cff22805acf2b301e8eb8b"
+  },
+  {
+    "id": "lockheed-a12-blackbird",
+    "file": "lockheed-a12-blackbird.jpg",
+    "museum": "Intrepid Museum",
+    "title": "Lockheed A-12 (Blackbird), often labeled SR-71",
+    "maker": "Lockheed (Skunk Works)",
+    "year": "1963",
+    "category": "vehicle",
+    "medium": "titanium airframe",
+    "expected_facts": [
+      "A Lockheed A-12 (the single-seat CIA reconnaissance predecessor of the SR-71 Blackbird)",
+      "Built by Lockheed's Skunk Works; a Mach 3+ titanium spy plane",
+      "Displayed at the Intrepid Sea, Air & Space Museum in New York (aircraft 60-6925)"
+    ],
+    "difficulty": "medium",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:USS_Intrepid_Lockheed_SR-71_Blackbird.JPG",
+    "license": "CC BY-SA (photo)",
+    "expected_id_tokens": [
+      "blackbird"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "826287ae7eade9eb0dc82cf1e9fac6b253c66748"
+  },
+  {
+    "id": "space-shuttle-enterprise",
+    "file": "space-shuttle-enterprise.jpg",
+    "museum": "Intrepid Museum",
+    "title": "Space Shuttle Enterprise (OV-101)",
+    "maker": "NASA / Rockwell International",
+    "year": "1976",
+    "category": "vehicle",
+    "medium": "aluminum airframe (prototype orbiter)",
+    "expected_facts": [
+      "The first Space Shuttle orbiter, a prototype used for atmospheric approach-and-landing tests (never flew to space)",
+      "Delivered to the Intrepid Museum and displayed in its Space Shuttle Pavilion from 2012",
+      "Built for NASA by Rockwell International; designated OV-101"
+    ],
+    "difficulty": "medium",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Space_Shuttle_Enterprise_delivered_to_the_Intrepid_Museum.jpg",
+    "license": "Public domain (NASA)",
+    "expected_id_tokens": [
+      "enterprise"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "888a5a3a5164d085a2d9b945673077b39a6452e4"
+  },
+  {
+    "id": "concorde-gboad",
+    "file": "concorde-gboad.jpg",
+    "museum": "Intrepid Museum",
+    "title": "Concorde G-BOAD",
+    "maker": "British Aircraft Corporation / Aérospatiale",
+    "year": "1976",
+    "category": "vehicle",
+    "medium": "aluminum-alloy supersonic airliner",
+    "expected_facts": [
+      "A British Airways Concorde supersonic passenger jet (registration G-BOAD)",
+      "Holds the record for the fastest Atlantic crossing by a Concorde",
+      "On display at the Intrepid Sea, Air & Space Museum in New York"
+    ],
+    "difficulty": "medium",
+    "image_type": "in-situ-photo",
+    "source_url": "https://commons.wikimedia.org/wiki/File:British_Airways_Conorde_G-BOAD,_Intrepid_Sea,_Air_and_Space_Museum,_New_York._(45910117824).jpg",
+    "license": "CC BY-SA 2.0 (Roland Turner)",
+    "expected_id_tokens": [
+      "concorde"
+    ],
+    "expected_band": "PROBABLE",
+    "sha1": "5cc757cfd2e799c7beecae9a22a32572cf53a24e"
+  }
+]
