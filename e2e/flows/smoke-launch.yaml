@@ -1,0 +1,11 @@
+# SPIKE smoke: prove Maestro can launch the real native app and read a testID.
+# Not part of the deterministic tier — just the build+drive gate. clearState:false so the
+# dev-client keeps its Metro URL (a Release/standalone build is used for the real flows later).
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: "welcome.emailInput"
+    timeout: 60000

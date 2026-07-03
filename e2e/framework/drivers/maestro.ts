@@ -62,7 +62,7 @@ export class MaestroDriver implements Driver {
     if (!this.transport) {
       throw new Error(
         'MaestroDriver: no transport bound. iOS-native flows run via the `maestro` CLI on a Mac w/ Xcode ' +
-          '(see e2e/flows/*.yaml and docs/IOS-TESTING.md). This sandbox has Command Line Tools only.',
+          '(see e2e/flows/*.yaml).',
       )
     }
     await this.transport.send(cmd)
@@ -154,7 +154,7 @@ export interface CompileOptions {
   permissions?: Partial<Record<'camera' | 'microphone' | 'notifications', 'allow' | 'deny' | 'unset'>>
 }
 
-const DEFAULT_APP_ID = 'com.voxi.app'
+const DEFAULT_APP_ID = 'com.kvnlee.voxi'
 
 /** Record a Scenario's driver calls without a device, then serialize them to a Maestro flow YAML string. */
 export async function compileFlow(scenario: Scenario, opts: CompileOptions = {}): Promise<string> {
@@ -292,7 +292,7 @@ function compileCtx(driver: MaestroDriver, scenario: Scenario) {
       emit({ assertVisible: { id, text: matcher instanceof RegExp ? matcher.source : matcher } })
     },
     async attr(id: string, _key: string, _value: string | RegExp) {
-      // Maestro YAML cannot assert arbitrary a11y attributes; presence is the compilable proxy (see IOS-TESTING.md).
+      // Maestro YAML cannot assert arbitrary a11y attributes; presence is the compilable proxy.
       assertId(id)
     },
     async chipBand(id: string, _band: 'CONFIDENT' | 'PROBABLE' | 'UNKNOWN') {

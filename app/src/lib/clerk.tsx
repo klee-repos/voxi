@@ -72,11 +72,19 @@ export function useAuth(): AuthState {
 export const hasClerk = PUBLISHABLE_KEY.length > 0
 
 /**
+ * E2E (native Maestro build): a fixed user so flows land on the camera without driving welcome/OTP. Set ONLY in the
+ * maestro EAS profile; that build also ships an EMPTY Clerk key, so `hasClerk` is false and FakeAuth is the active
+ * provider — real Clerk can't even initialize (mutually exclusive by construction, matching the web harness).
+ */
+const TEST_USER = process.env.EXPO_PUBLIC_TEST_USER ?? ''
+
+/**
  * Deterministic offline auth used when no Clerk key is configured. The userId is derived from the email so
  * the BFF's per-user ACL and metering behave realistically in E2E.
  */
 function FakeAuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [email, setEmail] = React.useState<string | null>(null)
+  // In the maestro build, start signed-in as test:<TEST_USER> so index.tsx redirects straight to the camera.
+  const [email, setEmail] = React.useState<string | null>(TEST_USER ? `${TEST_USER}@voxi.dev` : null)
   const [pending, setPending] = React.useState<string | null>(null)
 
   const value = useMemo<AuthState>(
@@ -184,5 +192,9 @@ function ClerkAuthAdapter({
 
 /** The provider mounted in _layout.tsx. Picks the real Clerk path iff a key is configured. */
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
+  // maestro/E2E build → deterministic FakeAuth regardless of any baked Clerk key. EXPO_PUBLIC_TEST_MODE is pinned
+  // OFF in the prod/preview EAS profiles, so real builds never take this path (defence-in-depth: the BFF also
+  // rejects `test:` bearers unless the server runs VOXI_TEST_MODE).
+  if (process.env.EXPO_PUBLIC_TEST_MODE === '1') return <FakeAuthProvider>{children}</FakeAuthProvider>
   return hasClerk ? <ClerkBridge>{children}</ClerkBridge> : <FakeAuthProvider>{children}</FakeAuthProvider>
 }

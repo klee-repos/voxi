@@ -67,6 +67,10 @@ export function createStubCameraPermission(): CameraPermissionApi {
  * Lazy require so the web bundle never needs react-native-vision-camera.
  */
 export function createCameraPermission(): CameraPermissionApi {
+  // E2E (maestro build): the camera is fed a bundled fixture, so never touch vision-camera's REAL permission API
+  // (its OS prompt occludes the shutter and flakes Maestro). The deterministic stub reports granted (native
+  // default) — no prompt. Gated on EXPO_PUBLIC_TEST_MODE, which is pinned OFF in the prod/preview EAS profiles.
+  if (process.env.EXPO_PUBLIC_TEST_MODE === '1') return createStubCameraPermission()
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const vc = require('react-native-vision-camera') as typeof import('react-native-vision-camera')

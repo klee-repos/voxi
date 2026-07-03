@@ -1,0 +1,28 @@
+# Maestro flow (iOS native, deterministic) — drawer navigation. The bottom tab bar was replaced by a slide-out
+# drawer, so nav.settingsTab/threadsTab are occluded until nav.menuButton opens it. This is the CORRECT pattern
+# the previously-broken a11y-01/a11y-04/sub-03/thread-04 flows were missing (they tapped the drawer rows with no
+# open step). Proves: authed camera → open drawer → take the Settings row → land on Settings.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/drawer-nav.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- tapOn:
+    id: "nav.menuButton"
+- extendedWaitUntil:
+    visible:
+      id: "nav.settingsTab"
+    timeout: 15000
+- tapOn:
+    id: "nav.settingsTab"
+- extendedWaitUntil:
+    visible:
+      id: "settings.reduceMotion"
+    timeout: 15000

@@ -39,6 +39,8 @@ import { useThreadStreamRun } from '../src/lib/useThreadStreamRun'
 import { cacheReveal, getCachedReveal } from '../src/lib/revealCache'
 import { createCameraPermission, type CameraPermissionStatus } from '../src/lib/cameraPermission'
 import { toDataUri } from '../src/lib/photo'
+import { isTestMode, getTestSeed } from '../src/lib/testSeed'
+import { loadFixtureDataUri } from '../src/lib/e2eFixtures'
 import { revealEmptyState } from '../src/lib/loadingCopy'
 import type { AudioBucket, ThreadSummary } from '../src/lib/apiClient'
 import { registerFor } from '../../packages/shared/src/confidence'
@@ -88,6 +90,13 @@ function RevealBody(): React.ReactElement {
   const camMounted = useRef(true)
   const pendingCaptureScroll = useRef(false) // after a capture, scroll the pager onto the new item once it lands in `pages`
   const pagerRef = useRef<FlatList<ThreadSummary>>(null)
+  // While the pager is mid-scroll the fixed bottom chrome (dock / shutter bar) is HIDDEN, so it doesn't sit pinned
+  // over the sliding photos and pop on settle — the whole surface reads as one moving thing. Ref-guarded so a
+  // per-frame scroll event flips React state at most once per gesture.
+  const [transitioning, setTransitioning] = useState(false)
+  const transitioningRef = useRef(false)
+  const beginTransition = useCallback((): void => { if (!transitioningRef.current) { transitioningRef.current = true; setTransitioning(true) } }, [])
+  const endTransition = useCallback((): void => { if (transitioningRef.current) { transitioningRef.current = false; setTransitioning(false) } }, [])
   useEffect(() => {
     camMounted.current = true
     if (perm.getStatus() === 'undetermined') {
@@ -118,6 +127,7 @@ function RevealBody(): React.ReactElement {
   // contentFade — a sibling of the static GlassFill, so the native Liquid Glass never breaks.
   const overlayFade = useRef(new Animated.Value(run.phase === 'streaming' ? 1 : 0)).current
   const contentFade = useRef(new Animated.Value(band ? 1 : 0)).current
+  const viewfinderFade = useRef(new Animated.Value(1)).current // the viewfinder shutter bar (no glass — animate freely)
   const [overlayMounted, setOverlayMounted] = useState(run.phase !== 'settled')
   useEffect(() => {
     if (run.phase === 'streaming') {
@@ -129,6 +139,20 @@ function RevealBody(): React.ReactElement {
     }
     // 'failed' keeps the overlay mounted — the Orb pill shows the retry in place.
   }, [run.phase, reduceMotion, overlayFade, contentFade])
+
+  // Bottom chrome ANIMATES back in on settle (not a hard snap): while scrolling the chrome is hidden (the glass
+  // card via a hard opacity toggle, so the Liquid Glass never breaks); on settle the CONTENT fades + rises — the
+  // dock title/icons via contentFade (a GlassFill sibling, glass-safe), the glass-less shutter bar via viewfinderFade.
+  // Keyed ONLY on `transitioning` (band/index via refs) so a fresh capture's band-settle can't fire this early and
+  // race the loading overlay — that first entrance stays owned by the run.phase cross-dissolve above.
+  const bandRef = useRef(band); bandRef.current = band
+  const currentIndexRef = useRef(currentIndex); currentIndexRef.current = currentIndex
+  useEffect(() => {
+    if (transitioning) { contentFade.setValue(0); viewfinderFade.setValue(0); return }
+    const dur = reduceMotion ? 0 : 240
+    if (currentIndexRef.current <= 0) Animated.timing(viewfinderFade, { toValue: 1, duration: dur, useNativeDriver: false }).start()
+    else if (bandRef.current) Animated.timing(contentFade, { toValue: 1, duration: dur, useNativeDriver: false }).start()
+  }, [transitioning, reduceMotion, contentFade, viewfinderFade])
 
   // Cache this thread's FULLY-loaded content once research settles, so swiping back to it later paints instantly
   // (band + title + buckets) with no re-fetch/loading — "no loading when you go back and forth".
@@ -212,19 +236,26 @@ function RevealBody(): React.ReactElement {
     setBusy(true)
     setCamOffline(false)
     try {
-      const shot = (await cameraRef.current?.takePhoto().catch(() => null)) ?? null
       let photoUrl: string
       let displayUri: string | null
-      if (shot) {
-        photoUrl = await toDataUri(shot)
+      if (isTestMode()) {
+        // The iOS Simulator has no camera — load the bundled fixture through the SAME intake path (honest test
+        // image; the reveal band is steered by the optional seed, not the pixels).
+        photoUrl = await loadFixtureDataUri()
         displayUri = photoUrl
       } else {
-        const signed = await api.signUpload().catch(() => ({ url: 'capture://local' }) as { url: string })
-        photoUrl = signed.url
-        displayUri = null
+        const shot = (await cameraRef.current?.takePhoto().catch(() => null)) ?? null
+        if (shot) {
+          photoUrl = await toDataUri(shot)
+          displayUri = photoUrl
+        } else {
+          const signed = await api.signUpload().catch(() => ({ url: 'capture://local' }) as { url: string })
+          photoUrl = signed.url
+          displayUri = null
+        }
       }
       startCapture(displayUri)
-      const { threadId: newId } = await api.createThread({ photoUrl })
+      const { threadId: newId } = await api.createThread({ photoUrl, testSeed: getTestSeed() ?? undefined })
       void queryClient.invalidateQueries({ queryKey: threadsKey })
       setThread(newId)
       pendingCaptureScroll.current = true
@@ -304,21 +335,23 @@ function RevealBody(): React.ReactElement {
   // that item into the store, which repaints the dock. `currentIndex` drives which overlay shows (controls vs dock).
   const settleToOffset = useCallback(
     (x: number): void => {
+      endTransition() // scroll stopped → restore the bottom chrome for the settled page
       const idx = Math.round(x / (winW || 1))
       setCurrentIndex(idx)
       if (idx <= 0) return // page 0 = the live viewfinder; nothing to load, no navigation
       const target = pages[idx - 1] // items are offset by the leading viewfinder page
       if (target) loadPage(target)
     },
-    [pages, winW, loadPage],
+    [pages, winW, loadPage, endTransition],
   )
   const onPageScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      beginTransition() // any pager movement → hide the fixed bottom chrome until it settles
       const x = e.nativeEvent.contentOffset.x
       if (scrollTimer.current) clearTimeout(scrollTimer.current)
       scrollTimer.current = setTimeout(() => settleToOffset(x), 120)
     },
-    [settleToOffset],
+    [settleToOffset, beginTransition],
   )
   const onPageSettle = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
@@ -488,7 +521,7 @@ function RevealBody(): React.ReactElement {
       {/* The floating dock CARD — shown on an item page once the band settles (never on the viewfinder). During
           loading it's the Orb pill overlay above. STATIC glass card; only the content fades in on settle. */}
       {band && !onViewfinder ? (
-        <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, openBucket ? styles.dockHidden : null]} pointerEvents={openBucket ? 'none' : 'box-none'}>
+        <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, openBucket || transitioning ? styles.dockHidden : null]} pointerEvents={openBucket || transitioning ? 'none' : 'box-none'}>
           <View style={[styles.floatCard, shadow]}>
             <GlassFill radiusStyle={{ borderRadius: radius.xl }} />
             <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
@@ -597,7 +630,11 @@ function RevealBody(): React.ReactElement {
                   {camOffline ? "We're offline — your last capture will retry when you reconnect." : busy ? 'Capturing…' : pages.length === 0 ? 'Point at one object to begin.' : 'Tap to identify.'}
                 </Muted>
               ) : null}
-              <View style={[styles.bottomBar, { paddingBottom: space.xl + insets.bottom }]} pointerEvents="box-none">
+              {/* opacity stays hittable at 0 (a tap landing in the settle window still fires); it fades + rises in on settle */}
+              <Animated.View
+                style={[styles.bottomBar, { paddingBottom: space.xl + insets.bottom, opacity: viewfinderFade, transform: [{ translateY: viewfinderFade.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}
+                pointerEvents="box-none"
+              >
                 <View style={styles.side}>
                   <Pressable {...tid(ids.camera.recentToggle, 'Recently catalogued')} accessibilityRole="button" onPress={() => setTrayOpen(true)} hitSlop={10} style={[styles.iconBtn, { backgroundColor: onFeed ? 'rgba(0,0,0,0.35)' : surface.sunken }]}>
                     <Images size={22} color={onFeed ? '#FFFFFF' : surface.text} strokeWidth={2} />
@@ -605,7 +642,7 @@ function RevealBody(): React.ReactElement {
                 </View>
                 <CaptureOrb busy={busy} onPress={() => void onShutter()} size={80} />
                 <View style={styles.side} />
-              </View>
+              </Animated.View>
             </View>
             <RecentCard
               open={trayOpen}

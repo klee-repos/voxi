@@ -4,7 +4,7 @@
 # live-mic indicator on while held and off on release — the native push-to-talk contract. In VOXI_TEST_MODE
 # a deterministic voice fixture is fed to the mic so a Voxi turn comes back reproducibly (no live ASR/TTS).
 # Run on a Mac w/ Xcode:  maestro test e2e/flows/conv-01.yaml
-appId: com.voxi.app
+appId: com.kvnlee.voxi
 env:
   VOXI_TEST_MODE: "1"
   EMAIL: "qa+conv01@voxi.test"

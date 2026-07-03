@@ -1,37 +1,25 @@
-# Maestro flow (iOS native, deterministic) — auth-01: first launch → email → OTP → camera.
-# Maestro is the "Playwright for mobile": resilient id-based selectors, low-flake, fast to author/scale.
-# This is the iOS-native equivalent of the web Playwright auth scenario; both use the same testIds.
-# Run on a Mac w/ Xcode:  maestro test e2e/flows/auth-01.yaml
-appId: com.voxi.app
-env:
-  VOXI_TEST_MODE: "1"
-  EMAIL: "qa+auth01@voxi.test"
-  OTP: "424242" # deterministic OTP honored only in VOXI_TEST_MODE
+# Maestro flow (iOS native, deterministic) — auth-01: a launched maestro build lands the authed session on the
+# camera. The maestro build ships an empty Clerk key + EXPO_PUBLIC_TEST_USER, so FakeAuth starts signed-in as
+# test:<user> and app/app/index.tsx redirects straight to the camera — no welcome/OTP to drive (the real Clerk
+# email→OTP journey is covered by the web tier; this proves the native authed landing).
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/auth-01.yaml
+appId: com.kvnlee.voxi
 ---
 - launchApp:
     clearState: true
-    arguments:
-      voxiTestSeed: "auth-01"
-- assertVisible:
-    id: "welcome.emailInput"
-- tapOn:
-    id: "welcome.emailInput"
-- inputText: ${EMAIL}
-- tapOn:
-    id: "welcome.eulaAccept"
-- tapOn:
-    id: "welcome.ageConfirm"
-- tapOn:
-    id: "welcome.continueBtn"
-- assertVisible:
-    id: "welcome.otpInput"
-- tapOn:
-    id: "welcome.otpInput"
-- inputText: ${OTP}
-# Lands on the camera (the one screen that matters after login).
-- assertVisible:
-    id: "camera.screen"
-    timeout: 10000
-- assertVisible:
-    id: "camera.shutter"
-# No brittle coordinate taps anywhere — every step locates by a registered testId.
+    permissions:
+      camera: allow
+      microphone: allow
+# The camera page mounts the real camera view → iOS may still raise the OS permission dialog on a clean install;
+# answer it the way a user does (the only sanctioned non-testID matcher — system UI outside our app).
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000

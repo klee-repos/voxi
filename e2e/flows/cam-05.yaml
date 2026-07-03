@@ -4,7 +4,7 @@
 # time and short-circuits BEFORE any signed-URL upload or AI spend. In VOXI_TEST_MODE the camera is fed a
 # deterministic face-dominant seed image so the refusal path is reproducible.
 # Run on a Mac w/ Xcode:  maestro test e2e/flows/cam-05.yaml
-appId: com.voxi.app
+appId: com.kvnlee.voxi
 env:
   VOXI_TEST_MODE: "1"
   EMAIL: "qa+cam05@voxi.test"

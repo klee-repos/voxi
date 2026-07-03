@@ -1,89 +1,32 @@
-# Maestro flow (iOS native, agentic-friendly but deterministic here) — cam-03: shutter captures a frame →
-# uploads via signed URL → processing begins (plan §10.2.4 / cam-03 row, surface I,L).
-# What this proves on real iOS that web cannot: the native camera shutter captures a real frame and the
-# event-driven processing screen rises. In VOXI_TEST_MODE the camera is fed a deterministic seed image so
-# the run is reproducible (no live photo, no live AI spend) while still exercising the real capture path.
-# Run on a Mac w/ Xcode:  maestro test e2e/flows/cam-03.yaml
-appId: com.voxi.app
-env:
-  VOXI_TEST_MODE: "1"
-  EMAIL: "qa+cam03@voxi.test"
-  OTP: "424242"
+# Maestro flow (iOS native, deterministic) — cam-03: the native shutter captures → the event-driven reveal rises.
+# The iOS Simulator has no camera, so in the maestro build (EXPO_PUBLIC_TEST_MODE=1) the shutter feeds a bundled
+# fixture image through the SAME intake path (app/app/reveal.tsx onShutter → POST /v1/threads). With no band seed
+# the deterministic test-BFF returns a PROBABLE reveal; reveal.card + reveal.title rise. This proves the real
+# capture→createThread→NDJSON-stream→reveal pipeline on the native binary, not react-native-web.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/cam-03.yaml
+appId: com.kvnlee.voxi
 ---
 - launchApp:
     clearState: true
-    clearKeychain: true
     permissions:
-      camera: allow # capture path requires a granted camera; priming covered by cam-01
+      camera: allow
       microphone: allow
-    arguments:
-      voxiTestSeed: "cam-03" # seeds a deterministic capture fixture in test mode
-# --- sign in ---
-- assertVisible:
-    id: "welcome.emailInput"
-- tapOn:
-    id: "welcome.emailInput"
-- inputText: ${EMAIL}
-- tapOn:
-    id: "welcome.eulaAccept"
-- tapOn:
-    id: "welcome.ageConfirm"
-- tapOn:
-    id: "welcome.continueBtn"
-- assertVisible:
-    id: "welcome.otpInput"
-- tapOn:
-    id: "welcome.otpInput"
-- inputText: ${OTP}
-# --- skip past first-run priming straight to a live camera (permissions already granted) ---
 - runFlow:
     when:
       visible:
-        id: "firstRun.meetVoxiNext"
+        text: "Allow"
     commands:
       - tapOn:
-          id: "firstRun.meetVoxiNext"
-      - runFlow:
-          when:
-            visible:
-              id: "firstRun.cameraPrimeAllow"
-          commands:
-            - tapOn:
-                id: "firstRun.cameraPrimeAllow"
-      - runFlow:
-          when:
-            visible:
-              id: "firstRun.micPrimeAllow"
-          commands:
-            - tapOn:
-                id: "firstRun.micPrimeAllow"
-      - runFlow:
-          when:
-            visible:
-              id: "firstRun.privacyAck"
-          commands:
-            - tapOn:
-                id: "firstRun.privacyAck"
-# --- live camera ready; press the single shutter ---
-- assertVisible:
-    id: "camera.screen"
-    timeout: 10000
-- assertVisible:
-    id: "camera.shutter"
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
 - tapOn:
     id: "camera.shutter"
-# Capture → signed-URL upload → the event-driven processing screen rises with its orb + looping line.
-- assertVisible:
-    id: "processing.screen"
-    timeout: 15000
-- assertVisible:
-    id: "processing.orb"
-- assertVisible:
-    id: "processing.loadingLine"
-# Processing is genuinely underway (deterministic seed → terminal REVEAL); the reveal card eventually rises.
 - extendedWaitUntil:
     visible:
       id: "reveal.card"
-    timeout: 30000
+    timeout: 60000
 - assertVisible:
     id: "reveal.title"

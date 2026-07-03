@@ -61,7 +61,7 @@ export class AppiumDriver implements Driver {
     if (!this.session)
       throw new Error(
         'AppiumDriver: no XCUITest session bound. iOS agentic runs need Appium + a booted simulator on a ' +
-          'Mac w/ Xcode (see docs/IOS-TESTING.md). This sandbox has Command Line Tools only.',
+          'Mac w/ Xcode.',
       )
     return this.session
   }
@@ -87,7 +87,7 @@ export class AppiumDriver implements Driver {
   }
   async speak(fixtureName: string) {
     // Deterministic voice fixture: in VOXI_TEST_MODE the app reads `voxiVoiceFixture`; this nudges it to play.
-    await this.require().execute('mobile: launchApp', { bundleId: 'com.voxi.app', arguments: ['--voxiSpeak', fixtureName] })
+    await this.require().execute('mobile: launchApp', { bundleId: 'com.kvnlee.voxi', arguments: ['--voxiSpeak', fixtureName] })
   }
 
   // ---- observation ----
@@ -134,7 +134,7 @@ export class AppiumDriver implements Driver {
   async grantPermission(p: 'camera' | 'mic' | 'notifications', granted: boolean) {
     const map = { camera: 'camera', mic: 'microphone', notifications: 'notifications' } as const
     await this.require().execute('mobile: setPermission', {
-      bundleId: 'com.voxi.app',
+      bundleId: 'com.kvnlee.voxi',
       access: { [map[p]]: granted ? 'yes' : 'no' },
     })
   }

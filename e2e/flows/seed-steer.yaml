@@ -1,0 +1,43 @@
+# Maestro flow (iOS native, deterministic) — proves the deep-link BAND-STEER seam end to end: after landing on the
+# camera, Maestro drives `openLink voxi://e2e?seed=pill`; app/app/+native-intent.tsx stashes the seed and routes
+# back to the camera; onShutter forwards it as the `X-Voxi-Test-Seed` header; the test-BFF maps it to obj:pill →
+# the safety-refusal stream. A DISTINCT outcome (global.safetyRefusal, NOT reveal.card) proves the seed actually
+# reached the server and changed the reveal.
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/seed-steer.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?seed=pill"
+# iOS confirms opening a custom-scheme URL — this system prompt (outside our app) is the only non-testID matcher.
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 30000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "global.safetyRefusal"
+    timeout: 60000

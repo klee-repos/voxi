@@ -4,7 +4,7 @@
 # VOXI_TEST_MODE the app binds RevenueCat to the StoreKit sandbox / a deterministic test offering, so the
 # paywall and restore are reproducible without a live App Store account.
 # Run on a Mac w/ Xcode:  maestro test e2e/flows/sub-03.yaml
-appId: com.voxi.app
+appId: com.kvnlee.voxi
 env:
   VOXI_TEST_MODE: "1"
   EMAIL: "qa+sub03@voxi.test"

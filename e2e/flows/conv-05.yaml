@@ -5,7 +5,7 @@
 # surfaces the native RevenueCat paywall. In VOXI_TEST_MODE the user is seeded at zero remaining voice
 # minutes so the cutoff is deterministic and immediate (no waiting out real minutes, no live charge).
 # Run on a Mac w/ Xcode:  maestro test e2e/flows/conv-05.yaml
-appId: com.voxi.app
+appId: com.kvnlee.voxi
 env:
   VOXI_TEST_MODE: "1"
   EMAIL: "qa+conv05@voxi.test"

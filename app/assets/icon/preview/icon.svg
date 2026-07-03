@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <radialGradient id="bg" cx="0.5" cy="0.46" r="0.85"><stop offset="0" stop-color="#1B1440"/><stop offset="0.42" stop-color="#100B24"/><stop offset="1" stop-color="#070511"/></radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="rgba(70,205,150,0.2)"/><stop offset="0.4" stop-color="rgba(78,162,250,0.14)"/><stop offset="0.7" stop-color="rgba(78,162,250,0.05)"/><stop offset="1" stop-color="rgba(78,162,250,0)"/></radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="rgba(78,162,250,0.05)"/><stop offset="0.55" stop-color="rgba(78,162,250,0.16)"/><stop offset="0.7" stop-color="rgba(78,162,250,0.34)"/><stop offset="0.74" stop-color="rgba(78,162,250,0.3)"/><stop offset="0.86" stop-color="rgba(78,162,250,0.1)"/><stop offset="1" stop-color="rgba(78,162,250,0)"/></radialGradient>
+    <radialGradient id="sphere" cx="0.5" cy="0.44" r="0.6"><stop offset="0" stop-color="#E9FFF4"/><stop offset="0.1" stop-color="#B4F0D2"/><stop offset="0.24" stop-color="#63D598"/><stop offset="0.42" stop-color="#2FB268"/><stop offset="0.6" stop-color="#1E9A5C"/><stop offset="0.78" stop-color="#1A8C6E"/><stop offset="0.9" stop-color="#1E8F86"/><stop offset="1" stop-color="#249B96"/></radialGradient>
+    <radialGradient id="rim" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="rgba(150,225,255,0)"/><stop offset="0.9" stop-color="rgba(150,225,255,0)"/><stop offset="0.955" stop-color="rgba(150,225,255,0.6)"/><stop offset="0.99" stop-color="rgba(150,225,255,0.14)"/><stop offset="1" stop-color="rgba(150,225,255,0)"/></radialGradient>
+    <linearGradient id="shade" x1="0.2" y1="0.16" x2="0.84" y2="0.88"><stop offset="0" stop-color="rgba(255,255,255,0.04)"/><stop offset="0.5" stop-color="rgba(0,0,0,0)"/><stop offset="1" stop-color="rgba(2,10,20,0.34)"/></linearGradient>
+    <radialGradient id="glint" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="rgba(255,255,255,0.9)"/><stop offset="0.55" stop-color="rgba(255,255,255,0.3)"/><stop offset="1" stop-color="rgba(255,255,255,0)"/></radialGradient>
+    <clipPath id="ball"><circle cx="512" cy="470" r="238"/></clipPath>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="7" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="470" r="430" fill="url(#glow)"/>
+  <circle cx="512" cy="470" r="330" fill="url(#halo)"/>
+  <circle cx="512" cy="470" r="238" fill="url(#sphere)"/>
+  <g clip-path="url(#ball)"><circle cx="512" cy="470" r="238" fill="url(#shade)"/></g>
+  <circle cx="512" cy="470" r="238" fill="url(#rim)"/>
+  <ellipse cx="428" cy="374" rx="58" ry="33" fill="url(#glint)" transform="rotate(-34 428 374)" filter="url(#soft)"/>
+  <circle cx="430" cy="370" r="8" fill="rgba(255,255,255,0.82)"/>
+  <rect width="1024" height="1024" filter="url(#grain)" opacity="0.028"/>
+  
+  <rect x="0" y="874" width="1024" height="150" fill="#B79BFF"/>
+  <rect x="0" y="869" width="1024" height="5" fill="rgba(255,255,255,0.28)"/>
+  <text x="512" y="975" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="800" font-size="76" letter-spacing="14" fill="#0A0A0F">BETA</text>
+</svg>

@@ -71,3 +71,6 @@ e2e/web/.*-result.txt
 
 # ─── AI assistant instructions (local-only for now) ──────────────────
 CLAUDE.md
+
+# Isolated app-icon generator deps (scripts/icons is not a workspace)
+scripts/icons/node_modules/

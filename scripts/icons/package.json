@@ -1,0 +1,13 @@
+{
+  "name": "voxi-icon-gen",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Isolated SVG->PNG generator for the Voxi app icons. NOT a workspace member (scripts/ is excluded from the root workspaces glob), so @resvg/resvg-js + sharp never enter the app/EAS install.",
+  "scripts": {
+    "gen": "node generate.js"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "sharp": "0.35.3"
+  }
+}

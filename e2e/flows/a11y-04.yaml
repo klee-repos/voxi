@@ -6,7 +6,7 @@
 # minimum hit target. Under VOXI_TEST_MODE the app accepts uiContentSizeCategory as a launch argument so the
 # Dynamic Type axis is deterministic without scripting the iOS Settings app.
 # Run on a Mac w/ Xcode:  maestro test e2e/flows/a11y-04.yaml
-appId: com.voxi.app
+appId: com.kvnlee.voxi
 env:
   VOXI_TEST_MODE: "1"
   EMAIL: "qa+a11y04@voxi.test"
