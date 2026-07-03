@@ -1,5 +1,5 @@
 /**
- * Deterministic guard for the design.md migration (docs/design-migration-plan.md).
+ * Deterministic guard for the design.md migration.
  *
  * The e2e web tier is a testID-driven mock and cannot see token values; there is no
  * native render here. So this pure test is the real guard that the reskin is correct
@@ -141,7 +141,7 @@ function compositeOver(rgba: string, bgHex: string): string {
   return `#${hx(mix(Number(m[1]), bg(0)))}${hx(mix(Number(m[2]), bg(2)))}${hx(mix(Number(m[3]), bg(4)))}`
 }
 
-describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.md §10)', () => {
+describe('glass material — Liquid Glass AA guard', () => {
   // The dock is DARK glass with LIGHT text (mist100) over the full-bleed photo. Worst case for light text = the tint
   // composited over the BRIGHTEST backdrop (a white photo region) → lightest composite → lowest contrast. Guard that
   // light text still clears AA there, so a future alpha drop (glass too see-through → washes toward gray) fails CI.
@@ -157,7 +157,7 @@ describe('glass material — Liquid Glass AA guard (docs/REVEAL-DOCK-GLASS-PLAN.
   // Sources list, so it must clear AA. It reads AA ONLY because the morph card always sits over CARD_SCRIM (the deep
   // scrim behind the card, RevealDock.tsx CARD_SCRIM) UNDER the card glass (tintCard): that composite ≈ dark.bg,
   // where blue is ~5:1. Guard it (the plain scrim-less form is ~4.2:1 and would FAIL) so removing the scrim behind
-  // the card, or lightening tintCard, re-opens the issue in CI. (docs/REVEAL-CARD-CLEANUP-PLAN.md §2a/§6 R4.)
+  // the card, or lightening tintCard, re-opens the issue in CI.
   const CARD_SCRIM = 'rgba(20,18,14,0.60)' // = RevealDock.tsx CARD_SCRIM (scrim behind the morph card)
   test('blue source-title link ≥ 4.5:1 on the card material (tintCard over CARD_SCRIM over white)', () => {
     const cardBackdrop = compositeOver(glass.tintCard, compositeOver(CARD_SCRIM, '#FFFFFF'))

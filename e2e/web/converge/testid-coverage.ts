@@ -1,7 +1,7 @@
 /**
  * testid-coverage.ts — STATIC convergence check (companion to the runtime reveal-rnw.web.ts proof).
  *
- * The convergence contract (docs/CONVERGENCE.md): the harness web UI (e2e/web/server.ts) and the REAL Expo
+ * The convergence contract: the harness web UI (e2e/web/server.ts) and the REAL Expo
  * screens (app/app/*.tsx + app/app/(tabs)/*.tsx + their components) must locate behind the SAME testid set, so
  * a scenario written against the harness runs unchanged against the real screens. This check proves that set
  * equality statically — no browser, no creds — and fails loudly on drift, so a screen can never silently grow
@@ -126,7 +126,7 @@ else {
 
 console.log(`\nsummary: registry=${registry.size} app=${appIds.size} harness=${harnessIds.size} iosOnly=${IOS_ONLY.size}`)
 if (divergences.length) {
-  console.log('--- convergence divergences (recorded in docs/CONVERGENCE.md; close when server.ts adopts the real components) ---')
+  console.log('--- convergence divergences (close when server.ts adopts the real components) ---')
   for (const d of divergences) console.log('  •', d)
 }
 console.log(

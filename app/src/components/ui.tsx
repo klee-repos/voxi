@@ -191,7 +191,7 @@ export function Button({
 
 // No NavClose primitive: the top-left chevron / top-right X behavior lives in the universal <AppHeader/>
 // (leading="back" | onClose), which keeps nav.close (modal X) distinct from nav.back (the back chevron) and
-// applies the safe-area inset consistently. See docs/UNIVERSAL-HEADER-PLAN.md.
+// applies the safe-area inset consistently.
 
 export function PressableTile({
   id,

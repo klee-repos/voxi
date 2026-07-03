@@ -103,7 +103,7 @@ export interface World {
 }
 
 export interface Scenario {
-  id: string // matches docs/TEST-PLAN.md
+  id: string
   title: string
   /** 'deterministic' forbids agentic steps (CI backbone); 'hybrid' allows agent.achieve for navigation only. */
   pure: 'deterministic' | 'hybrid'

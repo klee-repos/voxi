@@ -101,7 +101,7 @@ framework/
   world.ts          disposable seeded Postgres + BFF test-mode boot
   assertions.ts     deterministic assertion helpers (expectChipState, expectPlaying, expectRefusal, …)
   runner.ts         picks surface, runs scenarios, reports (JUnit + screenshots + a11y dumps)
-scenarios/          one file per feature/scenario (TS) — see docs/TEST-PLAN.md for the full matrix
+scenarios/          one file per feature/scenario (TS)
 flows/              Maestro YAML for the iOS golden paths (generated from scenarios where possible)
 fixtures/           seed.sql, vendor tapes, sample object photos
 ```

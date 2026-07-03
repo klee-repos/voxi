@@ -8,7 +8,6 @@
  * Honesty: the creds-free default deployment grounds facts via Vertex, whose source URLs are opaque
  * `vertexaisearch.cloud.google.com/grounding-api-redirect/…` proxies — NOT a real publisher. We never render a
  * proxy host (it would read as "vertexaisearch…" / Title-cased "Google"); such rows are suppressed entirely.
- * See docs/REVEAL-CARD-CLEANUP-PLAN.md §3.2/§3.6.
  */
 
 /** The minimal source shape these helpers consume — a structural subset of `RevealFact`/`RevealSection`. */

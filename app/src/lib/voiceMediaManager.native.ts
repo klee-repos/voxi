@@ -134,7 +134,7 @@ class VoxiAudioMediaManager extends MediaManager {
     this.stream = null
     // Restore a playback-capable AVAudioSession. @daily-co/react-native-webrtc forces `.playAndRecord` on mic
     // acquire and NEVER restores it, so a reveal narration played after a voice call would otherwise hit
-    // AVFoundation -11800 / kCMBaseObjectError_ParamErr -12780 (H_session, docs/RCA-reveal-audio-avfoundation.md).
+    // AVFoundation -11800 / kCMBaseObjectError_ParamErr -12780 (H_session).
     // Best-effort — a failed restore must not block teardown.
     try {
       const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio')

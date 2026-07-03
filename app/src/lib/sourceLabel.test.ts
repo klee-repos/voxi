@@ -1,5 +1,5 @@
 /**
- * Unit guard for the reveal Sources-list display helpers (docs/REVEAL-CARD-CLEANUP-PLAN.md §3.2/§3.6). These are the
+ * Unit guard for the reveal Sources-list display helpers. These are the
  * only owners of the hostname-fallback, redirect-suppression, and dedupe branches that no deterministic E2E can
  * exhaustively cover, so they are tested here directly (pure, no render).
  */

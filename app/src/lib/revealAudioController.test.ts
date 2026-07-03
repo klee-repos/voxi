@@ -1,6 +1,6 @@
 /**
  * Deterministic proof that RevealAudioController eliminates the reveal-audio race
- * (RCA: docs/RCA-reveal-audio-avfoundation.md). No RN runtime — an injected mock player records the exact
+ * (RCA). No RN runtime — an injected mock player records the exact
  * call order, mirroring scratchpad/race-demo.ts but as a durable regression guard.
  *
  * The bug was: on speak-aloud-open two effects raced the singleton player → play() on an empty queue + a

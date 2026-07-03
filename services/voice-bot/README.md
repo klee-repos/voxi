@@ -88,5 +88,5 @@ required guarantees are asserted directly:
   The test suite proves the *control flow* (once-only persona, barge-in discard, idempotent write-back,
   voice-id consistency, hard cutoff), not vendor behaviour.
 
-Per `docs/IMPLEMENTATION-STATUS.md`, live integration (real ElevenLabs/Deepgram/Gemini) and iOS-native voice
+Live integration (real ElevenLabs/Deepgram/Gemini) and iOS-native voice
 verification require creds and a Mac+Xcode respectively; the logic layer above proceeds without them.

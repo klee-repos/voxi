@@ -4,8 +4,8 @@
  * lock-screen, UIBackgroundModes:[audio]); the playback service is registered at startup (nativeStartup.native.ts).
  *
  * All access to the process-global singleton player goes through ONE `RevealAudioController`
- * (lib/revealAudioController.ts) so the reveal narration can never race itself. See
- * docs/RCA-reveal-audio-avfoundation.md: the previous three-effect design let a speak-aloud open fire play() on an
+ * (lib/revealAudioController.ts) so the reveal narration can never race itself. The previous three-effect design
+ * let a speak-aloud open fire play() on an
  * empty queue + a double play()/configureAudioSession, churning the AVAudioSession mid-load and invalidating the
  * CoreMedia "Fig" player (AVFoundation -11800 / kCMBaseObjectError_ParamErr -12780). This file is now a thin
  * wrapper: it builds the real TrackPlayer adapter + a data-URI→cache-file resolver + a playback-session guard, and
@@ -73,7 +73,7 @@ async function resolveUrl(src: string): Promise<string> {
   return uri
 }
 
-/** Part B (H_session, docs/RCA-reveal-audio-avfoundation.md): force the AVAudioSession to a playback category
+/** Part B (H_session): force the AVAudioSession to a playback category
  *  before narration, so a session left in `.playAndRecord` by a prior WebRTC voice call can't invalidate the
  *  item. Best-effort — never blocks playback. (The voice loop also restores playback on disconnect; this is the
  *  point-of-use belt to that suspenders.) */

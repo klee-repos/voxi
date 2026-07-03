@@ -5,7 +5,7 @@
  * are the deterministic, seeded in-memory interview/contribution services in the harness — no stub forces a
  * green, no app internals are reached into, elements are located ONLY by ids from testids.ts.
  *
- * Covers docs/TEST-PLAN.md §9 rows:
+ * Covers the knowledge-base scenario rows:
  *   kb-01  interview capped at 2–3 Qs + skip/later + thread kept on bail (reached via the real UNKNOWN scan)
  *   kb-02  shared/private visibility toggle defaults to PRIVATE
  *   kb-03  add-a-tip status: TL0 → "a moderator will review"; TL2+ → "live now" (server-side trust gate)

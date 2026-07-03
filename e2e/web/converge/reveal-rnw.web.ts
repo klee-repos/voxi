@@ -1,5 +1,5 @@
 /**
- * reveal-rnw.web.ts — CONVERGENCE PROOF for the ANALYSIS-UX reveal redesign (docs/ANALYSIS-UX-REDESIGN-PLAN.md).
+ * reveal-rnw.web.ts — CONVERGENCE PROOF for the ANALYSIS-UX reveal redesign.
  *
  * Renders the REAL Expo screen `app/app/reveal.tsx` (unmodified app source, real child components, real Zustand
  * store, real shared confidence register, real ApiClient → real voxi-api BFF) under react-native-web in a real

@@ -14,7 +14,7 @@
  * The component tree is UNMODIFIED app code: Reveal → SurfaceProvider → RevealBody → Screen/Title/Body/Orb/
  * ConfidenceChip/Banners/FadeRise + useCaptureStore + registerFor(shared). Only three Expo-resolved imports
  * (expo-router, expo-image, react-native-safe-area-context) are bundler-aliased to web shims — exactly what
- * babel-preset-expo/Metro do on the real web build (see docs/CONVERGENCE.md).
+ * babel-preset-expo/Metro do on the real web build.
  */
 import React, { useEffect, useState } from 'react'
 

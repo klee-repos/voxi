@@ -2,7 +2,7 @@
  * RevealAudioController — serializes ALL access to the process-global native player so the reveal narration
  * can never race itself.
  *
- * ── Why this exists (RCA: docs/RCA-reveal-audio-avfoundation.md) ─────────────────────────────────────────
+ * ── Why this exists (RCA) ────────────────────────────────────────────────────────────────────────────────
  * The old AudioElement.native.tsx drove react-native-track-player (a singleton) from THREE independent async
  * React effects. On reveal speak-aloud-open, `playing` is already true when the element mounts, so the
  * `[src]` effect (resolveUrl → reset → add → play, gated behind file I/O) and the `[playing]` effect

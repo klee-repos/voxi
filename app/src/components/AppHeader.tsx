@@ -1,7 +1,7 @@
 /**
  * AppHeader — the app's ONE universal top bar (design.md nav). Constant height (`space.sm + insets.top +
  * BAR_H`) regardless of which controls it holds — only the glyphs swap, never the bar (validated against iOS
- * patterns in Mobbin; see docs/UNIVERSAL-HEADER-PLAN.md). Three regions:
+ * patterns in Mobbin). Three regions:
  *   • LEFT   — `leading`: 'back' (lucide ChevronLeft) · 'menu' (hamburger, opens the drawer) · 'none'.
  *              Camera root + reveal-refusal card pair 'menu' with the left-aligned serif `voxi` wordmark
  *              (design.md nav-home). The large-title drawer SECTIONS (Collection/Settings) use 'menu' with NO

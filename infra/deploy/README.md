@@ -119,7 +119,7 @@ the service itself exports no long-lived server, and infra owns the container, n
 
 ## Known gaps / seams (honest)
 
-See the top-level report and `docs/IMPLEMENTATION-STATUS.md`. In short: the eve `front`/`poller` and
+In short: the eve `front`/`poller` and
 `podcast-worker` entrypoints are **documented seams** that boot the real entry once the eve-backend (G3) and
 worker workflows land their `server.ts`/`poller.ts`; until then the wrappers **fail loudly**, never serve a
 fake. The Worker Pool deploy assumes `gcloud beta run worker-pools`; `deploy.sh` prints the GCE-MIG / GKE

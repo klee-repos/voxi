@@ -126,8 +126,8 @@ feature work stays blocked.
 
 - `out/pinned-versions.json` — the G3 pinned triple (feeds `infra/ci` matrix + the §4.5 thin-adapter).
 - `out/result.json` — `{ C0..C4: pass|fail, C3_mode: "completes"|"impossible", S1_schedules, throughput }`.
-- A line in `docs/IMPLEMENTATION-STATUS.md` flipping `services/eve-agent` from "scaffolded (gated on G3)" to
-  real — **only on PASS** (status doc owned by a sibling workflow; this spike supplies the evidence).
+- The status flip of `services/eve-agent` from "scaffolded (gated on G3)" to real — **only on PASS** (status
+  tracked by a sibling workflow; this spike supplies the evidence).
 
 ## 5. If G3 fails — the pre-committed response (§4.5 / §22.3)
 

@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
   headerHairline: { height: StyleSheet.hairlineWidth },
   // flexShrink:1 (NOT flex:1 — the card is maxHeight:'82%' with no explicit height) so short content lays out fully
   // and the card hugs it, but on overflow only the ScrollView shrinks+scrolls — the fixed tab bar + pinned transport
-  // never fall below the screen edge (RN's default flexShrink is 0; docs/REVEAL-CARD-CLEANUP-PLAN.md §2a).
+  // never fall below the screen edge (RN's default flexShrink is 0).
   cardScroll: { marginTop: space.md, flexShrink: 1 },
   madeBlock: {}, // "when it was made" line; the hairline + top spacing are applied inline only when maker prose precedes it
   factRow: { paddingVertical: space.sm, gap: space.xs }, // divider list (IMDb-trivia): fact text + its own source link

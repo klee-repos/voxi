@@ -3,7 +3,7 @@
  * runner is just its assertions). Builds a real-component bundle with esbuild (RNW's blessed bundler), serves it
  * on top of the REAL voxi-api BFF (createWebHarness gives the production /api routes), and opens a real Chromium
  * via Playwright. The aliases below are EXACTLY what babel-preset-expo + Metro substitute on the real
- * `expo start --web` (see reveal-rnw.web.ts header + docs/CONVERGENCE.md). Nothing in app/ is edited.
+ * `expo start --web` (see reveal-rnw.web.ts header). Nothing in app/ is edited.
  */
 import path from 'path'
 import { build as esbuild } from 'esbuild'
@@ -57,7 +57,7 @@ export async function buildConvergeBundle(clientEntry: string): Promise<string> 
     banner: { js: 'globalThis.global=globalThis.global||globalThis;globalThis.process=globalThis.process||{env:{NODE_ENV:"production"}};' },
     loader: { '.js': 'jsx' },
     alias: {
-      // the convergence boundary (see docs/CONVERGENCE.md) — exactly Metro's web substitutions.
+      // the convergence boundary — exactly Metro's web substitutions.
       react: dep('react'),
       'react-dom': dep('react-dom'),
       zustand: dep('zustand'),
