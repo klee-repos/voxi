@@ -82,3 +82,6 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Local design-system → claude.ai/design sync tooling (personal, not needed to build/run Voxi)
+.design-sync/
