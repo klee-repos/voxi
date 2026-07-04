@@ -12,6 +12,7 @@
 import { useCallback } from 'react'
 import { useRouter } from 'expo-router'
 import { useCaptureStore } from '../state/captureStore'
+import { isThreadStreaming } from './threadStream'
 import { revisitThread } from './revisitThread'
 import type { ThreadSummary } from './apiClient'
 
@@ -28,7 +29,14 @@ export function useRevisitThread(): (item: ThreadSummary) => void {
   const setBand = useCaptureStore((s) => s.setBand)
 
   return useCallback(
-    (item: ThreadSummary) => revisitThread(item, { startCapture, setThread, markRevisit, hydrate, setBand, push: (href) => router.push(href) }),
+    (item: ThreadSummary) => revisitThread(item, {
+      startCapture, setThread, markRevisit, hydrate, setBand,
+      // ATTACH-TO-SURVIVOR: the keepAlive survivor pump (if any) is keyed by the store's current threadId. If the
+      // tapped item IS that thread + its cascade is still streaming, revisitThread short-circuits to a bare navigate
+      // so it does NOT abort the survivor + reset researchComplete (which would force a full cascade re-run).
+      isStreamingThread: (tid) => isThreadStreaming() && useCaptureStore.getState().threadId === tid,
+      push: (href) => router.push(href),
+    }),
     [router, startCapture, setThread, markRevisit, hydrate, setBand],
   )
 }

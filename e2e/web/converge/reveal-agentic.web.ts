@@ -46,17 +46,17 @@ const audioMpeg = async (): Promise<{ src: string; paused: boolean; t: number } 
 await page.goto(`${base}/?scan=confident`)
 await d.waitFor(ids.reveal.buckets, { timeoutMs: 8000 })
 
-// ── Goal 1: the agent opens the identity bucket to hear what it is. ──
+// ── Goal 1: the agent opens the identity card via Details (the research lane collapsed to one icon → "What it is"). ──
 const openWhat: Planner = async (_g, obs) => {
   const v = (id: string) => obs.visibleIds.includes(id)
-  if (v(ids.reveal.bucketCard)) return { kind: 'done', rationale: 'the What card is open' }
-  if (v(ids.reveal.bucketWhat)) return { kind: 'tap', id: ids.reveal.bucketWhat, rationale: 'open "What it is"' }
+  if (v(ids.reveal.bucketCard)) return { kind: 'done', rationale: 'the identity card is open' }
+  if (v(ids.reveal.detailsIcon)) return { kind: 'tap', id: ids.reveal.detailsIcon, rationale: 'open Details → lands on "What it is"' }
   return { kind: 'done', rationale: 'dock not ready' }
 }
-await new Agent(d, openWhat).achieve('open the identity bucket', { maxSteps: 4 })
-await check('agent opened the What card (morph) via a real perceived tap', async () => {
+await new Agent(d, openWhat).achieve('open the identity card via Details', { maxSteps: 4 })
+await check('agent opened the What card (morph) via a real perceived tap on Details', async () => {
   await d.waitFor(ids.reveal.bucketCard, { timeoutMs: 3000 })
-  if ((await d.state(ids.reveal.bucketCard)).attrs.bucket !== 'what') throw new Error('card is not the What bucket')
+  if ((await d.state(ids.reveal.bucketCard)).attrs.bucket !== 'what') throw new Error('card is not the What bucket (Details should open at the first active bucket)')
 })
 await check('the bucket audio round-trips the REAL /speech route and plays after the agent tap', async () => {
   const deadline = Date.now() + 9000
@@ -185,8 +185,8 @@ await check('READY → tap back → the viewfinder shows IN PLACE; the item is p
 
 // ── Goal 7 (Round 4 — REVEAL-WHAT-MAKER): a logo-brand PROBABLE reveal must SURFACE the fixed buckets under real
 //    taps — the WHAT names the CATEGORY (never a bare hedge), the MAKER names the BRAND (deriveMaker corroborated-
-//    brand lane), the PURPOSE anchors the object. The agent opens each bucket by perception and the CONTENT is pinned
-//    deterministically. This closes the Maker/Purpose bucket taps that did not exist in this proof before. ──
+//    brand lane), the PURPOSE anchors the object. The research lane is collapsed under Details now, so the agent
+//    opens Details (perception), then switches IN PLACE to each bucket's tab; the CONTENT is pinned deterministically. ──
 await page.goto(`${base}/?scan=logobrand`)
 await d.waitFor(ids.reveal.buckets, { timeoutMs: 8000 })
 const pollActive = async (id: string, ms = 8000): Promise<void> => {
@@ -194,37 +194,48 @@ const pollActive = async (id: string, ms = 8000): Promise<void> => {
   while (Date.now() < deadline) { if ((await d.state(id)).attrs.state === 'active') return; await new Promise((r) => setTimeout(r, 120)) }
   throw new Error(`${id} never became active`)
 }
-const CARD_ATTR: Record<string, string> = { [ids.reveal.bucketWhat]: 'what', [ids.reveal.bucketPurpose]: 'purpose', [ids.reveal.bucketWho]: 'maker' }
-// A planner that opens the target bucket's morph card by perception (closing a wrong-bucket card first).
-const openBucketCard = (bucketId: string): Planner => async (_g, obs) => {
+// Open Details via the Agent (perception-driven) — lands on the first active bucket.
+const openDetails: Planner = async (_g, obs) => {
   const v = (id: string) => obs.visibleIds.includes(id)
-  if (v(ids.reveal.bucketCard)) {
-    const cur = (await d.state(ids.reveal.bucketCard)).attrs.bucket
-    if (cur === CARD_ATTR[bucketId]) return { kind: 'done', rationale: 'target card is open' }
-    return { kind: 'tap', id: ids.nav.close, rationale: 'close the wrong card first' }
-  }
-  if (v(bucketId)) return { kind: 'tap', id: bucketId, rationale: `open ${bucketId}` }
-  return { kind: 'done', rationale: 'bucket not reachable' }
+  if (v(ids.reveal.bucketCard)) return { kind: 'done', rationale: 'the research card is open' }
+  if (v(ids.reveal.detailsIcon)) return { kind: 'tap', id: ids.reveal.detailsIcon, rationale: 'open Details (the research lane)' }
+  return { kind: 'done', rationale: 'dock not ready' }
 }
-const cardTextFor = async (bucketId: string, label: string): Promise<string> => {
-  await pollActive(bucketId)
-  await new Agent(d, openBucketCard(bucketId)).achieve(`open the ${label} bucket`, { maxSteps: 6 })
-  await d.waitFor(ids.reveal.bucketCard, { timeoutMs: 3000 })
+// Switch the open card IN PLACE to a target bucket tab (direct locator — the tabs share the cardTab testID, like the
+// Goal 2 facts tab), then return the card's text. Asserts the card landed on the target — the LLM never decides.
+const openTabText = async (target: 'what' | 'purpose' | 'maker', label: string): Promise<string> => {
+  await pollActive(ids.reveal.detailsIcon) // the research lane has grounded content (the aggregate is active)
+  if (!(await d.state(ids.reveal.bucketCard)).visible) {
+    await new Agent(d, openDetails).achieve('open the Details card', { maxSteps: 4 })
+    await d.waitFor(ids.reveal.bucketCard, { timeoutMs: 3000 })
+  }
+  if ((await d.state(ids.reveal.bucketCard)).attrs.bucket !== target) {
+    const tab = page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="${target}"]`)
+    const dl = Date.now() + 8000
+    while (Date.now() < dl && (await tab.count()) === 0) await new Promise((r) => setTimeout(r, 120))
+    if ((await tab.count()) === 0) throw new Error(`the ${target} card tab never appeared (${label} did not ground)`)
+    await tab.first().click()
+    const dl2 = Date.now() + 3000
+    while (Date.now() < dl2) {
+      if ((await d.state(ids.reveal.bucketCard)).attrs.bucket === target) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
   const st = await d.state(ids.reveal.bucketCard)
-  if (st.attrs.bucket !== CARD_ATTR[bucketId]) throw new Error(`opened the ${st.attrs.bucket} card, not ${label}`)
+  if (st.attrs.bucket !== target) throw new Error(`opened the ${st.attrs.bucket} card, not ${label}`)
   return st.text ?? ''
 }
 
-await check('logo-brand: the MAKER bucket, opened by a real perceived tap, NAMES the brand (Microsoft) — the "empty maker" complaint fixed', async () => {
-  const t = await cardTextFor(ids.reveal.bucketWho, 'maker')
+await check('logo-brand: the MAKER tab NAMES the brand (Microsoft) — the "empty maker" complaint fixed', async () => {
+  const t = await openTabText('maker', 'maker')
   if (!/microsoft/i.test(t)) throw new Error('maker card does not name Microsoft: ' + JSON.stringify(t))
 })
-await check('logo-brand: the PURPOSE bucket, opened by a real perceived tap, ANCHORS the object (a controller for an Xbox), not a bare category truism', async () => {
-  const t = await cardTextFor(ids.reveal.bucketPurpose, 'purpose')
+await check('logo-brand: the PURPOSE tab ANCHORS the object (a controller for an Xbox), not a bare category truism', async () => {
+  const t = await openTabText('purpose', 'purpose')
   if (!/controller/i.test(t) || !/xbox|game/i.test(t)) throw new Error('purpose card does not anchor the object: ' + JSON.stringify(t))
 })
-await check('logo-brand: the WHAT bucket, opened by a real perceived tap, NAMES the category (a game controller), never a bare hedge — the "what never says what it is" complaint fixed', async () => {
-  const t = await cardTextFor(ids.reveal.bucketWhat, 'what')
+await check('logo-brand: the WHAT tab NAMES the category (a game controller), never a bare hedge — the "what never says what it is" complaint fixed', async () => {
+  const t = await openTabText('what', 'what')
   if (!/game controller|controller/i.test(t)) throw new Error('what card does not name the category: ' + JSON.stringify(t))
   if (/^\s*(i'?d wager|i would wager)/i.test(t)) throw new Error('what is a bare hedge with no identification: ' + JSON.stringify(t))
 })
@@ -232,7 +243,7 @@ await check('logo-brand: the WHAT bucket, opened by a real perceived tap, NAMES 
 await rig.stop()
 console.log(
   fails() === 0
-    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real reveal dock by perception (open What → hear it, open Facts → chips, Ask Voxi → nav; recovered from a refusal back to the viewfinder in place; saw the empty home IS the live viewfinder; slid back in place with the item preserved; and on a logo-brand reveal opened What/Purpose/Maker and pinned the fixed content — category named, object anchored, brand named), every outcome pinned deterministically'
+    ? '\nAGENTIC PROOF GREEN — an autonomous agent navigated the real 3-icon reveal dock by perception (open Details → What card → hear it, switch to the Facts tab → chips, Ask Voxi → nav; recovered from a refusal back to the viewfinder in place; saw the empty home IS the live viewfinder; slid back in place with the item preserved; and on a logo-brand reveal opened Details + switched tabs to What/Purpose/Maker, pinning the fixed content — category named, object anchored, brand named), every outcome pinned deterministically'
     : `\nAGENTIC FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

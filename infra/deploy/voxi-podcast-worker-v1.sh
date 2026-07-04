@@ -2,7 +2,7 @@
 #
 # Voxi v1 deploy — the Deep Dive podcast render worker as a SECOND Cloud Run service (voxi-podcast-worker). The BFF
 # (voxi-api) gates the credit then hands the render here over HTTP (x-worker-secret shared secret); this service runs
-# the REAL pipeline (Vertex research → Gemini script → honesty gates → ElevenLabs TTS → ffmpeg mux), UPLOADS the MP3
+# the REAL pipeline (Firecrawl→OpenAI research → OpenAI script → honesty gates → ElevenLabs TTS → ffmpeg mux), UPLOADS the MP3
 # to a PUBLIC GCS bucket, and keeps render status + the asset in a PRIVATE GCS bucket. It reuses the voxi-api SA.
 #
 # SCALE-TO-ZERO: fully stateless (keyed on (item,version) in GCS), so it runs --min-instances 0 → $0 idle, a few
@@ -45,9 +45,9 @@ if [ "${STEP:-all}" = "all" ]; then
   if ! gcloud secrets describe voxi-elevenlabs-key --project "$PROJECT" >/dev/null 2>&1; then
     echo "ERROR: secret voxi-elevenlabs-key is missing — run infra/deploy/voxi-api-v1.sh first." >&2; exit 1
   fi
-  # GLM + Firecrawl are REQUIRED (research/script run on GLM-5.2 over Firecrawl; the worker boot asserts both). Both
-  # are seeded by voxi-api-v1.sh, so fail fast here if a fresh checkout skipped it.
-  for K in voxi-glm-key voxi-firecrawl-key; do
+  # OpenAI + Firecrawl are REQUIRED (research/script run on OpenAI gpt-5.4-mini over Firecrawl; the worker boot asserts
+  # both). Both are seeded by voxi-api-v1.sh, so fail fast here if a fresh checkout skipped it.
+  for K in voxi-openai-key voxi-firecrawl-key; do
     if ! gcloud secrets describe "$K" --project "$PROJECT" >/dev/null 2>&1; then
       echo "ERROR: secret $K is missing — run infra/deploy/voxi-api-v1.sh first." >&2; exit 1
     fi
@@ -97,14 +97,14 @@ gcloud builds submit "$REPO_ROOT" --project "$PROJECT" \
 # worker's boot GCS self-check (server.ts) crash-loops the revision if the SA can't write — so a missing/unpropagated
 # storage grant fails THIS deploy, not the first user render (P5).
 say "Deploying Cloud Run service '${SVC}' (scale-to-zero) ⚠"
-# GEMINI_MODEL is no longer set on the worker: research/script moved to GLM-5.2, and the native-Gemini research
-# fallback defaults to gemini-3.5-flash inside providers.ts (read from the env only if overridden).
+# GEMINI_MODEL is no longer set on the worker: research/script moved to OpenAI gpt-5.4-mini, and the native-Gemini
+# research fallback defaults to gemini-3.5-flash inside providers.ts (read from the env only if overridden).
 gcloud run deploy "$SVC" --project "$PROJECT" --region "$REGION" \
   --image "${IMAGE}:${SHA}" \
   --service-account "$SA_EMAIL" \
   --allow-unauthenticated \
-  --set-secrets "ELEVENLABS_API_KEY=voxi-elevenlabs-key:latest,PODCAST_WORKER_SECRET=voxi-podcast-worker-secret:latest,GLM_API_KEY=voxi-glm-key:latest,FIRECRAWL_API_KEY=voxi-firecrawl-key:latest" \
-  --set-env-vars "GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_LOCATION=global,GLM_BASE_URL=https://api.z.ai/api/paas/v4/,VOXI_ENV=production,PODCAST_OUT_DIR=/tmp/voxi-podcasts,GCS_AUDIO_BUCKET=${AUDIO_BUCKET},GCS_STATE_BUCKET=${STATE_BUCKET},SENTRY_RELEASE=${SHA}" \
+  --set-secrets "ELEVENLABS_API_KEY=voxi-elevenlabs-key:latest,PODCAST_WORKER_SECRET=voxi-podcast-worker-secret:latest,OPENAI_API_KEY=voxi-openai-key:latest,FIRECRAWL_API_KEY=voxi-firecrawl-key:latest" \
+  --set-env-vars "GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_LOCATION=global,OPENAI_BASE_URL=https://api.openai.com/v1/,VOXI_ENV=production,PODCAST_OUT_DIR=/tmp/voxi-podcasts,GCS_AUDIO_BUCKET=${AUDIO_BUCKET},GCS_STATE_BUCKET=${STATE_BUCKET},SENTRY_RELEASE=${SHA}" \
   --memory 2Gi --cpu 2 --min-instances 0 --max-instances 1 --no-cpu-throttling --concurrency 8 --timeout 600
 
 WORKER_URL="$(gcloud run services describe "$SVC" --project "$PROJECT" --region "$REGION" --format='value(status.url)')"

@@ -4,7 +4,7 @@
  * idempotent podcast gate, account deletion cascade.
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
-import { createApp, speechBucketText, buildItemContext, buildPodcastContext, type Deps, type RevealRecord, type RevealStore, type PodcastAssetStore, type PodcastAssetRecord } from './app'
+import { createApp, speechBucketText, buildItemContext, buildPodcastContext, isServableAudioUrl, type Deps, type RevealRecord, type RevealStore, type PodcastAssetStore, type PodcastAssetRecord } from './app'
 import type { StreamEvent } from '../../../packages/shared/src/events'
 import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { testVerifier } from './auth'
@@ -528,5 +528,254 @@ describe('BFF /v1/podcast — reveal CONTEXT threading (DEEPDIVE context complet
     expect(res.status).toBe(200)
     expect(enqueued[0]!.subject).toBe('Some Object')
     expect(enqueued[0]!.context).toBeUndefined()
+  })
+})
+
+// ── /v1/threads/:id/ask — grounded "Ask Voxi" chat (F1) ──────────────────────────────────────────────────
+import type { ChatProvider } from './app'
+
+describe('BFF /v1/threads/:id/ask (grounded Ask Voxi chat)', () => {
+  // Build a world where A owns a thread + a CONFIDENT reveal with one fact; chat is a deterministic fake that
+  // records calls + echoes the evidence count (so the test proves the route built REAL grounding, not a stub).
+  async function askWorld(opts?: { voiceMin?: number; chatThrows?: boolean }): Promise<{
+    app: ReturnType<typeof createApp>
+    threadId: string
+    calls: () => number
+    reveals: ReturnType<typeof buildPgStores>['reveals']
+    close: () => void
+  }> {
+    const db = await PGlite.create()
+    const durable = await buildPgStores(db)
+    let calls = 0
+    let threadN = 0
+    const chat: ChatProvider = {
+      async reply(args) {
+        calls++
+        if (opts?.chatThrows) throw new Error('gemini down')
+        // CONFIDENT reveal → 'id' evidence + 1 fact evidence = 2 refs; echo so the test proves real grounding.
+        return { text: `SENTINEL(${args.evidence.length}):${args.question}`, grounded: true }
+      },
+    }
+    const deps: Deps = {
+      verifier: testVerifier,
+      store: memoryStore({ A: { scan: 5, podcast: 1, voiceMin: opts?.voiceMin ?? 10 }, B: { scan: 5, podcast: 0, voiceMin: 5 } }),
+      eve: { async createSession({ userId }) { return { sessionId: `sess_${userId}_${threadN++}`, continuationToken: 'ct' } }, async *stream() { yield JSON.stringify({ type: 'done', sessionId: 'x' }) } },
+      deletion: { async cascade() { return { deleted: [] } } },
+      bucket: 'voxi-photos',
+      sessionOwner: new Map(),
+      threads: durable.threads,
+      reveals: durable.reveals,
+      messages: durable.messages,
+      chat,
+    }
+    const app = createApp(deps)
+    const created = await app.request('/v1/threads', { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ photoUrl: 'data:image/jpeg;base64,AA' }) })
+    const threadId = (await created.json()).threadId as string
+    // Pin a durable reveal with one fact so /ask has grounded context + evidence (the 'id' ref is added on CONFIDENT).
+    await durable.reveals.put({ threadId, ownerUserId: 'A', band: 'CONFIDENT', title: 'Cannondale', candidates: [], narration: 'A 2008 Cannondale.', createdAt: Date.now(), events: [{ type: 'fact', text: 'Made in Pennsylvania.', sourceUrl: 'https://example.com/cannondale', index: 0 } as unknown as StreamEvent] })
+    return { app, threadId, calls: () => calls, reveals: durable.reveals, close: () => db.close() }
+  }
+  const voiceMin = async (app: ReturnType<typeof createApp>, u: string) => (await (await app.request('/v1/me', { headers: auth(u) })).json()).remaining.voiceMin as number
+
+  test('answers from the durable reveal, charges one voiceMin, persists user + guide turns', async () => {
+    const w = await askWorld()
+    const before = await voiceMin(w.app, 'A')
+    const res = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'where was it made?', userClientKey: 'k1' }) })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.text).toBe('SENTINEL(2):where was it made?') // 1 fact + 'id' (CONFIDENT) = 2 evidence refs
+    expect(body.replay).toBe(false)
+    expect(body.grounded).toBe(true) // F1c: with-reveal response carries the grounded flag
+    expect(before - (await voiceMin(w.app, 'A'))).toBe(1)
+    const msgs = (await (await w.app.request(`/v1/threads/${w.threadId}/messages`, { headers: auth('A') })).json()).messages as { text: string }[]
+    expect(msgs.map((m) => m.text)).toEqual(['where was it made?', body.text])
+    w.close()
+  })
+
+  test('idempotent replay: same userClientKey returns the prior guide text, no re-charge, no re-call', async () => {
+    const w = await askWorld()
+    await (await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })).json()
+    const calls1 = w.calls()
+    const before = await voiceMin(w.app, 'A')
+    const replay = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(replay.status).toBe(200)
+    const rb = await replay.json()
+    expect(rb.replay).toBe(true)
+    expect(rb.text).toBe('SENTINEL(2):q')
+    expect(w.calls()).toBe(calls1) // Gemini NOT re-called
+    expect(before - (await voiceMin(w.app, 'A'))).toBe(0) // NOT re-charged
+    w.close()
+  })
+
+  test('owner ACL: a non-owner is denied (403) and never reaches the chat provider', async () => {
+    const w = await askWorld()
+    const before = w.calls()
+    const res = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('B'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(res.status).toBe(403)
+    expect(w.calls()).toBe(before)
+    w.close()
+  })
+
+  test('no_reveal: a thread with no durable reveal → 200 route-owned reply, no charge, no chat.reply call', async () => {
+    const w = await askWorld()
+    const created = await w.app.request('/v1/threads', { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ photoUrl: 'data:image/jpeg;base64,AA' }) })
+    const bare = (await created.json()).threadId as string
+    const before = await voiceMin(w.app, 'A')
+    const callsBefore = w.calls()
+    const res = await w.app.request(`/v1/threads/${bare}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.text).toBe("I haven't been able to identify this one yet. Try photographing it again and I'll have another look.")
+    expect(body.grounded).toBe(false)
+    expect(body.replay).toBe(false)
+    expect(before - (await voiceMin(w.app, 'A'))).toBe(0) // no charge — the route owns the reply, no vendor call
+    expect(w.calls()).toBe(callsBefore) // chat.reply NOT called — the route owns the no-reveal reply (F1b eliminated)
+    // both turns persisted (idempotent on the user's clientKey so a retry is a free replay)
+    const msgs = (await (await w.app.request(`/v1/threads/${bare}/messages`, { headers: auth('A') })).json()).messages as { text: string; role: string }[]
+    expect(msgs.map((m) => m.text)).toEqual(['q', body.text])
+    // idempotent replay: same userClientKey returns the prior guide text, no re-charge, no re-call
+    const replay = await w.app.request(`/v1/threads/${bare}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    const rb = await replay.json()
+    expect(rb.replay).toBe(true)
+    expect(rb.text).toBe(body.text)
+    expect(w.calls()).toBe(callsBefore) // still NOT called
+    w.close()
+  })
+
+  test('wrong-owner reveal → 404 (defense-in-depth: a reveal owned by another user stays a hard 404, not the route-owned reply)', async () => {
+    const w = await askWorld()
+    // B owns a thread; manufacture a data inconsistency by pinning a reveal owned by A on B's thread. The thread-owner
+    // ACL passes (B owns the thread), so the reveal check is reached. The wrong-owner-reveal branch must stay a hard
+    // 404 — it must NOT fail open to the no-reveal route-owned reply (defense-in-depth: a non-owner reveal is a data
+    // inconsistency, not a legitimate HEDGE case). This pins that the F1a split did NOT weaken the existing guard.
+    const created = await w.app.request('/v1/threads', { method: 'POST', headers: { ...auth('B'), 'content-type': 'application/json' }, body: JSON.stringify({ photoUrl: 'data:image/jpeg;base64,AA' }) })
+    const bThread = (await created.json()).threadId as string
+    await w.reveals.put({ threadId: bThread, ownerUserId: 'A', band: 'CONFIDENT', title: 'Cannondale', candidates: [], narration: 'A 2008 Cannondale.', createdAt: Date.now(), events: [] })
+    const before = await voiceMin(w.app, 'B')
+    const callsBefore = w.calls()
+    const res = await w.app.request(`/v1/threads/${bThread}/ask`, { method: 'POST', headers: { ...auth('B'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(res.status).toBe(404) // wrong-owner reveal → hard 404, NOT the 200 route-owned reply
+    expect(before - (await voiceMin(w.app, 'B'))).toBe(0) // no charge
+    expect(w.calls()).toBe(callsBefore) // chat.reply NOT called
+    w.close()
+  })
+
+  test('F1d: a request with no userClientKey → 400 (closes the null-key replay-dedup hole)', async () => {
+    const w = await askWorld()
+    const before = await voiceMin(w.app, 'A')
+    const callsBefore = w.calls()
+    const res = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q' }) })
+    expect(res.status).toBe(400)
+    expect(before - (await voiceMin(w.app, 'A'))).toBe(0) // no charge
+    expect(w.calls()).toBe(callsBefore) // chat.reply NOT called
+    w.close()
+  })
+
+  test('charge fail-closed: out of voiceMin → 402, never reaches the chat provider', async () => {
+    const w = await askWorld({ voiceMin: 0 }) // A owns the thread + reveal but has no voice minutes
+    const before = w.calls()
+    const res = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(res.status).toBe(402)
+    expect(w.calls()).toBe(before)
+    w.close()
+  })
+
+  test('chat down (Gemini throws) → 503 guide_unavailable, no guide turn persisted', async () => {
+    const w = await askWorld({ chatThrows: true })
+    const res = await w.app.request(`/v1/threads/${w.threadId}/ask`, { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'q', userClientKey: 'k1' }) })
+    expect(res.status).toBe(503)
+    const msgs = (await (await w.app.request(`/v1/threads/${w.threadId}/messages`, { headers: auth('A') })).json()).messages as { role: string }[]
+    expect(msgs.find((m) => m.role === 'guide')).toBeUndefined() // no guide turn landed
+    w.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F2 — stale audio_url guard. The reported "Deep Dive takes forever, never finishes, no error" bug was NOT a
+// render hang: 3 durable `ready` rows carried a RETIRED worker-relative audio_url
+// (<worker-origin>/audio/:item/v:version/episode.mp3) cached before the GCS rework. The GCS worker has no
+// /audio/ route → the URL 404s → AVPlayer spins on it silently. The BFF must refuse to vouch for a cached
+// audio_url it cannot serve, at BOTH read paths (the thread payload the player primes on, AND the poll route).
+// Proven via Cloud Logging + Cloud SQL before/after — see .full-send/DEEPDIVE-HANG-RCA.md.
+// ---------------------------------------------------------------------------
+describe('BFF /v1/podcast — stale audio_url guard (F2)', () => {
+  test('isServableAudioUrl: only the public GCS host is servable', () => {
+    expect(isServableAudioUrl(undefined)).toBe(false)
+    expect(isServableAudioUrl(null)).toBe(false)
+    expect(isServableAudioUrl('')).toBe(false)
+    // the retired worker route (the bug):
+    expect(isServableAudioUrl('https://voxi-podcast-worker-xyz-uc.a.run.app/audio/c1/v1/episode.mp3')).toBe(false)
+    // the public GCS URL the current worker returns:
+    expect(isServableAudioUrl('https://storage.googleapis.com/voxi-podcast-audio-x/podcasts/c1/v1/episode.mp3')).toBe(true)
+  })
+
+  // Boot the real app on PGlite with a durable podcasts row carrying a given audio_url, plus a recording
+  // podcastStatus stub (the worker /status seam) so the F2 fall-through is observable.
+  async function buildWithAudioUrl(audioUrl: string | null) {
+    const db = await PGlite.create()
+    const durable = await buildPgStores(db)
+    let statusCalls = 0
+    const deps: Deps = {
+      verifier: testVerifier,
+      store: durable.store,
+      eve: { async createSession({ userId }) { return { sessionId: `sess_${userId}_1`, continuationToken: 'ct' } }, async *stream() { /* unused */ } },
+      deletion: { async cascade() { return { deleted: [] } } },
+      bucket: 'voxi-photos',
+      sessionOwner: new Map<string, string>(),
+      threads: durable.threads,
+      photos: durable.photos,
+      podcasts: durable.podcasts,
+      podcastStatus: {
+        // The worker re-poll after F2's fall-through returns a FRESH, servable GCS url (the real worker does too).
+        async status() {
+          statusCalls++
+          return { state: 'ready', audioUrl: 'https://storage.googleapis.com/voxi-podcast-audio-x/podcasts/c1/v1/episode.mp3' }
+        },
+      },
+    }
+    const app = createApp(deps)
+    const created = await app.request('/v1/threads', { method: 'POST', headers: { ...auth('A'), 'content-type': 'application/json' }, body: JSON.stringify({ photoUrl: 'data:image/jpeg;base64,AAAA' }) })
+    const threadId = (await created.json()).threadId as string
+    const token = 'gen_stale_fixture_token'
+    await durable.podcasts.upsert({ token, userId: 'A', catalogItemId: threadId, version: 1, status: 'ready', audioUrl, createdAt: Date.now(), updatedAt: Date.now() })
+    return { app, threadId, token, statusCalls: () => statusCalls, close: () => db.close() }
+  }
+
+  test('GET /v1/threads/:id OMITS a stale audio_url but keeps state=ready (no downgrade of status)', async () => {
+    const h = await buildWithAudioUrl('https://voxi-podcast-worker-xyz-uc.a.run.app/audio/c1/v1/episode.mp3')
+    const res = await h.app.request(`/v1/threads/${h.threadId}`, { headers: auth('A') })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.podcast.state).toBe('ready')        // status NOT downgraded (the "ready never regresses" invariant)
+    expect(body.podcast.audioUrl).toBeUndefined()   // the dead URL is withheld → the player probe (`state==='ready' && audioUrl`) does NOT seed it
+    await h.close()
+  })
+
+  test('GET /v1/podcast/:token falls through to the worker when the cached URL is stale (asserts URL + stub call, NOT state alone)', async () => {
+    // Discriminator (test-integrity): a state==='ready'-only assertion is GREEN ON BOTH SIDES — the buggy
+    // short-circuit also returns state:'ready' with the dead URL. The test must pin the URL VALUE and prove the
+    // worker re-poll actually ran.
+    const staleUrl = 'https://voxi-podcast-worker-xyz-uc.a.run.app/audio/c1/v1/episode.mp3'
+    const h = await buildWithAudioUrl(staleUrl)
+    const res = await h.app.request(`/v1/podcast/${h.token}`, { headers: auth('A') })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(h.statusCalls()).toBe(1)                  // F2 fell through to the worker (F2-missing short-circuits → 0)
+    expect(body.state).toBe('ready')
+    expect(body.audioUrl).not.toBe(staleUrl)         // never the stale worker URL
+    expect(body.audioUrl).toBe('https://storage.googleapis.com/voxi-podcast-audio-x/podcasts/c1/v1/episode.mp3') // the fresh GCS url
+    await h.close()
+  })
+
+  test('no regression: a healthy GCS audio_url is served on BOTH routes (short-circuit; worker NOT polled)', async () => {
+    const gcsUrl = 'https://storage.googleapis.com/voxi-podcast-audio-x/podcasts/c1/v1/episode.mp3'
+    const h = await buildWithAudioUrl(gcsUrl)
+    const thread = await h.app.request(`/v1/threads/${h.threadId}`, { headers: auth('A') })
+    expect((await thread.json()).podcast.audioUrl).toBe(gcsUrl)   // getThread serves a healthy URL unchanged
+    const poll = await h.app.request(`/v1/podcast/${h.token}`, { headers: auth('A') })
+    const pollBody = await poll.json()
+    expect(pollBody.audioUrl).toBe(gcsUrl)                         // poll short-circuits (no worker call)
+    expect(h.statusCalls()).toBe(0)
+    await h.close()
   })
 })

@@ -4,9 +4,12 @@ import {
   startDeepDive,
   regenerateDeepDive,
   cancelDeepDive,
+  forgetDeepDive,
   seedReadyDeepDive,
+  reconcileDeepDive,
   getDeepDiveStatus,
   deepDiveIconState,
+  useDeepDiveStore,
   __resetDeepDive,
   __awaitDeepDive,
   type DeepDiveApi,
@@ -133,6 +136,42 @@ describe('cancelDeepDive', () => {
   })
 })
 
+describe('forgetDeepDive (bulk-delete cleanup)', () => {
+  test('cancels an in-flight job AND removes the byThread key (no session leak)', async () => {
+    const api = fakeApi([{ state: 'composing' }, { state: 'ready', audioUrl: 'u' }])
+    startDeepDive(api, { threadId: 't1' }, { sleep: noSleep, pollMs: 0 })
+    expect(getDeepDiveStatus('t1').state).toBe('composing')
+    expect('t1' in useDeepDiveStore.getState().byThread).toBe(true)
+    forgetDeepDive('t1')
+    await __awaitDeepDive('t1')
+    // The cancelled job never flips to ready, AND the store key is GONE (not just reset to IDLE).
+    expect(getDeepDiveStatus('t1').state).not.toBe('ready')
+    expect('t1' in useDeepDiveStore.getState().byThread).toBe(false)
+  })
+
+  test('drops a stale ready entry a player will never reconcile (the bulk-delete leak case)', () => {
+    seedReadyDeepDive('t1', 'u.m4a')
+    expect('t1' in useDeepDiveStore.getState().byThread).toBe(true)
+    forgetDeepDive('t1')
+    expect('t1' in useDeepDiveStore.getState().byThread).toBe(false)
+  })
+
+  test('REGRESSION GUARD: cancelDeepDive leaves the key (only forgetDeepDive removes it)', async () => {
+    // The contrast that makes forgetDeepDive necessary: cancelDeepDive stops the job but the byThread entry dangles.
+    const api = fakeApi([{ state: 'composing' }, { state: 'ready', audioUrl: 'u' }])
+    startDeepDive(api, { threadId: 't1' }, { sleep: noSleep, pollMs: 0 })
+    cancelDeepDive('t1')
+    await __awaitDeepDive('t1')
+    expect(getDeepDiveStatus('t1').state).not.toBe('ready')
+    expect('t1' in useDeepDiveStore.getState().byThread).toBe(true) // still present — the leak forgetDeepDive fixes
+  })
+
+  test('no-op on an unknown thread (safe for partial-failure retry)', () => {
+    expect(() => forgetDeepDive('never-existed')).not.toThrow()
+    expect('never-existed' in useDeepDiveStore.getState().byThread).toBe(false)
+  })
+})
+
 describe('regenerateDeepDive', () => {
   test('fires a FRESH generate after ready, at a fresh (timestamp) version != 1 — the whole point', async () => {
     seedReadyDeepDive('t1', 'orig.m4a') // start from a durable episode
@@ -204,5 +243,64 @@ describe('deepDiveIconState', () => {
     expect(deepDiveIconState({ state: 'ready', failReason: null, startedAt: null })).toBe('ready')
     expect(deepDiveIconState({ state: 'idle', failReason: null, startedAt: null })).toBe('active')
     expect(deepDiveIconState({ state: 'failed', failReason: 'render', startedAt: null })).toBe('active')
+  })
+})
+
+// F3 — the player's mount probe reconciles the store with the server's podcast truth. The reported bug: a stale
+// `ready` cached earlier in the session (a pre-fix episode whose worker-relative audio URL 404s after the GCS
+// rework) kept the player attached to a DEAD episode until a force-quit. Reconcile clears it so Generate shows.
+describe('reconcileDeepDive — server-truth reconciliation on player mount', () => {
+  test('server has a SERVABLE ready → seeds it into an idle store', () => {
+    reconcileDeepDive('t1', { state: 'ready', audioUrl: 'https://storage.googleapis.com/b/podcasts/t1/v1/ep.m4a' })
+    expect(getDeepDiveStatus('t1').state).toBe('ready')
+    expect(getDeepDiveStatus('t1').audioUrl).toBe('https://storage.googleapis.com/b/podcasts/t1/v1/ep.m4a')
+  })
+
+  test('server ready with a FRESH url OVERWRITES a stale cached ready (seedReadyDeepDive would no-op here)', () => {
+    seedReadyDeepDive('t1', 'https://voxi-podcast-worker-x.a.run.app/audio/t1/v1/ep.m4a') // stale dead url cached
+    expect(getDeepDiveStatus('t1').audioUrl).toBe('https://voxi-podcast-worker-x.a.run.app/audio/t1/v1/ep.m4a')
+    reconcileDeepDive('t1', { state: 'ready', audioUrl: 'https://storage.googleapis.com/b/podcasts/t1/v1/ep.m4a' })
+    expect(getDeepDiveStatus('t1').audioUrl).toBe('https://storage.googleapis.com/b/podcasts/t1/v1/ep.m4a') // overwritten
+  })
+
+  test('server has NO episode (F1 deleted the row → getThread podcast=null) → a stale ready is CLEARED to idle', () => {
+    seedReadyDeepDive('t1', 'https://voxi-podcast-worker-x.a.run.app/audio/t1/v1/ep.m4a') // stale ready cached this session
+    expect(getDeepDiveStatus('t1').state).toBe('ready')
+    reconcileDeepDive('t1', null) // server truth: no episode
+    expect(getDeepDiveStatus('t1').state).toBe('idle') // cleared → player shows Generate (startDeepDive proceeds)
+    expect(getDeepDiveStatus('t1').audioUrl).toBeUndefined()
+  })
+
+  test('server ready but the BFF WITHHELD the url (F2 stale-URL guard) → stale ready is CLEARED to idle', () => {
+    seedReadyDeepDive('t1', 'https://voxi-podcast-worker-x.a.run.app/audio/t1/v1/ep.m4a')
+    reconcileDeepDive('t1', { state: 'ready' /* audioUrl withheld: undefined */ })
+    expect(getDeepDiveStatus('t1').state).toBe('idle')
+    expect(getDeepDiveStatus('t1').audioUrl).toBeUndefined()
+  })
+
+  test('a stale SLOW (budget-lapsed) episode is also cleared when the server has no servable ready', () => {
+    // prime a slow state by running a poll that exhausts its budget
+    const api = fakeApi([{ state: 'composing' }], {}) // never resolves ready → budget lapses to slow
+    startDeepDive(api, { threadId: 't1', subject: 'X' }, { sleep: noSleep, pollMs: 0, pollMax: 1 })
+    return __awaitDeepDive('t1').then(() => {
+      expect(getDeepDiveStatus('t1').state).toBe('slow')
+      reconcileDeepDive('t1', null)
+      expect(getDeepDiveStatus('t1').state).toBe('idle')
+    })
+  })
+
+  test('no-op while a poll job is in flight (the live poller owns the terminal write)', async () => {
+    const d = deferred<void>()
+    const api = fakeApi([], {})
+    // park a generate mid-flight so jobs.has('t1') stays true
+    const realApi: DeepDiveApi = {
+      async generatePodcast() { api.generateCalls++; await d.promise; return { token: 'tok', replay: false } },
+      async podcastStatus() { api.statusCalls++; return { state: 'composing' as const } },
+    }
+    startDeepDive(realApi, { threadId: 't1', subject: 'X' }, { sleep: noSleep })
+    reconcileDeepDive('t1', { state: 'ready', audioUrl: 'https://storage.googleapis.com/b/x.m4a' }) // must not clobber the in-flight composing
+    expect(getDeepDiveStatus('t1').state).toBe('composing')
+    d.resolve()
+    await __awaitDeepDive('t1')
   })
 })

@@ -19,6 +19,7 @@ import {
   type ThreadStore,
   type RevealStore,
   type RevealRecord,
+  type ChatProvider,
   type RefundStore,
   type PhotoStore,
   type PodcastAssetStore,
@@ -33,18 +34,19 @@ import { testVerifier } from '../../services/voxi-api/src/auth'
 import { memoryStore, type Store, type Entitlements } from '../../services/voxi-api/src/metering'
 import { NarrationStore } from '../../services/voxi-api/src/narration-store'
 import type { NarrationAudioCache } from '../../services/voxi-api/src/app'
+import { createVoiceRoutes } from '../../services/voxi-api/src/voice-routes'
 import { registerFor, type ConfidenceBand } from '../../packages/shared/src/confidence'
 
 // ---------------------------------------------------------------------------
 // Deterministic eve stream — terminal outcome chosen by the seeded object.
 // ---------------------------------------------------------------------------
-type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill' | 'logobrand'
+type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill' | 'logobrand' | 'bggen'
 
 /** Parse the seeded object out of the photoUrl the client sent (e.g. "obj:unknown"); default = probable. */
 function scanOf(photoUrl: string): Scan {
   const m = /obj:([a-z]+)/.exec(photoUrl)
   const v = m?.[1]
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(v as Scan)
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(v as Scan)
     ? (v as Scan)
     : 'probable'
 }
@@ -64,7 +66,7 @@ function scanFromReferer(referer: string | null): Scan | null {
   } catch {
     return null
   }
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
 }
 
 /**
@@ -75,7 +77,7 @@ function scanFromReferer(referer: string | null): Scan | null {
  */
 function scanFromHeader(seed: string | null): Scan | null {
   if (!seed) return null
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand'] as Scan[]).includes(seed as Scan) ? (seed as Scan) : null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(seed as Scan) ? (seed as Scan) : null
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -108,6 +110,24 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
     yield JSON.stringify({ type: 'section', index: 6, bucket: 'maker', text: 'Branded by Microsoft, the American technology company behind the Xbox line of consoles and their controllers.', sourceUrl: src, sourceTitle: '', quote: 'Microsoft, the company behind Xbox' })
     yield JSON.stringify({ type: 'description_upgrade', index: 7, text: 'This appears to be a wireless game controller from the Xbox family — Microsoft’s gaming line.' })
     yield JSON.stringify({ type: 'done', index: 8, sessionId })
+    return
+  }
+  if (scan === 'bggen') {
+    // Background-generation repro fixture: the INSTANT band settles (so the dock paints + the user can navigate
+    // away mid-research), then a LONG phase-2 (~20s — simulating the real BFF's ~60s Firecrawl+GLM research),
+    // THEN the grounded purpose/maker/facts stream in. This is the user's reported scenario: "took a picture,
+    // closed it to look at collections, came back" while details were STILL generating. A survivor pump (F1)
+    // must keep consuming across the navigation so the return shows the now-grounded buckets, not a stuck/broken
+    // state. The 20s is well over any Maestro nav+return timing so the pump is GUARANTEED mid-flight on return.
+    yield JSON.stringify({ type: 'token', index: 0, text: 'A 2008 Cannondale SuperSix EVO.' })
+    yield JSON.stringify({ type: 'confidence_band', index: 1, band: 'CONFIDENT', title: '2008 Cannondale SuperSix EVO', candidates: [] })
+    await sleep(20000) // the long phase-2 — details are "generating" across a navigation away + back
+    const src = 'https://en.wikipedia.org/wiki/Cannondale_SuperSix_EVO'
+    yield JSON.stringify({ type: 'fact', index: 2, text: "The SuperSix EVO is Cannondale's flagship lightweight road racing frame.", sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    yield JSON.stringify({ type: 'section', index: 3, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame.', sourceUrl: src, sourceTitle: '', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    yield JSON.stringify({ type: 'section', index: 4, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm.', sourceUrl: src, sourceTitle: '', quote: 'the SuperSix EVO is Cannondale’s flagship' })
+    yield JSON.stringify({ type: 'description_upgrade', index: 5, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer." })
+    yield JSON.stringify({ type: 'done', index: 6, sessionId })
     return
   }
   if (scan === 'slow') {
@@ -722,8 +742,18 @@ export interface HarnessOpts {
   plans?: Record<string, 'free' | 'explorer' | 'voyager'>
   /** wire the spoken-reveal /speech route with a deterministic FakeTts (default true; set false for the negative control). */
   speech?: boolean
+  /** wire the grounded /ask route with a deterministic FakeChat returning a sentinel reply (default true; set false for the negative control). */
+  chat?: boolean
+  /** pre-seed an owner-scoped thread + reveal so a converge runner that mounts the conversation screen on a known
+   *  fixture threadId (e.g. 'thr_converge') can round-trip a REAL /ask through the route — ACL + grounded context,
+   *  no synthetic stub. The session-owner map + the reveal row are primed for `userId`. */
+  chatFixture?: { threadId: string; userId: string; title?: string; fact?: string }
   /** opt in to the Sentry envelope sink + same-origin DSN injection (standUp). Off for every other runner. */
   sentry?: boolean
+  /** set VOICE_SERVER_BASE_URL so /v1/voice/session mint SUCCEEDS (returns a connectUrl) instead of 503. Used by
+   *  the F3 watchdog proof: the stub transport (enabled via __voxiHangVoiceConnect) hangs → the 20s watchdog fires
+   *  → keyboard fallback. Default empty → mint 503s → keyboard-only (the WS1 path). */
+  voiceServerBaseUrl?: string
 }
 
 /**
@@ -839,6 +869,24 @@ export function createWebHarness(
     async deleteByThread(id) { for (let i = messageRows.length - 1; i >= 0; i--) if (messageRows[i]!.threadId === id) messageRows.splice(i, 1) },
   }
 
+  // Deterministic grounded-chat seam: a FakeChat that echoes the question behind a unique sentinel. The runner
+  // matches the EXACT sentinel (never a loose regex) so the proof can't be satisfied by a canned stub string —
+  // the sentinel only arrives via the REAL /ask route (F1) wiring the REAL conversation screen (F2).
+  const chat: ChatProvider | undefined = opts.chat === false ? undefined : {
+    async reply(args: { question: string }) {
+      return { text: `GUIDE_SENTINEL::${args.question}`, grounded: true }
+    },
+  }
+
+  // Optional fixture: pre-seed an owner-scoped thread + reveal so a converge runner that mounts the conversation
+  // screen on a known threadId (e.g. 'thr_converge') can round-trip a REAL /ask. The sessionOwner map satisfies
+  // the fail-closed ACL (threadOwnerVerdict); the reveal row supplies the grounded context + evidence.
+  if (opts.chatFixture) {
+    const f = opts.chatFixture
+    sessionOwner.set(f.threadId, f.userId)
+    void reveals.put({ threadId: f.threadId, ownerUserId: f.userId, band: 'CONFIDENT', title: f.title ?? 'Converge Object', candidates: [], narration: 'A grounded converge test object.', createdAt: Date.now(), events: [{ type: 'fact', text: f.fact ?? 'A grounded converge fact.', sourceUrl: 'https://example.com/converge', index: 0 } as unknown as RevealRecord['events'][number]] })
+  }
+
   const deps: Deps = {
     verifier: testVerifier,
     store,
@@ -917,10 +965,17 @@ export function createWebHarness(
     // exercise the BFF's re-enqueue logic: a broken retry never calls this → the failed render never recovers.
     podcastEnqueue: async ({ token, userId }: { token: string; userId: string }) => podcast.markComposing(token, userId, true),
     speech, // spoken reveal: FakeTts + content-hash cache (undefined when opts.speech === false → route 503s)
+    chat, // grounded Ask chat: FakeChat sentinel (undefined when opts.chat === false → /ask 503s guide_unavailable)
+    voiceServerBaseUrl: opts.voiceServerBaseUrl, // set → /v1/voice/session mint succeeds (F3 watchdog proof)
   }
 
   // Wrap /v1/podcast so a freshly gated token is registered with the worker-status service for the owner.
   const app = createApp(deps)
+  // Mount the voice sub-app (mirroring server.ts) ONLY when a voiceServerBaseUrl is configured, so the F3
+  // watchdog proof can mint a real connectUrl (otherwise /v1/voice/session 404s — the WS1 keyboard-only path).
+  const voice = opts.voiceServerBaseUrl
+    ? createVoiceRoutes({ verifier: deps.verifier, store: deps.store, sessionOwner, voiceServerBaseUrl: opts.voiceServerBaseUrl })
+    : null
 
   return {
     store,
@@ -977,6 +1032,8 @@ export function createWebHarness(
         const stripped = new Request(url.origin + url.pathname.slice('/api'.length) + url.search, forward)
         // The render is registered by the BFF calling `deps.podcastEnqueue` (a FRESH gate + the retry-of-a-non-ready
         // fix), NOT by mirroring the gate response here — so the retry-recovery E2E exercises the real enqueue path.
+        if (voice && url.pathname.startsWith('/api/v1/voice/'))
+          return await voice.fetch(stripped) // the voice sub-app re-applies auth + ACL (mirrors server.ts)
         return await app.fetch(stripped)
       }
       return new Response('not found', { status: 404 })

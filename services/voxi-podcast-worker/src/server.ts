@@ -1,6 +1,6 @@
 /**
  * The podcast render worker as a runnable process. A Bun HTTP service that receives a gated job from the BFF, runs
- * the REAL renderPodcast pipeline (search-grounded research → claim-structured Gemini script → honesty + defamation
+ * the REAL renderPodcast pipeline (search-grounded research → claim-structured OpenAI script → honesty + defamation
  * gates → live ElevenLabs two-voice TTS → ffmpeg loudnorm mux), uploads the MP3 to the PUBLIC audio bucket, and
  * keeps render status + the finished asset in the PRIVATE state bucket. Fully STATELESS (keyed on (item,version) in
  * GCS) so it scales to zero between renders — no in-memory job map, no local audio files served. No fakes.
@@ -59,8 +59,8 @@ if (ON_CLOUD_RUN) {
   }, 30 * 60_000)
 }
 
-// GLM_API_KEY + FIRECRAWL_API_KEY are required on Cloud Run (the render's research/script run on GLM-5.2 over
-// Firecrawl). Assert at boot so a missing/typo'd secret crash-loops loudly instead of failing every render opaque.
+// OPENAI_API_KEY + FIRECRAWL_API_KEY are required on Cloud Run (the render's research/script run on OpenAI
+// gpt-5.4-mini over Firecrawl). Assert at boot so a missing/typo'd secret crash-loops loudly instead of failing every render opaque.
 assertProdKeys()
 
 const deps = buildProductionDeps({ outDir: OUT_DIR, audioBucket: AUDIO_BUCKET, stateBucket: STATE_BUCKET, gcs })

@@ -115,10 +115,10 @@ if [ "${STEP:-all}" = "all" ]; then
   put voxi-clerk-jwt-key    "$(envval CLERK_JWT_KEY)"
   put voxi-url-signing-key  "$(envval VOXI_URL_SIGNING_KEY)"
   EL="$(envval ELEVENLABS_API_KEY)"; [ -n "$EL" ] && put voxi-elevenlabs-key "$EL" || true
-  # GLM + Firecrawl are REQUIRED (narration/research/dossier/script run on GLM-5.2 over Firecrawl). Fail loud on an
-  # empty value rather than seeding an empty secret the boot assertion would then crash-loop on.
-  GLM="$(envval GLM_API_KEY)"; [ -n "$GLM" ] || { echo "ERROR: GLM_API_KEY is empty in $ENV_FILE" >&2; exit 1; }
-  put voxi-glm-key "$GLM"
+  # OpenAI + Firecrawl are REQUIRED (narration/research/dossier/script run on OpenAI gpt-5.4-mini over Firecrawl). Fail
+  # loud on an empty value rather than seeding an empty secret the boot assertion would then crash-loop on.
+  OPENAI="$(envval OPENAI_API_KEY)"; [ -n "$OPENAI" ] || { echo "ERROR: OPENAI_API_KEY is empty in $ENV_FILE" >&2; exit 1; }
+  put voxi-openai-key "$OPENAI"
   FC="$(envval FIRECRAWL_API_KEY)"; [ -n "$FC" ] || { echo "ERROR: FIRECRAWL_API_KEY is empty in $ENV_FILE" >&2; exit 1; }
   put voxi-firecrawl-key "$FC"
   # Sentry error-monitoring DSN — low-sensitivity (public key) but kept in Secret Manager for consistency. Optional:
@@ -137,7 +137,7 @@ gcloud builds submit "$REPO_ROOT" --project "$PROJECT" \
 # ── 7. Deploy Cloud Run (⚠ BILLABLE) ─────────────────────────────────────────────────────────────
 say "Deploying Cloud Run service '${SVC}' ⚠"
 CONN="${PROJECT}:${REGION}:${SQL_INSTANCE}"
-SECRETS="CLERK_JWT_KEY=voxi-clerk-jwt-key:latest,VOXI_URL_SIGNING_KEY=voxi-url-signing-key:latest,DATABASE_URL=voxi-database-url:latest,GLM_API_KEY=voxi-glm-key:latest,FIRECRAWL_API_KEY=voxi-firecrawl-key:latest"
+SECRETS="CLERK_JWT_KEY=voxi-clerk-jwt-key:latest,VOXI_URL_SIGNING_KEY=voxi-url-signing-key:latest,DATABASE_URL=voxi-database-url:latest,OPENAI_API_KEY=voxi-openai-key:latest,FIRECRAWL_API_KEY=voxi-firecrawl-key:latest"
 gcloud secrets describe voxi-elevenlabs-key --project "$PROJECT" >/dev/null 2>&1 \
   && SECRETS="${SECRETS},ELEVENLABS_API_KEY=voxi-elevenlabs-key:latest"
 # Sentry DSN appended ONLY if the secret exists — so a STEP=images redeploy before you've provisioned it deploys
@@ -150,7 +150,7 @@ gcloud secrets describe voxi-sentry-dsn --project "$PROJECT" >/dev/null 2>&1 \
 # just stays disabled). See infra/deploy/voxi-podcast-worker-v1.sh.
 # The BFF needs the podcast GCS bucket names to purge rendered audio + state in the deletion cascade (the SQL row
 # delete alone would orphan the objects). Same names the worker deploy creates.
-ENVVARS="GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),GEMINI_LOCATION=global,GLM_BASE_URL=https://api.z.ai/api/paas/v4/,VOXI_ENV=production,SENTRY_RELEASE=${SHA},GCS_AUDIO_BUCKET=voxi-podcast-audio-${PROJECT},GCS_STATE_BUCKET=voxi-podcast-state-${PROJECT}"
+ENVVARS="GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),GEMINI_LOCATION=global,OPENAI_BASE_URL=https://api.openai.com/v1/,VOXI_ENV=production,SENTRY_RELEASE=${SHA},GCS_AUDIO_BUCKET=voxi-podcast-audio-${PROJECT},GCS_STATE_BUCKET=voxi-podcast-state-${PROJECT}"
 gcloud secrets describe voxi-podcast-worker-secret --project "$PROJECT" >/dev/null 2>&1 \
   && SECRETS="${SECRETS},PODCAST_WORKER_SECRET=voxi-podcast-worker-secret:latest"
 WORKER_URL="$(gcloud run services describe voxi-podcast-worker --project "$PROJECT" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"

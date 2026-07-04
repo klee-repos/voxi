@@ -55,6 +55,11 @@ class BffTransport(Protocol):
         self, token: ScopedToken, session_id: str, idempotency_key: str, turn: dict[str, Any]
     ) -> dict[str, Any]: ...
 
+    async def fetch_context(self, connect_id: str) -> dict[str, Any]:
+        """F5: fetch the GROUNDED item context for a minted voice session. The connectId is the capability
+        (server-minted, owner-scoped at the BFF); the route is capability-auth'd, so NO bearer is needed.
+        Returns {} when the BFF has no reveal yet (the voice-bot fails open to persona-only)."""
+        ...
 
 @dataclass
 class FakeBff:
@@ -71,10 +76,17 @@ class FakeBff:
     _seen_keys: set[str] = field(default_factory=set)
     tool_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     rejected_cross_session: int = 0
+    # F5: connectId -> canned grounded context (the FakeBff stands in for the BFF /context route in tests).
+    contexts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    fetches: list[str] = field(default_factory=list)
 
     async def call_tool(self, token: ScopedToken, tool: str, args: dict[str, Any]) -> dict[str, Any]:
         self.tool_calls.append((tool, args))
         return self.tool_results.get(tool, {"ok": True, "tool": tool, "result": None})
+
+    async def fetch_context(self, connect_id: str) -> dict[str, Any]:
+        self.fetches.append(connect_id)
+        return self.contexts.get(connect_id, {})
 
     async def append_turn(
         self, token: ScopedToken, session_id: str, idempotency_key: str, turn: dict[str, Any]
@@ -125,3 +137,25 @@ class ToolBridge:
 
     async def call(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
         return await self._bff.call_tool(self._token, tool, args)
+
+
+class HttpxBff:
+    """The real BFF transport (httpx) for the voice-bot's grounded-context fetch (F5). The connectId is the
+    capability — the BFF's /v1/voice/session/:connectId/context route is capability-auth'd (no bearer), so this
+    just GETs it. Fail-OPEN: any error / non-200 → {} → the voice-bot starts persona-only rather than blocking
+    voice (better a generic Guide than no Guide). Used in dev/prod; tests inject FakeBff."""
+
+    def __init__(self, base_url: str, timeout: float = 4.0) -> None:
+        self._base = base_url.rstrip("/")
+        self._timeout = timeout
+
+    async def fetch_context(self, connect_id: str) -> dict[str, Any]:
+        if not self._base:
+            return {}
+        try:
+            import httpx  # lazy: the live extras install httpx; the test sandbox need not
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                r = await client.get(f"{self._base}/v1/voice/session/{connect_id}/context")
+                return r.json() if r.status_code == 200 else {}
+        except Exception:
+            return {}  # unreachable BFF / 404 no_context → persona-only (fail-open)

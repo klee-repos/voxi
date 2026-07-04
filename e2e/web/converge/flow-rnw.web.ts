@@ -146,13 +146,11 @@ const rigB = await standUp('flow-client.tsx', { seed: { converge: { scan: 5, pod
     )
     await db.waitFor(ids.reveal.buckets, { timeoutMs: 3000 })
   })
-  await check('tapping an unavailable bucket routes to /processing WITHOUT wiping the store (threadId survives)', async () => {
-    let tapped = ''
-    // Facts (bucketFacts) is no longer a dock icon (single flush row) — probe the dock buckets that render.
-    for (const b of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho]) {
-      if ((await db.state(b)).attrs.state === 'unavailable') { await db.tap(b); tapped = b; break }
-    }
-    if (!tapped) throw new Error('no bucket settled to `unavailable` after the forced research drop')
+  await check('tapping Details when research dropped routes to /processing WITHOUT wiping the store (threadId survives)', async () => {
+    // The research lane collapsed to Details; with all buckets forced unavailable (the dropped-stream case), the
+    // Details aggregate reads 'empty' and F2 routes its tap to /processing to resume the stream.
+    await db.waitFor(ids.reveal.detailsIcon, { timeoutMs: 3000 })
+    await db.tap(ids.reveal.detailsIcon)
     await db.waitFor(ids.processing.screen, { timeoutMs: 5000 })
     const now = await readThreadId(pb)
     if (now !== threadId0) throw new Error(`threadId must survive reveal→/processing (blanket-reset regression); was ${threadId0}, now ${now}`)

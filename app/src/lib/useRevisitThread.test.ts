@@ -89,4 +89,25 @@ describe('revisitThread', () => {
     // markRevisit MUST follow startCapture (which resets isRevisit → false), else the flag is clobbered.
     expect(order).toEqual(['startCapture', 'markRevisit', 'setThread', 'setBand', 'push'])
   })
+
+  test('[CRIT] ATTACH-TO-SURVIVOR: a still-streaming thread is NOT reset + re-streamed — just navigated to', () => {
+    // The user's "closed it, came back, broken" RCA: tapping the just-captured item in collections used to call
+    // startCapture → abortThreadStream() (killing the keepAlive survivor) + reset researchComplete → the reveal
+    // re-opened with band+title but LOADING buckets + re-ran the whole cascade. When the survivor is alive for
+    // this thread, revisit must ATTACH (bare navigate), preserving the in-flight research.
+    const { calls, deps } = spies()
+    deps.isStreamingThread = (tid) => tid === 't1'
+    revisitThread(item({ threadId: 't1', band: 'CONFIDENT' }), deps)
+    expect(calls.startCapture).toEqual([]) // NO reset — the survivor lives
+    expect(calls.setBand).toEqual([])      // the band already in the store from the survivor
+    expect(calls.push).toEqual(['/reveal']) // attach — the reveal mounts + reads the in-flight store
+  })
+
+  test('ATTACH-TO-SURVIVOR does not fire for a DIFFERENT thread (a genuine revisit still resets + streams)', () => {
+    const { calls, deps } = spies()
+    deps.isStreamingThread = (tid) => tid === 'other' // a different thread is the one streaming
+    revisitThread(item({ threadId: 't1', band: 'CONFIDENT' }), deps)
+    expect(calls.startCapture).toEqual([null]) // normal path: reset + seed for the revisited thread (no photoUrl → null)
+    expect(calls.setBand).toEqual([{ band: 'CONFIDENT', title: 'Capture · thing', candidates: [] }])
+  })
 })

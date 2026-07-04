@@ -2,7 +2,7 @@
  * LiveResearcher — the reveal ENRICHMENT step (PLAN §6 richer narration; ANALYSIS-VOICE-PLAN A1/A6–A9).
  *
  * Once identification lands, the honesty gate strips any specific fact the narrator cannot CITE, so this provider
- * gives the narrator real, GROUNDED facts to cite via the shared Firecrawl→GLM-5.2 `groundedFacts` primitive
+ * gives the narrator real, GROUNDED facts to cite via the shared Firecrawl→OpenAI `groundedFacts` primitive
  * (lib/grounded-research): each extracted fact carries its real `sourceUrl` + a verbatim quote. Facts with no source
  * are dropped, so nothing ungrounded ever becomes citable. Best-effort: any error/empty (or no Firecrawl wired)
  * returns `[]` and the reveal proceeds on web evidence only — never throws, never blocks the reveal.
@@ -15,6 +15,7 @@
  */
 import type { IdEvidence } from '../tools/identify_object'
 import { groundedFacts } from '../lib/grounded-research'
+import { OPENAI_CALL_TIMEOUT_MS } from '../lib/openai'
 import type { WebResearchProvider } from '../tools/web_research'
 
 export interface ResearchInput {
@@ -75,16 +76,25 @@ export function researchSubject(input: ResearchInput): string {
 }
 
 export class LiveResearcher implements Researcher {
-  constructor(private web: WebResearchProvider | null = null) {}
+  constructor(
+    private web: WebResearchProvider | null = null,
+    /** per-call OpenAI timeout — bounds a hung call so the catch below fires (a hang never throws on its own →
+     *  the cascade would hang at this step). Defaults to `OPENAI_CALL_TIMEOUT_MS`; tests override to keep the suite
+     *  fast. No retry — enrichment is best-effort, not fail-closed like the dossier. */
+    private timeoutMs: number = OPENAI_CALL_TIMEOUT_MS,
+  ) {}
 
   async research(input: ResearchInput): Promise<IdEvidence[]> {
     if (!this.web) return [] // no Firecrawl wired → no grounding (prod asserts the key at boot); reveal proceeds on web evidence only
     try {
       const subject = researchSubject(input)
-      const { facts } = await groundedFacts({ web: this.web, subject, query: subject, item: input.scope === 'item' })
+      // `timeoutMs` is the load-bearing bit: a HUNG call never throws on its own → the await never settles → the
+      // cascade hangs at this enrichment step. The timeout converts a hang to a throw so the catch returns [] (the
+      // reveal proceeds on web evidence only). No retry — enrichment is best-effort, not fail-closed like the dossier.
+      const { facts } = await groundedFacts({ web: this.web, subject, query: subject, item: input.scope === 'item', timeoutMs: this.timeoutMs })
       return factsToEvidence(facts)
     } catch {
-      return [] // enrichment is best-effort — never throw, never block the reveal
+      return [] // enrichment is best-effort — never throw, never block the reveal (a timeout lands here, not a hang)
     }
   }
 }

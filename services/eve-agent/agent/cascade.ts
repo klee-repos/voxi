@@ -21,6 +21,7 @@ import { gateNarration } from './providers/live-narrator'
 import type { Researcher, ResearchInput } from './providers/live-research'
 import type { DossierProvider } from './providers/live-dossier'
 import type { DossierInput } from './subagents/researcher'
+import { logger } from '../../../packages/telemetry/src/index'
 
 export interface CascadeDeps {
   vision: VisionProvider
@@ -324,6 +325,7 @@ export async function* runIdentificationCascade(
 ): AsyncGenerator<StreamEvent> {
   let i = 0
   const at = <E extends Omit<StreamEvent, 'index'>>(e: E) => ({ ...e, index: i++ }) as StreamEvent
+  logger.info('cascade:start', { sessionId })
 
   // ── Stage -1: fetch the image ONCE (when a loader is injected). A fetch failure is a technical hard_failure,
   //    NOT a safety refusal — the safety gate must only fail-closed on a genuine classification error. ──
@@ -342,6 +344,7 @@ export async function* runIdentificationCascade(
   yield at({ type: 'tool_start', tool: 'safety_gate' })
   const verdict = await safety_gate(scoped, deps.safety, deps.safetyThresholds ?? DEFAULT_SAFETY_THRESHOLDS)
   yield at({ type: 'tool_result', tool: 'safety_gate', ok: !verdict.fault })
+  logger.info('cascade:safety_gate', { sessionId, action: verdict.action, fault: verdict.fault })
 
   // A classifier FAULT (could not score the image) fails closed — no identification — but is surfaced as a
   // retryable TECHNICAL error, never a content refusal that implies the user's photo was unsafe.
@@ -368,15 +371,18 @@ export async function* runIdentificationCascade(
   // ── Stage 1–3: the identification cascade (VLM + web + catalog → arbitration). ──
   yield at({ type: 'tool_start', tool: 'identify_object' })
   let result: Awaited<ReturnType<typeof identify_object>>
+  logger.info('cascade:identify_start', { sessionId })
   try {
     result = await identify_object(scoped, deps.vision, deps.arbitration ?? DEFAULT_THRESHOLDS)
   } catch (err) {
     yield at({ type: 'tool_result', tool: 'identify_object', ok: false })
+    logger.info('cascade:identify_failed', { sessionId, error: (err as Error).message })
     yield at({ type: 'error', code: 'hard_failure', message: `identification failed: ${(err as Error).message}` })
     yield at({ type: 'done', sessionId })
     return
   }
   yield at({ type: 'tool_result', tool: 'identify_object', ok: true })
+  logger.info('cascade:identify', { sessionId, band: result.confidence_band, label: result.label })
 
   // The arbitrated band IS the reveal: CONFIDENT→reveal card, PROBABLE→partial (both candidates), UNKNOWN→interview.
   // Any reveal CARD (CONFIDENT or PROBABLE) shows the single clean human `displayTitle`; the uncertainty is carried
@@ -437,6 +443,7 @@ export async function* runIdentificationCascade(
       candidates: result.candidates.map((c) => c.name),
     }
     const narration = await deps.narrator.narrate(firstPassInput)
+    logger.info('cascade:narrator', { sessionId, clauses: narration.clauses.length, sections: emittedSections.size })
     // Stream ONLY the `what_is_it` clauses as `token`s (→ `whatItIs`) and PIN the what-only audio synchronously —
     // so `/speech/what` voices exactly the What card's text, never the full what+purpose+maker composite
     // (adversarial A). The `purpose`/`maker` clauses become their own progressive `section` events (from the FAST
@@ -463,9 +470,11 @@ export async function* runIdentificationCascade(
   if (deps.dossier && deps.narrator && result.confidence_band !== 'UNKNOWN') {
     const dossierInput = buildDossierInput(result)
     if (dossierInput) {
+      let dossierFacts = 0
       try {
         for await (const ev of deps.dossier.research(dossierInput)) {
           if (ev.type === 'fact') {
+            dossierFacts++
             yield at({ type: 'fact', text: ev.fact.text, sourceUrl: ev.fact.sourceUrl, sourceTitle: ev.fact.sourceTitle, quote: ev.fact.quote })
           } else if (ev.type === 'done' && ev.dossier && ev.dossier.evidence.length) {
             const upgradeInput: NarrationInput = {
@@ -502,6 +511,7 @@ export async function* runIdentificationCascade(
       } catch {
         /* best-effort: a research failure/timeout leaves the instant reveal exactly as it was streamed. */
       }
+      logger.info('cascade:dossier', { sessionId, facts: dossierFacts })
     }
   }
 
@@ -514,5 +524,6 @@ export async function* runIdentificationCascade(
     }
   }
 
+  logger.info('cascade:done', { sessionId })
   yield at({ type: 'done', sessionId })
 }

@@ -264,6 +264,37 @@ export class ApiClient {
     })
   }
 
+  // POST /v1/threads/:id/ask — the grounded "Ask Voxi" reply. The server owns the grounding (the durable reveal)
+  // + the honesty gate; the client only sends the question + an idempotency key. Returns the Guide's reply text.
+  ask(
+    threadId: string,
+    body: { text: string; userClientKey: string },
+  ): Promise<{ text: string; id?: string; replay: boolean }> {
+    return this.json<{ text: string; id?: string; replay: boolean }>(`/v1/threads/${encodeURIComponent(threadId)}/ask`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  }
+
+  // POST /v1/voice/session — mint a realtime voice session. The BFF verifies ownership, charges a voice minute
+  // (fail-closed), and returns a per-session connectUrl pointing the Pipecat SmallWebRTC client at the voice-bot's
+  // /offer. The connectUrl carries the session scope (NOT the identity); refund via refundVoiceSession if the
+  // client never reaches the media plane.
+  createVoiceSession(threadId: string): Promise<{ connectId: string; connectUrl: string; minutesCharged: number }> {
+    return this.json<{ connectId: string; connectUrl: string; minutesCharged: number }>('/v1/voice/session', {
+      method: 'POST',
+      body: JSON.stringify({ threadId }),
+    })
+  }
+
+  // POST /v1/voice/session/:connectId/refund — credit the minute back when the client never connected (a dismiss
+  // during mint, or a connect() failure/timeout). Idempotent on connectId; payer-only.
+  refundVoiceSession(connectId: string): Promise<{ refunded: boolean; replay?: boolean }> {
+    return this.json<{ refunded: boolean; replay?: boolean }>(`/v1/voice/session/${encodeURIComponent(connectId)}/refund`, {
+      method: 'POST',
+    })
+  }
+
   // POST /v1/podcast — gate paid generation (atomic decrement + idempotent token).
   generatePodcast(body: PodcastGateBody): Promise<PodcastGateResult> {
     return this.json<PodcastGateResult>('/v1/podcast', { method: 'POST', body: JSON.stringify(body) })

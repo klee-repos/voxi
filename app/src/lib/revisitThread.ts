@@ -26,9 +26,25 @@ export interface RevisitDeps {
   /** seed the settled band+title so the reveal renders READY at once (no /processing wait) on a known-identity revisit. */
   setBand: (band: ConfidenceBand, title: string, candidates: string[]) => void
   push: (href: '/processing' | '/reveal') => void
+  /** True when `threadId` is the thread whose cascade is ALREADY streaming in the background (the keepAlive survivor
+   *  pump kept it alive across a navigation away). When true, revisit ATTACHES to that survivor (just navigates)
+   *  instead of `startCapture`-ing — which would `abortThreadStream()` the survivor + wipe `researchComplete`,
+   *  forcing a full cascade re-run and showing loading buckets for an item the user watched nearly finish (the
+   *  "closed it, came back, broken" state). Optional (default never short-circuits) so the pure unit tests stay simple. */
+  isStreamingThread?: (threadId: string) => boolean
 }
 
 export function revisitThread(item: ThreadSummary, deps: RevisitDeps): void {
+  // ATTACH-TO-SURVIVOR: if this thread's cascade is ALREADY running in the background (the reveal's keepAlive
+  // survivor pump kept it alive across the user's navigation to collections + back), DON'T startCapture.
+  // startCapture calls abortThreadStream() — killing the very survivor we want to preserve — AND resets
+  // researchComplete, so the reveal re-opens with band+title but empty/loading buckets and re-runs the whole
+  // cascade (~60s on the real BFF). Instead, just navigate: /reveal mounts, useThreadStreamRun sees
+  // isThreadStreaming(), ATTACHES, and reads the in-flight store state the survivor keeps filling.
+  if (deps.isStreamingThread?.(item.threadId)) {
+    deps.push('/reveal')
+    return
+  }
   deps.startCapture(item.photoUrl ?? null) // resets the store (isRevisit → false, aborts any stream); mark AFTER
   deps.markRevisit()
   deps.setThread(item.threadId)

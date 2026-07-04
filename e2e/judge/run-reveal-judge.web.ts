@@ -47,18 +47,21 @@ async function deterministicGate(): Promise<void> {
     check('title is present + concise (≤6 words)', words.length >= 1 && words.length <= 6, `"${title}" (${words.length}w)`)
     check('title is not a bare category', !(titleTokens.size > 0 && [...titleTokens].every((t) => BANNED_TITLE_CATEGORIES.has(t))), `"${title}"`)
 
-    // The description + facts live INSIDE their bucket cards now (the ANALYSIS-UX icon-dock redesign moved them off
-    // the resting face). Open the What card to read the description, then the Facts card — mirroring reveal-rnw's
-    // authoritative card transitions (open → nav.close → open the next), asserting the SAME real state, not a weaker one.
-    await d.tap(ids.reveal.bucketWhat)
+    // The description + facts live INSIDE their bucket cards (the research lane collapsed to Details). Open Details
+    // (lands on "what") to read the description, then switch IN PLACE to the Facts tab — mirroring reveal-rnw's
+    // authoritative card transitions, asserting the SAME real state, not a weaker one.
+    await d.tap(ids.reveal.detailsIcon)
     await d.waitFor(ids.reveal.bucketCard, { timeoutMs: 4000 })
     const desc = (await d.state(ids.reveal.whatItIs)).text ?? ''
     check('description is present + substantial (≥20 words)', desc.trim().split(/\s+/).filter(Boolean).length >= 20, `${desc.slice(0, 60)}…`)
-    await d.tap(ids.nav.close) // close the What card before opening Facts (a single card overlay at a time)
 
-    // Facts: open the Facts card → ≥3 fact rows, EACH with its own source link (under the fact) showing the webpage
-    // title (a prettified site name when the page has no title), never a raw URL.
-    await d.tap(ids.reveal.bucketFacts)
+    // Facts: switch the open card to the Facts tab → ≥3 fact rows, EACH with its own source link (under the fact)
+    // showing the webpage title (a prettified site name when the page has no title), never a raw URL.
+    const factsTab = page.locator(`[data-testid="${ids.reveal.cardTab}"][data-bucket="facts"]`)
+    const factsTabDeadline = Date.now() + 8000
+    while (Date.now() < factsTabDeadline && (await factsTab.count()) === 0) await new Promise((r) => setTimeout(r, 150))
+    if ((await factsTab.count()) === 0) throw new Error('the facts card tab never appeared (facts did not ground)')
+    await factsTab.first().click()
     await d.waitFor(ids.reveal.facts, { timeoutMs: 4000 })
     const deadline = Date.now() + 8000
     let nFacts = 0

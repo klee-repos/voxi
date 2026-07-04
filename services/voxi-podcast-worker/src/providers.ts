@@ -1,17 +1,17 @@
 /**
  * Production providers for the podcast render pipeline (render.ts seams), no fakes:
- *   - CompositeResearchProvider: GLM-5.2 PRIMARY (the shared Firecrawl→GLM `groundedFacts` primitive) with a
- *     native-Gemini grounding FALLBACK (GeminiResearchProvider) so a Firecrawl outage can't hard-fail a Deep Dive.
- *   - GlmScriptProvider: GLM-5.2 writes the claim-structured two-host (Arlo/Mave) script over ONLY the closed
- *     facts, refs translated back to the closed sourceUrls the honesty gate resolves against.
+ *   - CompositeResearchProvider: OpenAI gpt-5.4-mini PRIMARY (the shared Firecrawl→OpenAI `groundedFacts` primitive)
+ *     with a native-Gemini grounding FALLBACK (GeminiResearchProvider) so a Firecrawl outage can't hard-fail a Deep Dive.
+ *   - OpenAIScriptProvider: OpenAI gpt-5.4-mini writes the claim-structured two-host (Arlo/Mave) script over ONLY the
+ *     closed facts, refs translated back to the closed sourceUrls the honesty gate resolves against.
  *   - FfmpegMuxer: takes the concatenated multi-voice MP3, runs a real ffmpeg pass (loudnorm + clean re-encode)
  *     → a single player-safe MP3 written into the asset dir. (HLS segmentation is a later prod refinement; a
  *     normalized MP3 is a real, playable asset.)
  *
- * Auth: GLM uses an API key (lib/glm); the native-Gemini fallback reuses gcloudToken() (gcloud CLI bearer).
+ * Auth: OpenAI uses an API key (lib/openai); the native-Gemini fallback reuses gcloudToken() (gcloud CLI bearer).
  */
 import { gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
-import { glmJSON } from '../../eve-agent/agent/lib/glm'
+import { openaiJSON, OPENAI_CALL_TIMEOUT_MS } from '../../eve-agent/agent/lib/openai'
 import { groundedFacts } from '../../eve-agent/agent/lib/grounded-research'
 import { firecrawlFromEnv, type WebResearchProvider } from '../../eve-agent/agent/tools/web_research'
 import { loadPrompt, renderPrompt } from './prompts'
@@ -131,9 +131,11 @@ export class GeminiResearchProvider implements ResearchProvider {
 }
 
 /**
- * PRIMARY research path: the shared Firecrawl→GLM-5.2 `groundedFacts` primitive (same one the BFF dossier/researcher
+ * PRIMARY research path: the shared Firecrawl→OpenAI `groundedFacts` primitive (same one the BFF dossier/researcher
  * use). Each fact's sourceUrl is the real Firecrawl doc its quote was lifted from — NO round-robin (per-fact
  * attribution is the honesty property). Fail-closed retry; a null web → throws so the composite falls back to Gemini.
+ * The OpenAI extract call is bounded by `OPENAI_CALL_TIMEOUT_MS` so a hung call throws (and the retry re-attempts)
+ * instead of hanging the render past its deadline.
  */
 export class GroundedResearchProvider implements ResearchProvider {
   constructor(private web: WebResearchProvider | null, private maxAttempts = 3) {}
@@ -143,7 +145,7 @@ export class GroundedResearchProvider implements ResearchProvider {
     let lastErr = 'grounded research failed'
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
-        const { facts } = await groundedFacts({ web: this.web, subject: job.subject, query: job.subject, item: true })
+        const { facts } = await groundedFacts({ web: this.web, subject: job.subject, query: job.subject, item: true, timeoutMs: OPENAI_CALL_TIMEOUT_MS })
         if (!facts.length) { lastErr = 'grounded research: no facts extracted'; continue }
         return facts.map((f) => ({ claim: f.text, sourceUrl: f.sourceUrl, confidence: 0.9 }))
       } catch (e) {
@@ -155,7 +157,7 @@ export class GroundedResearchProvider implements ResearchProvider {
 }
 
 /**
- * Resilience composite: GLM-5.2 (Firecrawl) primary, native-Gemini grounding fallback. A Firecrawl outage or a missing
+ * Resilience composite: OpenAI (Firecrawl) primary, native-Gemini grounding fallback. A Firecrawl outage or a missing
  * key no longer HARD-FAILS a Deep Dive — the worker is fail-closed by design (render.ts re-throws when priorFacts is
  * empty), so without this fallback an outage would sink every episode whose BFF dossier was also starved. The fallback
  * is safe: the worker's honesty gate resolves evidenceRef against the closed facts[] (render.ts), NOT via the BFF's
@@ -167,7 +169,7 @@ export class CompositeResearchProvider implements ResearchProvider {
     try {
       return await this.primary.research(job)
     } catch {
-      return this.fallback.research(job) // Firecrawl/GLM down → native Gemini grounding
+      return this.fallback.research(job) // Firecrawl/OpenAI down → native Gemini grounding
     }
   }
 }
@@ -193,10 +195,11 @@ const SCRIPT_SCHEMA = {
 }
 
 /**
- * GLM-5.2 writes the claim-structured two-host script over ONLY the closed facts (grounded refs enforced).
- * RETRIES on a transient/parse failure. GLM enforces no json_schema, so the schema is a prompt hint + a client-side
- * tolerant parse, and there is NO maxOutputTokens cap — GLM thinking tokens are heavy, so a tight cap would truncate
- * a long script mid-JSON.
+ * OpenAI gpt-5.4-mini writes the claim-structured two-host script over ONLY the closed facts (grounded refs enforced).
+ * RETRIES on a transient/parse failure. OpenAI enforces no json_schema here, so the schema is a prompt hint + a
+ * client-side tolerant parse. `reasoning_effort:'none'` means NO reasoning tokens bloat the budget, so a generous
+ * `maxTokens` (16384) gives a long script room without truncating mid-JSON. The call is bounded by
+ * `OPENAI_CALL_TIMEOUT_MS` so a hung call throws (retry re-attempts) instead of hanging the render.
  */
 /**
  * Build the script model's USER prompt: the OBJECT + the server-owned reveal ORIENTATION (identity confidence +
@@ -217,7 +220,7 @@ export function buildScriptUserPrompt(job: PodcastJob, facts: Fact[]): string {
   })
 }
 
-export class GlmScriptProvider implements ScriptProvider {
+export class OpenAIScriptProvider implements ScriptProvider {
   constructor(private readonly maxAttempts = 3) {}
 
   async writeScript(job: PodcastJob, facts: Fact[]): Promise<Script> {
@@ -229,10 +232,11 @@ export class GlmScriptProvider implements ScriptProvider {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       let out: { clauses: { speaker: 'arlo' | 'mave'; text: string; claimType: Script['clauses'][number]['claimType']; evidenceRef?: string }[] }
       try {
-        // glmJSON sets response_format: json_object + renders the schema as a prompt hint + a tolerant extractJson parse.
-        out = await glmJSON(system, user, SCRIPT_SCHEMA, 0.6)
+        // openaiJSON sets response_format: json_object + renders the schema as a prompt hint + a tolerant extractJson parse.
+        // 6th param `maxTokens: 16384` gives a long two-host script room (reasoning_effort:'none' → no reasoning tokens eat it).
+        out = await openaiJSON(system, user, SCRIPT_SCHEMA, 0.6, OPENAI_CALL_TIMEOUT_MS, 16384)
       } catch (e) {
-        lastErr = 'glm script: ' + (e as Error).message
+        lastErr = 'openai script: ' + (e as Error).message
         continue
       }
       const clauses = (out.clauses ?? []).map((c) => {

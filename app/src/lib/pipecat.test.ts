@@ -9,7 +9,7 @@
 import { test, expect, describe } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { createVoiceSession, createStubVoiceSession, setVoiceMediaManagerFactory, type OrbState } from './pipecat'
+import { createVoiceSession, createStubVoiceSession, setVoiceMediaManagerFactory, voxiIceServers, type OrbState } from './pipecat'
 
 const appRoot = resolve(import.meta.dir, '../..') // app/
 const read = (p: string) => readFileSync(resolve(appRoot, p), 'utf8')
@@ -65,5 +65,50 @@ describe('voice session fail-safe seam (never crash the conversation screen)', (
     stub.stopTalking()
     expect(turns.filter((t) => t.final).length).toBeGreaterThanOrEqual(2) // a user turn + a Voxi reply, both final
     expect(turns.some((t) => t.role === 'voxi')).toBe(true)
+  })
+})
+
+describe('voxiIceServers (B1: TURN config so ICE can traverse UDP-blocked networks)', () => {
+  // Value-bound assertions (NOT a "shape" tautology) — pin the exact entries so a regression that drops the
+  // TURN branch or omits STUN is caught. Mirror of voice_server._ice_server_config (server side).
+  test('TURN env unset → STUN-only, the exact prior behavior (no regression)', () => {
+    expect(voxiIceServers({})).toEqual([{ urls: 'stun:stun.l.google.com:19302' }])
+  })
+
+  test('partial TURN creds (URL but no user/pass) → STUN-only (never emit a credential-less TURN entry)', () => {
+    expect(voxiIceServers({ TURN_URL: 'turn:turn.example.com:3478' })).toEqual([
+      { urls: 'stun:stun.l.google.com:19302' },
+    ])
+  })
+
+  test('TURN set → STUN first, then a TURN entry with the exact urls/username/credential', () => {
+    const servers = voxiIceServers({
+      TURN_URL: 'turn:turn.example.com:3478',
+      TURN_USER: 'voxi',
+      TURN_PASS: 's3cret',
+    })
+    expect(servers).toHaveLength(2)
+    expect(servers[0]).toEqual({ urls: 'stun:stun.l.google.com:19302' })
+    expect(servers[1]).toEqual({
+      urls: 'turn:turn.example.com:3478',
+      username: 'voxi',
+      credential: 's3cret',
+    })
+  })
+
+  test('comma-separated TURN_URL → one TURN entry per URL (redundant relays), shared creds', () => {
+    const servers = voxiIceServers({
+      TURN_URL: 'turn:turn-a.example.com:3478, turn:turn-b.example.com:5349 ,', // trailing empty + whitespace
+      TURN_USER: 'voxi',
+      TURN_PASS: 's3cret',
+    })
+    const turnEntries = servers.filter((s): s is { urls: string; username: string; credential: string } => 'username' in s)
+    expect(turnEntries.map((s) => s.urls)).toEqual([
+      'turn:turn-a.example.com:3478',
+      'turn:turn-b.example.com:5349',
+    ])
+    expect(turnEntries.every((s) => s.username === 'voxi' && s.credential === 's3cret')).toBe(true)
+    // STUN stays first.
+    expect(servers[0]).toEqual({ urls: 'stun:stun.l.google.com:19302' })
   })
 })

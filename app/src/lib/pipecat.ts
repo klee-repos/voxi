@@ -56,6 +56,31 @@ export interface VoiceConfig {
 export type VoiceSessionFactory = (config: VoiceConfig) => VoiceSession
 
 /**
+ * ICE servers for the voice peer connection (B1 root cause: STUN-only can't traverse a UDP-blocked network —
+ * the device's gathered candidates were all `tcp tcptype passive`, so ICE went `failed` and the RTVI data
+ * channel never opened). STUN is always present; env-driven TURN relays are added when creds are set so a relay
+ * path exists on restrictive NAT. `EXPO_PUBLIC_TURN_URL` is comma-separated (≥2 relays for redundancy); static
+ * creds for v1. Default-off (unset → STUN-only = the prior behavior, no regression). Pure + dep-injected so it
+ * unit-tests without touching process.env globally. Mirrored server-side in voice_server.py.
+ */
+export function voxiIceServers(env: {
+  TURN_URL?: string
+  TURN_USER?: string
+  TURN_PASS?: string
+}): ReadonlyArray<{ urls: string } | { urls: string; username: string; credential: string }> {
+  const servers: Array<{ urls: string } | { urls: string; username: string; credential: string }> = [
+    { urls: 'stun:stun.l.google.com:19302' },
+  ]
+  const turnUrls = (env.TURN_URL ?? '').split(',').map((u) => u.trim()).filter(Boolean)
+  const user = env.TURN_USER ?? ''
+  const pwd = env.TURN_PASS ?? ''
+  if (turnUrls.length && user && pwd) {
+    for (const u of turnUrls) servers.push({ urls: u, username: user, credential: pwd })
+  }
+  return servers
+}
+
+/**
  * Deterministic stub session. Renders the full conversation UX (orb states, transcript turns, mic indicator)
  * without a media stack — used in the E2E web harness and as the default until the native build wires Pipecat.
  */
@@ -63,12 +88,18 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
   const ev = config.events ?? {}
   let connected = false
   let talking = false
+  // Test seam: simulate Bug B (real WebRTC peer comes up but the RTVI data channel / audio track never delivers,
+  // so onConnected never fires). When set, connect() hangs (no onConnected) and disconnect() fires
+  // 'transport_closed' (the REAL transport's reason, pipecat.ts:185) so the F3 watchdog→keyboard fallback + its
+  // override guard are provable in the web harness. Production default: off (the stub fires onConnected immediately).
+  const hang = (globalThis as { __voxiHangVoiceConnect?: boolean }).__voxiHangVoiceConnect === true
 
   return {
     get connected() {
       return connected
     },
     async connect() {
+      if (hang) return // Bug B: never fires onConnected → the 20s watchdog arms + falls back to keyboard (F3)
       connected = true
       ev.onConnected?.()
       ev.onOrbState?.('idle')
@@ -76,7 +107,15 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
     async disconnect() {
       connected = false
       ev.onOrbState?.('idle')
-      ev.onDisconnected?.('client_closed')
+      if (hang) {
+        // Bug B: the REAL transport fires onDisconnected ASYNC (after the WebRTC peer tears down), in a later tick —
+        // AFTER the watchdog's synchronous setConn('connected'). Without the override guard that late callback would
+        // re-error the screen in a SEPARATE React batch. Fire it in a microtask so the guard is actually exercised
+        // (a synchronous fire would batch with + be overwritten by the watchdog's setConn, hiding a guard regression).
+        queueMicrotask(() => ev.onDisconnected?.('transport_closed'))
+      } else {
+        ev.onDisconnected?.('client_closed')
+      }
     },
     startTalking() {
       if (!connected) return
@@ -161,12 +200,23 @@ export function createRealVoiceSession(config: VoiceConfig): VoiceSession | null
   let idCounter = 0
   const nextId = (p: string) => `${p}_${(idCounter++).toString(36)}_${Date.now().toString(36)}`
 
+  // B1: STUN + env-driven TURN. The EXPO_PUBLIC_* reads MUST appear literally here so Expo's babel inlines them
+  // into the bundle (a generic process.env index wouldn't). Default-off (unset → STUN-only). Logged so the
+  // device-side config is OBSERVABLE in the Metro pane — `hasTurn:false` means the bundle didn't pick up the env
+  // (reload Metro after editing app/.env.local) and ICE will fail on UDP-blocked networks.
+  const iceServers = voxiIceServers({
+    TURN_URL: process.env.EXPO_PUBLIC_TURN_URL,
+    TURN_USER: process.env.EXPO_PUBLIC_TURN_USER,
+    TURN_PASS: process.env.EXPO_PUBLIC_TURN_PASS,
+  })
+  const hasTurn = iceServers.some((s): s is { urls: string; username: string; credential: string } => 'username' in s)
+  console.log(`[voice] iceServers: ${iceServers.length} (${hasTurn ? 'STUN+TURN' : 'STUN-only'})`)
   const transport = new RNSmallWebRTCTransport({
     // BFF-minted per-session SmallWebRTC /offer signalling endpoint (see voice-routes.ts).
     connectionUrl: config.connectUrl,
     waitForICEGathering: true,
     mediaManager: mediaManagerFactory(),
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' } as unknown],
+    iceServers: iceServers as unknown,
   })
 
   const client: RealClient = new PipecatClient({
@@ -175,11 +225,13 @@ export function createRealVoiceSession(config: VoiceConfig): VoiceSession | null
     enableCam: false,
     callbacks: {
       onConnected: () => {
+        console.log('[voice] connected: data channel open')
         connected = true
         ev.onConnected?.()
         ev.onOrbState?.('idle')
       },
       onDisconnected: () => {
+        console.log('[voice] disconnected (transport_closed)')
         connected = false
         ev.onOrbState?.('idle')
         ev.onDisconnected?.('transport_closed')
@@ -204,6 +256,7 @@ export function createRealVoiceSession(config: VoiceConfig): VoiceSession | null
       return connected
     },
     async connect() {
+      console.log('[voice] connect() — posting /offer to', config.connectUrl)
       await client.connect({ connectionUrl: config.connectUrl })
     },
     async disconnect() {

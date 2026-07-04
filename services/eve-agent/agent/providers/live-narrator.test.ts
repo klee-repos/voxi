@@ -6,9 +6,38 @@
  *   - falsifiable claims without a valid web evidence ref are dropped;
  *   - a `flavor` clause smuggling a year/spec is caught by the independent auditor.
  */
-import { test, expect, describe } from 'bun:test'
-import { gateNarration, narrationEvidence, smugglesFalsifiable, type NarrationInput } from './live-narrator'
+import { test, expect, describe, afterEach } from 'bun:test'
+import { gateNarration, narrationEvidence, smugglesFalsifiable, LiveNarrator, type NarrationInput } from './live-narrator'
 import type { Clause } from '../../../../packages/shared/src/confidence'
+
+const origFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = origFetch
+  delete process.env.OPENAI_API_KEY
+})
+
+/** Signal-aware never-resolve (see openai.test.ts). Required for the timeout case — a signal-blind mock hangs the test. */
+function neverResolvingFetch(): typeof fetch {
+  return ((_input, init) =>
+    new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+    })) as typeof fetch
+}
+
+/** Per-call OpenAI fetch mock (same shape as live-dossier.test.ts). */
+function sequencedFetch(responses: Array<{ ok: true; content: string } | { ok: false; status: number }>): {
+  fetch: typeof fetch
+  getCalls: () => number
+} {
+  let calls = 0
+  const fn = (async () => {
+    const r = responses[Math.min(calls, responses.length - 1)]!
+    calls++
+    if (r.ok) return new Response(JSON.stringify({ choices: [{ message: { content: r.content } }] }), { status: 200 })
+    return new Response(JSON.stringify({ error: 'openai down' }), { status: r.status })
+  }) as typeof fetch
+  return { fetch: fn, getCalls: () => calls }
+}
 
 const webEv = [{ ref: 'w1', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_AE-1', claim: 'The Canon AE-1 is a 35mm SLR film camera introduced in 1976.' }]
 const base: NarrationInput = { label: '1976 Canon AE-1', band: 'CONFIDENT', evidence: webEv, unsupportedFields: [], candidates: ['1976 Canon AE-1'] }
@@ -153,5 +182,41 @@ describe('smugglesFalsifiable — the flavor auditor (broadened, A7)', () => {
     // pure, non-falsifiable flavor still passes (no false-positive drop of legitimate wit)
     expect(smugglesFalsifiable('a handsome, workmanlike thing')).toBe(false)
     expect(smugglesFalsifiable('an object of quiet, unshowy competence')).toBe(false)
+  })
+})
+
+// F2d — the FIRST test of the LIVE LiveNarrator.narrate path (the prior tests cover the pure gate only). The retry
+// loop at live-narrator.ts:143-151 was already 3×, but WITHOUT a timeout a HUNG call never throws → the await never
+// settles → the retry never re-attempts → the reveal hangs (the predecessor RCA: GLM-5.2 unbounded reasoning spun
+// ~1113s/call, and 3× of that = ~3340s blanking purpose/maker while what+facts survive). The constructor `timeoutMs`
+// converts a hang to a throw (catch → retry) and bounds a slow 5xx to `timeoutMs`. The migration to gpt-5.4-mini with
+// reasoning_effort:'none' makes the stall structurally impossible (no reasoning phase to run away) — but the timeout
+// stays as defence-in-depth against any black-holed vendor socket.
+describe('LiveNarrator.narrate — timeout + retry (F2d, the live path)', () => {
+  const webEv = [{ ref: 'w1', sourceUrl: 'https://en.wikipedia.org/wiki/Canon_AE-1', claim: 'The Canon AE-1 is a 35mm SLR film camera introduced in 1976.' }]
+  const base: NarrationInput = { label: '1976 Canon AE-1', band: 'CONFIDENT', evidence: webEv, unsupportedFields: [], candidates: ['1976 Canon AE-1'] }
+
+  test('a 5xx on attempt 1 + ok on attempt 2 → the gate-approved clause is returned (retry fires on a throw)', async () => {
+    process.env.OPENAI_API_KEY = 'k-test'
+    const seq = sequencedFetch([
+      { ok: false, status: 503 }, // attempt 1: OpenAI 5xx → narrate catches → retry
+      { ok: true, content: JSON.stringify({ clauses: [{ text: 'It is a 35mm SLR film camera.', claimType: 'provenance', bucket: 'what_is_it', evidenceRef: 'w1' }] }) },
+    ])
+    globalThis.fetch = seq.fetch
+    const nar = new LiveNarrator(undefined, 5000)
+    const r = await nar.narrate(base)
+    expect(seq.getCalls()).toBe(2) // the retry actually fired — RED if the loop was 1 attempt
+    expect(r.clauses.map((c) => c.text)).toContain('It is a 35mm SLR film camera.') // gate-approved (cites a real web ref)
+  })
+
+  test('a HUNG OpenAI call (never resolves) → 3 timeouts → empty clauses (NOT a hang) — the timeout makes retry fire', async () => {
+    process.env.OPENAI_API_KEY = 'k-test'
+    globalThis.fetch = neverResolvingFetch()
+    const nar = new LiveNarrator(undefined, 50) // 50ms timeout → 3 attempts ≈ 150ms total
+    const t0 = Date.now()
+    const r = await nar.narrate(base)
+    expect(Date.now() - t0).toBeLessThan(2000) // bounded — NOT the predecessor's 1113s × 3 spin
+    expect(r.clauses).toEqual([]) // all 3 attempts timed out → empty raw clauses → gate approves nothing
+    expect(r.dropped).toBe(0) // nothing was dropped (there was nothing to drop)
   })
 })

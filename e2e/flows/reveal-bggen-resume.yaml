@@ -1,0 +1,100 @@
+# Maestro flow (iOS native, deterministic) — reproduce + validate the "closed it, came back, broken" scenario.
+#
+# The bggen fixture: the band settles INSTANTLY (the dock paints), then a ~20s phase-2 streams the grounded
+# purpose/maker/facts — simulating the real BFF's ~60s Firecrawl+GLM research. So mid-phase-2 the user "closes"
+# the reveal (drawer → Collection), then taps the item to come back — exactly while details are STILL generating.
+#
+# RCA (the bug): tapping the item ran `revisitThread` → `startCapture` → `abortThreadStream()` KILLED the
+# keepAlive survivor pump + reset `researchComplete`. The reveal re-opened with band+title but LOADING buckets
+# and re-ran the whole cascade — the reported "broken state".
+#
+# FIX (attach-to-survivor): `revisitThread` now short-circuits when the tapped thread is the one whose cascade is
+# already streaming in the background → it bare-navigates to /reveal (no reset). /reveal mounts, ATTACHES to the
+# survivor via isThreadStreaming(), reads the in-flight store, and the survivor keeps filling it. This flow proves
+# the round trip is NOT broken: the reveal card + title are present on return (no error state), and after the
+# survivor finishes phase-2 the Details icon grounds (active) and its morph card shows the now-grounded text.
+#
+# Run:  bun run e2e:native:bff &   then   maestro test e2e/flows/reveal-bggen-resume.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+# Steer the capture to the bggen fixture (instant band, then a ~20s phase-2).
+- openLink: "voxi://e2e?seed=bggen"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 30000
+# Capture (fixture shutter). Band settles immediately; phase-2 (details generation) is now running for ~20s.
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+- assertVisible:
+    id: "reveal.title"
+# Mid-phase-2 (details STILL generating): back to the viewfinder (the drawer hamburger lives on page 0, not the
+# item reveal), then open the drawer → Collection.
+- tapOn:
+    id: "nav.back"
+- extendedWaitUntil:
+    visible:
+      id: "nav.menuButton"
+    timeout: 20000
+- tapOn:
+    id: "nav.menuButton"
+- extendedWaitUntil:
+    visible:
+      id: "nav.threadsTab"
+    timeout: 30000
+- tapOn:
+    id: "nav.threadsTab"
+- extendedWaitUntil:
+    visible:
+      id: "threads.item"
+    timeout: 30000
+# Come BACK: tap the just-captured item. With the FIX, revisitThread ATTACHES to the survivor (no reset/abort);
+# /reveal mounts and reads the in-flight store. (Without the fix this is where it breaks: loading buckets + re-run.)
+- tapOn:
+    id: "threads.item"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 30000
+# NOT broken — the reveal card + object title render on return (no error/apology surface, no blank).
+- assertVisible:
+    id: "reveal.title"
+# The survivor keeps streaming in the background; once phase-2 completes the Details dock icon grounds to active.
+- extendedWaitUntil:
+    visible:
+      id: "reveal.detailsIcon"
+    timeout: 45000
+- tapOn:
+    id: "reveal.detailsIcon"
+# The morph card opens with the now-grounded content (the buckets the survivor filled while we were away + on return).
+- extendedWaitUntil:
+    visible:
+      id: "reveal.bucketCard"
+    timeout: 20000

@@ -18,6 +18,7 @@ import { buildLocalCollaborators } from './local-collaborators'
 import { createPgStores } from './pg-stores'
 import { Catalog } from '../../../packages/db/catalog'
 import { VertexEmbeddingProvider, EMBED_DIM } from '../../eve-agent/agent/lib/embedding'
+import { LiveChatProvider } from '../../eve-agent/agent/providers/live-chat'
 import { mkdirSync } from 'node:fs'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 
@@ -85,6 +86,7 @@ const voice = createVoiceRoutes({
   store: local.store,
   sessionOwner: local.sessionOwner,
   threads: durable.threads, // durable owner backstop: without it a legit owner's voice session 404s after a restart
+  reveals: durable.reveals, // the voice-bot fetches the grounded item context (F5) per minted session
   voiceServerBaseUrl: process.env.VOICE_SERVER_BASE_URL ?? 'http://192.168.1.193:7071',
 })
 
@@ -108,6 +110,7 @@ const app = createApp({
   podcastStatus: podcast.status,
   podcastEnqueue: podcast.enqueue,
   speech, // spoken reveal (ElevenLabs) — undefined when no key → route 503s loud
+  chat: new LiveChatProvider(), // grounded "Ask Voxi" chat (Vertex Gemini + claim-structured honesty gate)
 
   // Dev: full access so testing is never paywalled. (Real App Store JWS verification lands with billing; the
   // verifier exists in appstore.ts and is fail-closed, but a sandbox purchase can't be exercised here.)

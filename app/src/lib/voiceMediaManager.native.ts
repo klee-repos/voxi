@@ -115,6 +115,20 @@ class VoxiAudioMediaManager extends MediaManager {
     this.audioTrack = track
     // TrackEvent: { track, type }. type must be 'audio' to hit the audio transceiver branch in transport.js.
     this.onTrackStarted?.({ track: track as never, type: 'audio' })
+    // F2: react-native-webrtc forces AVAudioSession to `.playAndRecord` on mic acquire, which on iOS routes
+    // OUTPUT to the earpiece (quiet) by default. Explicitly route through the SPEAKER for the call's duration
+    // so voice matches the podcast/narration volume. disconnect() restores the playback-capable mode after.
+    try {
+      const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio')
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldRouteThroughEarpiece: false, // → speaker (the volume-fixing flag)
+        interruptionMode: 'duckOthers',
+      })
+    } catch {
+      /* best-effort: a failed mode set must not block the call */
+    }
   }
 
   /** Called by transport.disconnect()/stop(). Stop tracks + release the native stream so the OS mic frees. */

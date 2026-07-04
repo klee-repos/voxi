@@ -118,7 +118,7 @@ describe('BFF durable collection — survives a restart', () => {
     const dir = freshDir()
     const eve = makeEve()
     let pg = await openStores(dir)
-    let app = createApp(build(pg, eve, { audioUrl: 'g/ep.m4a', transcript: [{ speaker: 'ARLO', text: 'A fine camera.' }] }))
+    let app = createApp(build(pg, eve, { audioUrl: 'https://storage.googleapis.com/voxi-podcast-audio-test/podcasts/x/v1/ep.m4a', transcript: [{ speaker: 'ARLO', text: 'A fine camera.' }] }))
 
     // capture (real PNG) → the photo is persisted
     const id = await createThread(app, 'A', `${PNG_1x1}#confident`)
@@ -151,7 +151,7 @@ describe('BFF durable collection — survives a restart', () => {
     // detail: photo + podcast (served despite the unreachable worker) + conversation flag
     const detail = await (await app.request(`/v1/threads/${id}`, { headers: auth('A') })).json()
     expect(detail.photoUrl).toBeTruthy()
-    expect(detail.podcast).toMatchObject({ state: 'ready', audioUrl: 'g/ep.m4a' })
+    expect(detail.podcast).toMatchObject({ state: 'ready', audioUrl: 'https://storage.googleapis.com/voxi-podcast-audio-test/podcasts/x/v1/ep.m4a' })
     expect(detail.hasConversation).toBe(true)
 
     // /stream REPLAYS deterministically from the durable reveal — eve2.stream was NEVER called
@@ -243,7 +243,7 @@ describe('BFF durable collection — survives a restart', () => {
   test('A9/A6: podcast + messages are owner-scoped; cross-tenant reads/writes denied', async () => {
     const dir = freshDir()
     const pg = await openStores(dir)
-    const app = createApp(build(pg, makeEve(), { audioUrl: 'g/ep.m4a', transcript: [] }))
+    const app = createApp(build(pg, makeEve(), { audioUrl: 'https://storage.googleapis.com/voxi-podcast-audio-test/podcasts/x/v1/ep.m4a', transcript: [] }))
     const id = await createThread(app, 'A', `${PNG_1x1}#confident`)
     await drain(await app.request(`/v1/threads/${id}/stream`, { headers: auth('A') }))
 

@@ -1,27 +1,30 @@
 /**
- * The reveal DOCK (ANALYSIS-UX redesign) — four green research icons (What it is · What it's for · Who made it ·
- * Curious facts) plus a blue Ask-Voxi conversation icon (design.md's green=audio / blue=people lanes). Each
- * research icon carries `bucket.state` (loading|active|empty|unavailable) via `tidWith`; tapping an active one
- * morphs it into a `BucketCard` — the grounded content + a source proof + per-bucket audio.
+ * The reveal DOCK — three icons: Explore (Deep Dive, green audio lane, featured first), Details (the research lane
+ * — what/purpose/maker/facts — collapsed to one icon that opens the morph `BucketCard` with all four tabs), and Ask
+ * (blue people lane). Details carries the AGGREGATE state of the research buckets via `tidWith`
+ * (loading|active|empty); Explore carries its Deep Dive state (generating|ready|active). design.md's green=audio /
+ * blue=people lanes.
  *
  * Converge-safe by construction: JS-driven `Animated` (`useNativeDriver:false`), lucide-only iconography, and NO
- * `react-native-gesture-handler` (between-bucket nav is a tappable labeled tab strip, never a swipe). State rides
- * `data-*` (via `tidWith`), never colour/glyph alone, so the E2E proof reads it deterministically.
+ * `react-native-gesture-handler` — section nav is a tappable labeled tab strip PLUS a core-RN `PanResponder` swipe
+ * over the card body (the same converge-safe gesture path Drawer.tsx/Scrubber.tsx use). State rides `data-*` (via
+ * `tidWith`), never colour/glyph alone, so the E2E proof reads it deterministically.
  */
 import React, { useEffect, useRef } from 'react'
-import { View, Text, Pressable, Animated, Easing, StyleSheet, ScrollView, Linking, type ViewStyle } from 'react-native'
-import { BookOpen, Target, Stamp, Lightbulb, Sparkles, MessageCircle, Play, Pause, RotateCcw, X } from 'lucide-react-native'
+import { View, Text, Pressable, Animated, Easing, StyleSheet, ScrollView, Linking, PanResponder, type ViewStyle, type PanResponderGestureState } from 'react-native'
+import { BookOpen, Target, Stamp, Lightbulb, Sparkles, MessageCircle, Play, Pause, RotateCcw, X, ScrollText } from 'lucide-react-native'
 import { AudioElement } from './AudioElement'
 import { GlassFill } from './GlassFill'
 import { ids, tid, tidWith } from '../lib/testid'
 import { radius, space, typeStyles, type, hit, shadow } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
 import { sourceLabel } from '../lib/sourceLabel'
-import type { BucketStatus, RevealFact } from '../state/captureStore'
+import { deriveDetailsStatus, deriveDetailsUnread, type BucketStatus, type RevealFact } from '../state/captureStore'
+import { nextTab, type TabDir } from '../lib/cardTabs'
 
 /** Dock affordances. The four research buckets morph into a card (green lane); `deepdive` navigates to the Deep
  *  Dive player (green audio lane, on-demand); `conversation` navigates (blue people lane, pinned). */
-export type DockKey = 'what' | 'purpose' | 'maker' | 'facts' | 'deepdive' | 'conversation'
+export type DockKey = 'what' | 'purpose' | 'maker' | 'facts' | 'deepdive' | 'details' | 'conversation'
 /** The morph/audio buckets — the ones that open a `BucketCard` + have per-bucket status/audio. Excludes the two
  *  NAV affordances (`deepdive` opens the Deep Dive screen; `conversation` opens the chat), so their union never
  *  leaks into the morph-card / audio-bucket / deriveBucketStatus paths (adversarial D4). */
@@ -29,8 +32,8 @@ export type MorphKey = 'what' | 'purpose' | 'maker' | 'facts'
 
 type Surface = ReturnType<typeof useTheme>['surface']
 
-// Dock layout: the icons lay out as a SINGLE flush row of equal `flex:1` slots (see styles.dockRow / iconWrap),
-// evenly distributed edge-to-edge — the Apple/Google Photos bottom-bar pattern. Each slot centers its glyph
+// Dock layout: THREE icons (Explore · Details · Ask) as equal `flex:1` slots with a real `gap` between them (see
+// styles.dockRow / iconWrap) — the Apple/Google Photos bottom-bar pattern, spaced. Each slot centers its glyph
 // circle (`ICON_CIRCLE`) plus a one-word caption; a bucket's corner badge (unread dot / "?") pokes just above the
 // glyph. It's a plain View (not a ScrollView), so nothing scrolls.
 const ICON_CIRCLE = 44
@@ -42,18 +45,19 @@ const CARD_RADIUS: ViewStyle = { borderTopLeftRadius: radius.xl, borderTopRightR
 // copy in theme.test.ts (the blue-source-link AA guard composites over this exact value).
 const CARD_SCRIM = 'rgba(20,18,14,0.60)'
 
-const ICON = { what: BookOpen, purpose: Target, maker: Stamp, facts: Lightbulb, deepdive: Sparkles, conversation: MessageCircle } as const
+const ICON = { what: BookOpen, purpose: Target, maker: Stamp, facts: Lightbulb, deepdive: Sparkles, details: ScrollText, conversation: MessageCircle } as const
 // One word per slot (the a11yLabel keeps the full "Deep Dive" for screen readers).
-const CAPTION: Record<DockKey, string> = { what: 'What', purpose: 'Purpose', maker: 'Maker', facts: 'Facts', deepdive: 'Explore', conversation: 'Ask' }
+const CAPTION: Record<DockKey, string> = { what: 'What', purpose: 'Purpose', maker: 'Maker', facts: 'Facts', deepdive: 'Explore', details: 'Details', conversation: 'Ask' }
 const TEST_ID: Record<DockKey, string> = {
   what: ids.reveal.bucketWhat,
   purpose: ids.reveal.bucketPurpose,
   maker: ids.reveal.bucketWho,
   facts: ids.reveal.bucketFacts,
   deepdive: ids.reveal.deepDiveIcon,
+  details: ids.reveal.detailsIcon,
   conversation: ids.reveal.conversationIcon,
 }
-/** The full question a morph bucket's card announces as its eyebrow (dock captions are short; no meaning lost). */
+/** The descriptive phrase retained for each tab's aria-label (the VISIBLE tab is the single-word CAPTION — sighted users see short, screen readers hear long). */
 export const CARD_EYEBROW: Record<MorphKey, string> = {
   what: 'What it is',
   purpose: "What it's for",
@@ -61,10 +65,13 @@ export const CARD_EYEBROW: Record<MorphKey, string> = {
   facts: 'Curious facts',
 }
 
-/** The research buckets shown in the DOCK, in order. `facts` ("Curious facts") is intentionally OMITTED so the dock
- *  stays a single flush row: the facts still stream and stay reachable as a morph-card tab. Add 'facts' back here to
- *  restore its dock icon. */
-const DOCK_RESEARCH: readonly MorphKey[] = ['what', 'purpose', 'maker']
+// A horizontal swipe over the card body switches sections (core-RN PanResponder — converge-safe, no gesture-handler).
+// The predicate gates BOTH the responder claim (capture + bubble) AND the release commit, so a gesture that ended
+// vertical-dominant, or drifted back inside the deadzone, is a no-op — never a wrong-way switch (Drawer.tsx:78 gates
+// at release for the same reason).
+const SWIPE_MIN_PX = 20
+const isHorizontalSwipe = (g: PanResponderGestureState): boolean =>
+  Math.abs(g.dx) > SWIPE_MIN_PX && Math.abs(g.dx) > Math.abs(g.dy) * 1.5
 
 /** Accessible, state-bearing label for a dock icon (never colour/motion alone — a11y §4.9). */
 function a11yLabel(key: DockKey, status: BucketStatus, ready?: boolean, generating?: boolean, unread?: boolean): string {
@@ -75,12 +82,24 @@ function a11yLabel(key: DockKey, status: BucketStatus, ready?: boolean, generati
     if (generating) return 'Deep Dive — generating its story, tap to check on it'
     return ready ? 'Deep Dive — ready to play its story' : 'Deep Dive — tap to generate its story'
   }
+  if (key === 'details') {
+    // The research lane collapsed to one icon; its state is the aggregate of what/purpose/maker. 'active' with an
+    // unread bucket → "new"; all-empty (none active/loading) → "nothing grounded yet"; else loading/read.
+    const q = "Details — what it is, what it's for, who made it"
+    if (status === 'loading') return `${q} — still researching`
+    if (status === 'empty') return `${q} — nothing grounded yet`
+    return unread ? `${q} — new, unread` : `${q} — read`
+  }
   const q = CARD_EYEBROW[key]
   if (status === 'loading') return `${q} — still researching`
   if (status === 'empty') return `${q} — no information found`
   if (status === 'unavailable') return `${q} — couldn't reach the Guide, tap to retry`
   return unread ? `${q} — new, unread` : `${q} — read`
 }
+
+/** The research buckets rolled up under the single Details dock icon (the dock's research lane collapses to one
+ *  slot; all four stay reachable as morph-card tabs). The aggregate is derived in `captureStore`
+ *  (`deriveDetailsStatus` / `deriveDetailsUnread`) so the dock-face contract is unit-pinned. */
 
 /** One dock icon. Loading → a single green pulse ring (shared driver) around a dimmed glyph; active → full-ink
  *  glyph (green reserved for the audio/play control, not "active"); an active research bucket the user hasn't read
@@ -208,15 +227,19 @@ export function BucketDock({
     return () => loop.stop()
   }, [anyLoading, reduceMotion, pulse])
 
-  // One flush row of equal `flex:1` slots: the research buckets, then Deep Dive + Ask. Each BucketIcon Pressable IS
-  // a slot (role=button, a DIRECT child), so the row hugs its container's edges with no bunching. An active research
-  // bucket the user hasn't read yet carries the unread dot; an empty one carries the small "?" (missing info).
+  // Three dock icons, in order: Explore (Deep Dive — featured first, the most compelling content) · Details (the
+  // research lane collapsed to one icon; opens the morph card whose tabs are what/purpose/maker/facts) · Ask. Each
+  // BucketIcon Pressable IS a slot (role=button, a direct child); styles.dockRow gives them flex:1 + a real gap, so
+  // the row reads as three clearly-spaced affordances (not the old five-up flush row).
+  // Details carries the AGGREGATE state of what/purpose/maker (derived in captureStore, unit-pinned): a loading
+  // bucket → the spinning ring; any active → full ink (an unread one adds the dot — but ONLY once the lane has
+  // finished streaming); none active/loading → the small "?" (nothing grounded yet).
+  const detailsStatus = deriveDetailsStatus(statuses)
+  const detailsUnread = deriveDetailsUnread(statuses, read)
   return (
     <View {...tid(ids.reveal.buckets)} style={styles.dockRow}>
-      {DOCK_RESEARCH.filter((k) => statuses[k] !== 'hidden').map((k) => (
-        <BucketIcon key={k} dkey={k} status={statuses[k]} unread={statuses[k] === 'active' && !read[k]} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen(k)} />
-      ))}
       <BucketIcon dkey="deepdive" status="active" ready={deepDiveState === 'ready'} generating={deepDiveState === 'generating'} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('deepdive')} />
+      <BucketIcon dkey="details" status={detailsStatus} unread={detailsUnread} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('details')} />
       <BucketIcon dkey="conversation" status="active" pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('conversation')} />
     </View>
   )
@@ -262,11 +285,13 @@ function Waveform({ playing, color }: { playing: boolean; color: string }): Reac
 
 /** The morph CARD: a scrim-backed reading sheet that rises + scales in from the dock (single-node transform+opacity
  *  on the JS driver — not an expensive per-node shared-element morph, adversarial 7b; reduce-motion → cross-fade).
- *  The header is a horizontally-scrollable SECTION-TITLE tab bar (the heading AND the in-place section switch — a
- *  tap, never a swipe); below it the grounded body (or the fact rows + per-fact sources), and a pinned audio
- *  transport (a filled play/pause + label + a calm level ornament). */
+ *  Sections switch TWO ways: a TAP on a labeled tab in the header strip, OR a horizontal SWIPE over the card body
+ *  (core-RN PanResponder — converge-safe, no gesture-handler). Below the strip: the grounded prose (or fact rows +
+ *  per-fact sources), and a pinned audio transport (a filled play/pause + label + a calm level ornament). */
 export function BucketCard({
   bucket,
+  /** the section's dock status — drives the honest loading vs empty body (loading → "Still researching…"). */
+  status,
   body,
   whenMade,
   facts,
@@ -281,6 +306,8 @@ export function BucketCard({
   onClose,
 }: {
   bucket: MorphKey
+  /** the section's dock status — loading → "Still researching…" (not the failed-looking empty prose). */
+  status: BucketStatus
   body: string
   /** the "when it was made" grounded date (maker card only) — a muted line beside the maker prose; '' when absent. */
   whenMade?: string
@@ -301,6 +328,31 @@ export function BucketCard({
     enter.setValue(0)
     Animated.timing(enter, { toValue: 1, duration: 240, useNativeDriver: false }).start()
   }, [bucket, reduceMotion, enter])
+  // Swipe-between-tabs: a horizontal drag over the card body commits the next/prev section. The PanResponder is
+  // built once; `live` is refreshed every render so the release handler never closes over a stale bucket/tabs/onTab
+  // (the same ref-refresh Scrubber.tsx uses for its long-lived seek PanResponder). onMoveShouldSet… claims ONLY
+  // horizontal-dominant moves, so the inner vertical ScrollView keeps vertical scroll and every Pressable (tab /
+  // transport / source link) keeps its tap. The handlers live on a wrapper around the body + transport ONLY — the
+  // tab strip keeps its OWN horizontal responder (so it still scrolls on overflow at accessibility font scales).
+  const live = useRef({ bucket, tabs, onTab })
+  live.current = { bucket, tabs, onTab }
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false, // never steal taps — Pressables inside keep them
+      onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g),
+      // capture too, so the parent robustly preempts the inner vertical ScrollView for a horizontal gesture (the
+      // bubble handler covers the converge-proven RNW path; capture covers native + the greedy-ScrollView case).
+      onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g),
+      onPanResponderRelease: (_e, g) => {
+        if (Math.abs(g.dx) <= SWIPE_MIN_PX) return // deadzone: a backtrack/drift that collapsed below threshold
+        if (Math.abs(g.dx) <= Math.abs(g.dy) * 1.5) return // ended vertical-dominant (a curved scroll attempt)
+        const dir: TabDir = g.dx < 0 ? 1 : -1 // leftward swipe → next tab; rightward → previous
+        const t = nextTab(live.current.bucket, dir, live.current.tabs)
+        if (t) live.current.onTab(t)
+      },
+      onPanResponderTerminate: () => { /* a contended/cancelled gesture never switches tabs */ },
+    }),
+  ).current
   const cardStyle = {
     opacity: enter,
     transform: reduceMotion
@@ -355,7 +407,7 @@ export function BucketCard({
                   numberOfLines={1}
                   style={[styles.tabLabel, { color: selected ? surface.text : surface.textMuted, fontFamily: selected ? type.family.sans['800'] : type.family.sans['600'] }]}
                 >
-                  {CARD_EYEBROW[k]}
+                  {CAPTION[k]}
                 </Text>
                 <View style={[styles.tabUnderline, { backgroundColor: selected ? surface.text : 'transparent' }]} />
               </Pressable>
@@ -364,6 +416,7 @@ export function BucketCard({
         </ScrollView>
         <View style={[styles.headerHairline, { backgroundColor: surface.border }]} />
 
+        <View style={styles.body} {...pan.panHandlers}>
         <ScrollView style={styles.cardScroll} contentContainerStyle={{ paddingBottom: space.md }} showsVerticalScrollIndicator={false}>
           {bucket === 'facts' && facts && facts.length ? (
             <View {...tid(ids.reveal.facts)}>
@@ -374,6 +427,10 @@ export function BucketCard({
           ) : body ? (
             // Prose buckets (what / purpose / maker) show ONLY the grounded text — larger + looser for reading.
             <Text {...(bucket === 'what' ? tid(ids.reveal.whatItIs) : {})} style={[typeStyles.body, { color: surface.text, fontSize: 17, lineHeight: 26 }]}>{body}</Text>
+          ) : status === 'loading' ? (
+            // The section is still streaming — an honest IN-PROGRESS state, NOT the failed-looking "nothing grounded"
+            // prose (a still-researching tab must read as in-progress, not as an answer of absence).
+            <Text style={[typeStyles.body, { color: surface.textMuted, fontStyle: 'italic', fontSize: 16, lineHeight: 24 }]}>Still researching this one…</Text>
           ) : bucket === 'maker' && makerDate ? (
             // Date-known / maker-unknown (Lviv "Painter unknown, 1830"): the date LEADS below, so the one grounded
             // fact isn't buried under a negation. The made block (rendered next) carries the softened maker note.
@@ -426,16 +483,17 @@ export function BucketCard({
             {audioUrl ? <AudioElement id={ids.reveal.narrationAudio} src={audioUrl} playing={playing} seekToStartOnPlay onPlayingChange={() => {}} /> : null}
           </>
         ) : null}
+        </View>
       </Animated.View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  // Flush dock: a SINGLE row of equal `flex:1` slots, evenly distributed edge-to-edge (Apple/Google Photos
-  // bottom-bar pattern). Each BucketIcon Pressable IS a slot (role=button, direct child), so the row hugs its
-  // container's left/right edges with no bunching — no wrap, no fixed width; the caption is single-line (no reflow).
-  dockRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  // Three spaced dock icons: equal `flex:1` slots (Apple/Google Photos bottom-bar pattern) with a real `gap`
+  // between them so the row reads as three distinct affordances, not a flush cluster. Each BucketIcon Pressable IS
+  // a slot (role=button, direct child) hugging the container's left/right edges; the caption is single-line.
+  dockRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.lg },
   iconWrap: { flex: 1, alignItems: 'center' },
   iconCircleWrap: { width: hit.min, height: hit.min, alignItems: 'center', justifyContent: 'center' },
   iconCircle: { width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radius.pill, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
@@ -454,10 +512,14 @@ const styles = StyleSheet.create({
   // Full-width, horizontally-scrolling section-title tabs (flexGrow:0 → its height hugs the labels, not the column).
   tabBar: { flexGrow: 0, marginTop: space.xs },
   tabBarContent: { flexDirection: 'row', alignItems: 'flex-end', gap: space.lg, paddingRight: space.md },
-  tab: { alignItems: 'center', paddingTop: space.xs },
+  tab: { alignItems: 'center', paddingTop: space.xs, paddingHorizontal: space.sm, minHeight: hit.min }, // 44pt hit-target holds even for the shortest single-word label ('What')
   tabLabel: { fontSize: 16, lineHeight: 21 }, // the section title IS the tab — larger + readable, not a tiny caption
   tabUnderline: { alignSelf: 'stretch', height: 2.5, borderRadius: 2, marginTop: space.sm }, // active-tab indicator on the hairline
   headerHairline: { height: StyleSheet.hairlineWidth },
+  // The swipe-able body wrapper (cardScroll + transport). flexShrink:1 so it shrinks within the card on overflow
+  // (matching cardScroll below) — short content still hugs. The swipe PanResponder lives here, scoped AWAY from the
+  // tab strip so the strip keeps its own horizontal responder at every font scale.
+  body: { flexShrink: 1 },
   // flexShrink:1 (NOT flex:1 — the card is maxHeight:'82%' with no explicit height) so short content lays out fully
   // and the card hugs it, but on overflow only the ScrollView shrinks+scrolls — the fixed tab bar + pinned transport
   // never fall below the screen edge (RN's default flexShrink is 0).

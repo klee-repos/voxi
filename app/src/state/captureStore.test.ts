@@ -4,7 +4,7 @@
  * contract the dock renders and the converge proof asserts, so it is unit-pinned here.
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
-import { useCaptureStore, deriveBucketStatus, type StatusSlice } from './captureStore'
+import { useCaptureStore, deriveBucketStatus, deriveDetailsStatus, deriveDetailsUnread, type StatusSlice } from './captureStore'
 
 const base: StatusSlice = {
   band: null,
@@ -108,5 +108,29 @@ describe('capture store actions', () => {
     useCaptureStore.getState().reset()
     expect(useCaptureStore.getState()).toMatchObject({ researchComplete: false, researchError: false, lastSeenIndex: null, sawAnySection: false })
     expect(useCaptureStore.getState().sections).toEqual({})
+  })
+})
+
+describe('deriveDetailsStatus / deriveDetailsUnread (the Details dock-icon aggregate)', () => {
+  test('status: loading if ANY of what/purpose/maker is still streaming', () => {
+    expect(deriveDetailsStatus({ what: 'active', purpose: 'loading', maker: 'empty' })).toBe('loading')
+    expect(deriveDetailsStatus({ what: 'loading', purpose: 'loading', maker: 'loading' })).toBe('loading')
+  })
+  test('status: empty if NONE is active or loading', () => {
+    expect(deriveDetailsStatus({ what: 'empty', purpose: 'empty', maker: 'unavailable' })).toBe('empty')
+  })
+  test('status: active if any is active AND none is loading', () => {
+    expect(deriveDetailsStatus({ what: 'active', purpose: 'empty', maker: 'active' })).toBe('active')
+  })
+  test('unread: NO dot while any bucket is still loading — even if another is active+unread (the reported bug)', () => {
+    // 'what' already grounded (active + unread) while purpose/maker are still streaming → the dot must NOT show
+    // beside the spinning ring. This is the exact regression: the dot appeared mid-load.
+    expect(deriveDetailsUnread({ what: 'active', purpose: 'loading', maker: 'loading' }, { what: false, purpose: false, maker: false })).toBe(false)
+  })
+  test('unread: the dot appears once the lane finishes streaming (active + unread)', () => {
+    expect(deriveDetailsUnread({ what: 'active', purpose: 'active', maker: 'active' }, { what: false, purpose: false, maker: false })).toBe(true)
+  })
+  test('unread: no dot once every active bucket has been read', () => {
+    expect(deriveDetailsUnread({ what: 'active', purpose: 'active', maker: 'active' }, { what: true, purpose: true, maker: true })).toBe(false)
   })
 })

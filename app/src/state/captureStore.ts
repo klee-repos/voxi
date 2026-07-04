@@ -202,6 +202,24 @@ export function deriveBucketStatus(bucket: 'what' | SectionBucket | 'facts', s: 
   return 'loading'
 }
 
+/** The three research buckets rolled up under the Details dock icon. */
+export type DetailsSlice = { what: BucketStatus; purpose: BucketStatus; maker: BucketStatus }
+
+/** The Details dock icon's AGGREGATE state over the research buckets it nests (what/purpose/maker): `loading` while
+ *  ANY is still streaming, `empty` if none grounded, else `active`. Pure → unit-pinned (the dock-face contract). */
+export function deriveDetailsStatus(s: DetailsSlice): BucketStatus {
+  if (s.what === 'loading' || s.purpose === 'loading' || s.maker === 'loading') return 'loading'
+  if (s.what !== 'active' && s.purpose !== 'active' && s.maker !== 'active') return 'empty'
+  return 'active'
+}
+
+/** The Details dock icon's unread dot. It WAITS for the research lane to finish streaming — never while any bucket
+ *  is still loading (otherwise the dot pops in beside the spinning ring the moment the first bucket grounds). Pure. */
+export function deriveDetailsUnread(s: DetailsSlice, read: Record<'what' | 'purpose' | 'maker', boolean>): boolean {
+  return deriveDetailsStatus(s) !== 'loading'
+    && (['what', 'purpose', 'maker'] as const).some((k) => s[k] === 'active' && !read[k])
+}
+
 // Dev/E2E testability seam (never attached in a production build): expose the store on the browser global so
 // Playwright can drive the capture flow to any state without a live backend scan or Clerk sign-in. It seeds the
 // SAME state the real NDJSON stream would produce, so what renders is the real screen, not a mock.

@@ -26,10 +26,13 @@ export MAESTRO_DRIVER_STARTUP_TIMEOUT="${MAESTRO_DRIVER_STARTUP_TIMEOUT:-180000}
 #   drawer-nav     — open the slide-out drawer → Settings (the repair pattern for the drawer-occluded flows)
 #   reveal-regen   — ⋯ MORE sheet → Regenerate → confirm → loading overlay reappears → fresh reveal re-settles
 #   reveal-delete  — ⋯ MORE sheet → Delete → two-step confirm → Collection empty (item genuinely removed)
+#   reveal-bggen-resume — capture (bggen seed → instant band + ~20s phase-2) → drawer → Collection mid-research →
+#                    tap the item to come back. Proves the keepAlive survivor + revisitThread attach-to-survivor
+#                    keep details generating across the navigation (no "closed it, came back, broken" re-run).
 #   deepdive-01    — reveal → Deep Dive → Generate → composing hero → ready player; PLAY/PAUSE flips + STICKS (the
 #                    native transport-mirror bug fixed) and real playback advances the elapsed clock
 # deepdive-retry is NOT in this list — it needs a fail-first BFF (below), which would fail deepdive-01's render.
-FLOWS=(auth-01 auth-landing auth-signup auth-signin auth-exists auth-noaccount cam-03 seed-steer drawer-nav reveal-regenerate reveal-delete deepdive-01)
+FLOWS=(auth-01 auth-landing auth-signup auth-signin auth-exists auth-noaccount cam-03 seed-steer drawer-nav reveal-regenerate reveal-delete reveal-bggen-resume deepdive-01)
 
 echo "[e2e:ios] booting deterministic test-BFF on :8799 (dedicated — 8787 is the dev BFF; see test-bff.ts)"
 bun "$ROOT/e2e/native/test-bff.ts" >/tmp/voxi-test-bff.log 2>&1 &

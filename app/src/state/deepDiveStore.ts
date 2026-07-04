@@ -37,12 +37,19 @@ const IDLE: DeepDiveStatus = { state: 'idle', failReason: null, startedAt: null 
 interface DeepDiveStoreShape {
   byThread: Record<string, DeepDiveStatus>
   _set(threadId: string, next: DeepDiveStatus): void
+  _del(threadId: string): void
   _reset(): void
 }
 
 export const useDeepDiveStore = create<DeepDiveStoreShape>((set) => ({
   byThread: {},
   _set: (threadId, next) => set((s) => ({ byThread: { ...s.byThread, [threadId]: next } })),
+  _del: (threadId) => set((s) => {
+    if (!(threadId in s.byThread)) return s
+    const next = { ...s.byThread }
+    delete next[threadId]
+    return { byThread: next }
+  }),
   _reset: () => set({ byThread: {} }),
 }))
 
@@ -169,12 +176,60 @@ export function cancelDeepDive(threadId: string): void {
   jobs.delete(threadId)
 }
 
+/** Item-delete cleanup: cancel any in-flight generation AND drop the `byThread[threadId]` entry. Distinct from
+ *  `cancelDeepDive`, which leaves the Zustand key in place (the single-item reveal path navigates away and the
+ *  player's `reconcileDeepDive` later rewrites it on mount). Bulk delete from the collection grid deletes threads
+ *  whose player will NEVER mount again — so a `cancelDeepDive`-only cleanup would leave dead `ready`/`composing`
+ *  entries in the store for the whole session (a monotonic leak for heavy bulk-delete users). This removes the key
+ *  outright. */
+export function forgetDeepDive(threadId: string): void {
+  const job = jobs.get(threadId)
+  if (job) job.cancelled = true
+  jobs.delete(threadId)
+  useDeepDiveStore.getState()._del(threadId)
+}
+
 /** Seed a durable-ready episode discovered by the player's getThread probe, so the dock's ready indicator lights
  *  without a (re)generate. No-op if a generation is in flight. */
 export function seedReadyDeepDive(threadId: string, audioUrl: string, transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[]): void {
   if (jobs.has(threadId)) return
   if (read(threadId).state === 'ready') return // don't let a same-session reopen's probe clobber a fresher (regenerated) episode
   write(threadId, { state: 'ready', audioUrl, transcript, failReason: null, startedAt: null })
+}
+
+/**
+ * Reconcile the store with the SERVER's podcast truth (the player's getThread probe calls this on mount). The
+ * store is module-level and survives in-app navigation, so a stale `ready` cached earlier in the session — e.g. a
+ * pre-fix episode whose worker-relative audio URL now 404s after the GCS rework — would otherwise keep the player
+ * attached to a DEAD episode until a force-quit (the bug: "takes forever, never finishes, no error").
+ *
+ *   • Server has a SERVABLE ready (state=ready + audioUrl the BFF vouched for) → seed it (overwriting a stale
+ *     cached URL, which seedReadyDeepDive's no-op-on-ready would skip).
+ *   • Server has NO servable ready (null / composing / failed, OR ready-with-audioUrl-withheld by the BFF's
+ *     stale-URL guard) but the store still claims ready/slow → CLEAR the stale entry so the player shows the
+ *     Generate CTA and a subsequent startDeepDive regenerates (free, via the idempotent gate) instead of attaching
+ *     to the dead episode.
+ *   • No-op while a poll job is in flight (the live poller owns the terminal write).
+ *
+ * Mirrors the probe's "never compose here" rule: it only reconciles existing state, never starts a generate.
+ */
+export function reconcileDeepDive(
+  threadId: string,
+  server: { state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string }[] } | null,
+): void {
+  if (jobs.has(threadId)) return // a poll is in flight — its terminal write owns the state
+  const cur = read(threadId)
+  if (server?.state === 'ready' && server.audioUrl) {
+    if (cur.state !== 'ready' || cur.audioUrl !== server.audioUrl) {
+      write(threadId, { state: 'ready', audioUrl: server.audioUrl, transcript: server.transcript, failReason: null, startedAt: null })
+    }
+    return
+  }
+  // Server has no servable ready — a stale `ready`/`slow` cached this session is dead weight; drop it so the
+  // player shows Generate and startDeepDive proceeds (instead of no-oping on the dead `ready`).
+  if (cur.state === 'ready' || cur.state === 'slow') {
+    useDeepDiveStore.getState()._set(threadId, IDLE)
+  }
 }
 
 /** Imperative read (non-hook) — for effects that need the current status without subscribing. */

@@ -65,9 +65,9 @@ const databaseUrl = process.env.DATABASE_URL
 if (ON_CLOUD_RUN && !databaseUrl) {
   throw new Error('DATABASE_URL is required on Cloud Run — the collection must persist in Cloud SQL, not on the ephemeral container disk')
 }
-// GLM_API_KEY + FIRECRAWL_API_KEY: the cascade's narration/research/dossier now run on GLM-5.2 over Firecrawl. The
-// per-call clients throw at the seam but the retry loops swallow that into honest-empty output, so assert at boot — a
-// missing/typo'd secret crash-loops loudly here rather than silently serving blank reveals for hours.
+// OPENAI_API_KEY + FIRECRAWL_API_KEY: the cascade's narration/research/dossier run on OpenAI gpt-5.4-mini over
+// Firecrawl. The per-call clients throw at the seam but the retry loops swallow that into honest-empty output, so
+// assert at boot — a missing/typo'd secret crash-loops loudly here rather than silently serving blank reveals for hours.
 assertProdKeys()
 const durable = databaseUrl
   ? await createCloudSqlStores(databaseUrl)

@@ -19,6 +19,7 @@
 import React from 'react'
 import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native'
 import { Image } from 'expo-image'
+import { Check } from 'lucide-react-native'
 import { PressableTile, Body, Muted } from './ui'
 import { ids, tid } from '../lib/testid'
 import { radius, space, motion, photoLabelScrim } from '../lib/theme'
@@ -39,6 +40,10 @@ export function CatalogTile({
   testID,
   photoTestID,
   style,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+  onLongPress,
 }: {
   item: ThreadSummary
   onPress: () => void
@@ -46,23 +51,48 @@ export function CatalogTile({
   testID?: string
   photoTestID?: string
   style?: StyleProp<ViewStyle>
+  /** multi-select: when true the tile taps TOGGLE selection (not open) and renders the selection badge. Only the
+   *  grid variant honors it; the camera carousel never passes it (byte-unchanged). */
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
+  /** long-press ENTERS selection mode (only meaningful when selectionMode is false). In selection mode long-press
+   *  toggles (same as a tap). */
+  onLongPress?: () => void
 }): React.ReactElement {
   const { surface } = useTheme()
   const tileId = testID ?? DEFAULT_IDS[variant].tile
   const photoId = photoTestID ?? DEFAULT_IDS[variant].photo
   const onPhoto = !!item.photoUrl
+  const selecting = selectionMode && variant === 'grid'
+  const press = selecting ? (onToggleSelect ?? onPress) : onPress
+  const longPress = selecting ? (onToggleSelect ?? onLongPress) : onLongPress
 
   return (
     <PressableTile
       id={tileId}
-      onPress={onPress}
+      onPress={press}
+      onLongPress={longPress}
+      dataSet={selecting ? { selected: selected ? 'true' : 'false' } : undefined}
+      accessibilityState={selecting ? { selected } : undefined}
       style={[
         variant === 'grid' ? styles.grid : styles.carousel,
         // grid photo tiles recess to a warm sunken fill WHILE the photo is pending — an unloaded tile reads
         // as an intentional loading state, not "cream + dark band." VARIANT-GATED: the shared inline style
         // is applied to BOTH variants, so without this gate the camera carousel tile would shift hue
         // (#FBF9F3→#EDEAE0). The carousel keeps surface.card byte-identical to its shipping appearance.
-        { backgroundColor: variant === 'grid' && onPhoto ? surface.sunken : surface.card, borderColor: surface.border, overflow: 'hidden' },
+        // GRID gets a real hairline border (borderColor alone renders nothing in RN — without borderWidth the
+        // tiles read as borderless/merged, the "everything is missing lines" defect); carousel keeps no border.
+        {
+          backgroundColor: variant === 'grid' && onPhoto ? surface.sunken : surface.card,
+          borderColor: surface.border,
+          borderWidth: variant === 'grid' ? StyleSheet.hairlineWidth : 0,
+          overflow: 'hidden',
+        },
+        // multi-select: a 2pt blue border on the SELECTED tile (the "selected pops" cue). Unselected-in-mode
+        // dims via a scrim OVERLAY over the photo (not whole-tile opacity — multiplying opacity would dim the
+        // AA-guarded photoLabelScrim + white label too, an unverified composite). Applied only on grid.
+        selecting && selected ? { borderColor: surface.accentSecondary, borderWidth: 2 } : null,
         style,
       ]}
     >
@@ -91,6 +121,21 @@ export function CatalogTile({
           style={variant === 'grid' ? [styles.footScrim, { backgroundColor: photoLabelScrim }] : [StyleSheet.absoluteFill, styles.scrim]}
         />
       ) : null}
+      {/* multi-select badge (grid + selection mode only): a top-LEFT disc, sized to READ on any photo. Empty = a
+        dark scrim disc + a THICK white ring (high contrast over bright AND dark pixels); selected = filled blue +
+        white ✓ + the white ring. The whole tile is the tap target; the badge is the indicator. */}
+      {selecting ? (
+        <View pointerEvents="none" style={styles.badgeWrap}>
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: selected ? surface.accentSecondary : 'rgba(0,0,0,0.55)', borderColor: '#FFFFFF' },
+            ]}
+          >
+            {selected ? <Check size={18} color="#FFFFFF" strokeWidth={3} /> : null}
+          </View>
+        </View>
+      ) : null}
       {/* the identified label (falls back to the auto-title until the reveal settles). */}
       <Body numberOfLines={2} style={onPhoto ? styles.textOnPhoto : undefined}>
         {item.revealTitle || item.title}
@@ -113,4 +158,8 @@ const styles = StyleSheet.create({
   footScrim: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' },
   scrim: { backgroundColor: 'rgba(20,18,14,0.42)' }, // carousel: lighter full-tile scrim (unchanged)
   textOnPhoto: { color: '#FFFFFF' },
+  // multi-select badge: top-left, clear of the bottom-60% foot-scrim label band. 30pt with a thick white ring so
+  // it reads on any photo (the prior 26pt + 1.5pt ring was "too small / low contrast" per visual review).
+  badgeWrap: { position: 'absolute', top: space.sm, left: space.sm, zIndex: 2 },
+  badge: { width: 30, height: 30, borderRadius: 9999, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
 })

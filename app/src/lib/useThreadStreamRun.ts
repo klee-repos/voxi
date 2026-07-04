@@ -150,11 +150,11 @@ export function useThreadStreamRun(opts: UseThreadStreamRunOpts): ThreadRun {
       rotate = setInterval(() => {
         i = (i + 1) % lines.length
         const next = lines[i] ?? firstLine(kind)
-        setLine(next)
+        if (mountedRef.current) setLine(next)
         setLoadingLine(next)
       }, ROTATE_MS)
     }
-    const longTimer = setTimeout(() => setLongWait(true), LONG_WAIT_MS)
+    const longTimer = setTimeout(() => { if (mountedRef.current) setLongWait(true) }, LONG_WAIT_MS)
 
     const settleDelay = reduceMotion ? 0 : SETTLE_DELAY_MS
     const ui = (fn: () => void): void => { if (mountedRef.current) fn() }
@@ -233,7 +233,17 @@ export function useThreadStreamRun(opts: UseThreadStreamRunOpts): ThreadRun {
 
   useEffect(() => {
     mountedRef.current = true
-    keepAliveRef.current = false
+    // Durable latch: PRESERVE an already-latched survivor across a `[run]` re-fire instead of resetting
+    // it. A mid-stream `api`/`reduceMotion` identity change (e.g. a Clerk token refresh → ApiProvider
+    // rebuild → useApi() returns a new client → the `run` useCallback dep changes) re-fires this effect;
+    // the body re-enters `run()`, which ATTACHES (early-returns on `isThreadStreaming()`) BEFORE
+    // `route('reveal')` would re-latch — so a bare `= false` here would leave the survivor's protection
+    // off and the NEXT unmount would abort it (the user's "it stopped generating" silently returning).
+    // `keepAliveRef.current || keepAliveAcrossUnmount` keeps an inherited latch AND latches a fresh
+    // mount whose caller asked for survival, while still letting a genuinely-fresh non-survivor mount
+    // start at false. A `cancel()` (explicit) or a single-owner `beginThreadStream()` (new capture /
+    // swipe) still aborts — only the "navigate away" unmount is now survivable.
+    keepAliveRef.current = keepAliveRef.current || keepAliveAcrossUnmount
     void run()
     return () => {
       mountedRef.current = false

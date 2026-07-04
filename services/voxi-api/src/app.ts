@@ -13,6 +13,7 @@ import { threadOwnerVerdict } from './acl'
 import type { StreamEvent } from '../../../packages/shared/src/events'
 import { isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
 import type { PodcastContext } from '../../../packages/shared/src/podcast'
+import type { Evidence } from '../../../packages/shared/src/confidence'
 import { gatePodcastGeneration, charge, type Store, type Meter } from './metering'
 import { logger } from '../../../packages/telemetry/src/index'
 import { verifyAndApplyTransaction, applyNotification, planForUser, type AppleJwsVerifier, type EntitlementStore } from './appstore'
@@ -44,6 +45,16 @@ export interface EveClient {
    *  instead of a hard_failure) and ALWAYS clear the session's pinned narration so the fresh run re-pins new
    *  clauses. Omit `photoUrl` to leave the in-process photo untouched (clear narration only). */
   primeSession?(sessionId: string, photoUrl?: string): void
+}
+
+/** A grounded "Ask Voxi" chat turn for the conversation screen. The Guide answers the user's question ABOUT the
+ *  item using ONLY the durable reveal's grounded context + facts (never client-supplied), run through the SAME
+ *  deterministic honesty gate as the narrator (`validateClaims`). `grounded=false` means nothing could be proven
+ *  in persona and `text` is a hedge — surfaced so the caller/UI never mistakes a hedge for an answer. */
+export interface ChatTurn { role: 'user' | 'guide'; text: string }
+export interface ChatReply { text: string; grounded: boolean }
+export interface ChatProvider {
+  reply(args: { context: string; evidence: Evidence[]; history: ChatTurn[]; question: string }): Promise<ChatReply>
 }
 
 /** Single-voice TTS seam for the spoken reveal (ElevenLabs in prod, a deterministic fake in tests). */
@@ -253,6 +264,14 @@ export interface Deps {
    */
   speech?: { tts: NarrationTtsProvider; cache?: NarrationAudioCache }
   /**
+   * Grounded "Ask Voxi" chat (PLAN §6.3 — the blue conversation lane). `POST /v1/threads/:id/ask` answers the
+   * user's question ABOUT the item from the SERVER-OWNED durable reveal (buildItemContext + its cited facts) —
+   * never client-supplied — through the SAME deterministic honesty gate as the narrator (claim-structured
+   * `validateClaims`, NOT "trust the prompt"). Absent → the route 503s (`guide_unavailable`), loud not fake.
+   * Charge is a voiceMin (the existing chat/voice meter lane), fail-closed like `/v1/voice/session`.
+   */
+  chat?: ChatProvider
+  /**
    * Direct StoreKit 2 entitlement verification (replaces RevenueCat): the Apple JWS verifier + the entitlement
    * store. When present, `/v1/purchases/verify` and the `/appstore/notifications` webhook are live and `/v1/me`
    * reads the server-verified plan from it. No third-party billing vendor.
@@ -389,6 +408,22 @@ export function buildPodcastContext(reveal: RevealRecord | null, userId: string)
 }
 
 /**
+ * A cached `podcast_assets.audio_url` is a point-in-time snapshot that can rot when the worker's serving scheme
+ * changes. The pre-GCS worker served `<worker-origin>/audio/:item/v:version/episode.mp3` (an in-memory route);
+ * the GCS worker has NO `/audio/` route and serves the MP3 at a public GCS URL. A durable `ready` row rendered on
+ * the old worker cached its worker-relative URL — which now 404s forever, and AVPlayer spins on it silently
+ * ("takes forever, never finishes, no error"). The BFF must not vouch for a cached URL it can't serve: only a URL
+ * on the public GCS host is servable. Pure so the two read paths (the thread payload + the poll route) share one
+ * check and a unit test can pin it. NOTE: a non-servable URL is treated as MISSING (omitted), never as a downgrade
+ * of the row's `status` — the "ready never regresses" invariant (app.ts ~837, ~874-875) holds; the row keeps its
+ * state and the client's `state==='ready' && audioUrl` probe simply fails to seed, so the user sees Generate and
+ * taps through a FREE idempotent_replay regen (the gate keys on the separate gen_tokens table, not podcast_assets).
+ */
+export function isServableAudioUrl(url: string | null | undefined): boolean {
+  return !!url && url.startsWith('https://storage.googleapis.com/')
+}
+
+/**
  * Decode ONLY a real `data:` URI into bytes (adversarial A3). A scheme/plain photoUrl ('capture://local',
  * 'obj:confident', a signed https URL) has no inline bytes → returns null and the caller skips photo persistence
  * (never a fabricated placeholder — the repo's "seams, not stubs-that-fake-success" rule).
@@ -516,7 +551,7 @@ export function createApp(deps: Deps): Hono {
       continuationToken: rec.continuationToken,
       resumes: true,
       photoUrl: rec.photoMime ? mintPhotoUrl({ threadId: id, userId, now: now() }) : null,
-      podcast: podcast ? { state: podcast.status, audioUrl: podcast.audioUrl ?? undefined, transcript: podcast.transcript ?? undefined } : null,
+      podcast: podcast ? { state: podcast.status, audioUrl: isServableAudioUrl(podcast.audioUrl) ? podcast.audioUrl : undefined, transcript: podcast.transcript ?? undefined } : null,
       hasConversation: convo.length > 0,
     })
   })
@@ -734,6 +769,85 @@ export function createApp(deps: Deps): Hono {
     })
   })
 
+  // "Ask Voxi" grounded chat (PLAN §6.3 blue lane / PROMPT-QUALITY §3.E). Answers the user's question ABOUT the
+  // item from the SERVER-OWNED durable reveal — never client-supplied — through the same deterministic honesty
+  // gate as the narrator (the ChatProvider emits claim-structured clauses + runs validateClaims internally; it is
+  // NOT freeform "trust the prompt"). Fail-closed order: auth → ACL → idempotent replay → no_context → charge →
+  // reply → persist. The guide turn is persisted with a deterministic clientKey derived from the user's so a
+  // network retry is a free replay (no re-charge, no re-call) — the idempotency arbiter is (thread_id, client_key),
+  // NOT role-scoped, so the guide's clientKey is `${userClientKey}:g`.
+  app.post('/v1/threads/:id/ask', async (c) => {
+    const userId = uid(c)
+    const id = c.req.param('id')
+    const body = await c.req.json<{ text: string; userClientKey?: string }>().catch(() => null)
+    if (!body?.text) return c.json({ error: 'text required' }, 400)
+    const userClientKey = body.userClientKey ?? null
+    const guideKey = userClientKey ? `${userClientKey}:g` : null
+    // F1d: userClientKey is required (the client always mints one — apiClient.ts:271). A null key skips the replay
+    // dedup below + the ON CONFLICT arbiter (pg-stores WHERE client_key IS NOT NULL), so a null-key spammer could
+    // insert unbounded free rows on the no-reveal path. Reject null up front (matches the client's contract).
+    if (!userClientKey) return c.json({ error: 'userClientKey required' }, 400)
+
+    const acl = await threadOwnerVerdict(deps, id, userId)
+    if (!acl.ok) return c.json({ error: acl.error }, acl.status)
+
+    // Idempotent replay (M3): a network retry AFTER a successful answer returns the previously-persisted guide
+    // turn — no re-charge, no re-call. (A retry after a FAILED reply re-charges; refunding that is a fast-follow.)
+    if (deps.messages) {
+      const prior = (await deps.messages.listByThread(id)).find((m) => m.clientKey === guideKey)
+      if (prior) return c.json({ text: prior.text, id: prior.id, replay: true })
+    }
+
+    const reveal = deps.reveals ? await deps.reveals.get(id) : null
+    // F1a: split the condition. A wrong-owner reveal is defense-in-depth (the thread-owner ACL above already
+    // rejected non-owners; a mismatch here is a data inconsistency) → keep it a hard 404. A MISSING reveal fails
+    // open to a route-owned honest reply (Bug A: 26 of 57 cataloged threads have no reveal — their cascade stalled
+    // during the legacy GLM-5.2 untimed-call bug; the user gets an honest, loop-free Guide reply instead of a dead
+    // 404). NO charge, NO vendor call — there is no evidence to ground, so the honesty gate has nothing to gate;
+    // calling the LLM with empty evidence would risk hallucination. The route owns the reply.
+    if (reveal && reveal.ownerUserId !== userId) return c.json({ error: 'no_context' }, 404)
+    if (!reveal) {
+      const NO_REVEAL_REPLY = "I haven't been able to identify this one yet. Try photographing it again and I'll have another look."
+      let guideId = undefined
+      if (deps.messages) {
+        await deps.messages.append({ threadId: id, userId, role: 'user', text: body.text, source: 'text', clientKey: userClientKey })
+        const g = await deps.messages.append({ threadId: id, userId, role: 'guide', text: NO_REVEAL_REPLY, source: 'text', clientKey: guideKey })
+        guideId = g.id
+      }
+      return c.json({ text: NO_REVEAL_REPLY, id: guideId, replay: false, grounded: false })
+    }
+    if (!deps.chat) return c.json({ error: 'guide_unavailable' }, 503)
+    // Charge a voice minute BEFORE the LLM call, fail-closed (the existing chat/voice meter lane, same as
+    // /v1/voice/session). A spammer can't run unbounded Gemini — every turn costs a minute.
+    if (!(await charge(deps.store, userId, 'voiceMin', 1))) return c.json({ error: 'voice_limit_reached' }, 402)
+
+    // Server-owned grounding (the same evidence the reveal carried) + recent turns for continuity.
+    const context = buildItemContext(reveal)
+    const factEvents = reveal.events.filter((e): e is Extract<StreamEvent, { type: 'fact' }> => e.type === 'fact')
+    const evidence: Evidence[] = factEvents.map((f, i) => ({ ref: `fact${i}`, sourceUrl: f.sourceUrl, claim: f.text }))
+    if (reveal.band === 'CONFIDENT') evidence.push({ ref: 'id', sourceUrl: 'voxi:cascade', claim: reveal.title })
+    const history: ChatTurn[] = deps.messages
+      ? (await deps.messages.listByThread(id)).slice(-8).map((m) => ({ role: m.role, text: m.text }))
+      : []
+
+    let reply: ChatReply
+    try {
+      reply = await deps.chat.reply({ context, evidence, history, question: body.text })
+    } catch (e) {
+      logger.error('chat_reply_failed', e instanceof Error ? e : new Error(String(e)), { threadId: id })
+      return c.json({ error: 'guide_unavailable' }, 503)
+    }
+
+    // Persist both turns (each idempotent on its own clientKey). The user turn first, then the guide reply.
+    let guideId = undefined
+    if (deps.messages) {
+      await deps.messages.append({ threadId: id, userId, role: 'user', text: body.text, source: 'text', clientKey: userClientKey })
+      const g = await deps.messages.append({ threadId: id, userId, role: 'guide', text: reply.text, source: 'text', clientKey: guideKey })
+      guideId = g.id
+    }
+    return c.json({ text: reply.text, id: guideId, replay: false, grounded: reply.grounded })
+  })
+
   // Gate paid podcast generation — atomic decrement + idempotent token (retries/double-taps collapse).
   app.post('/v1/podcast', async (c) => {
     const userId = uid(c)
@@ -802,7 +916,7 @@ export function createApp(deps: Deps): Hono {
     // owning userId) AND how the stateless worker is addressed (it keys on item+version, not the token). A durable
     // READY is served straight off (survives the worker scaling to zero); otherwise we proxy the worker's honest state.
     const rec = deps.podcasts ? await deps.podcasts.getByToken(token, userId) : null
-    if (rec?.status === 'ready') {
+    if (rec?.status === 'ready' && isServableAudioUrl(rec.audioUrl)) {
       return c.json({ state: 'ready', audioUrl: rec.audioUrl ?? undefined, transcript: rec.transcript ?? undefined })
     }
     const st = rec ? ((await deps.podcastStatus?.status(rec.catalogItemId, rec.version)) ?? null) : null

@@ -17,9 +17,10 @@ import {
   type ViewStyle,
   type TextStyle,
   type StyleProp,
+  type AccessibilityState,
 } from 'react-native'
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context'
-import { ids, tid } from '../lib/testid'
+import { ids, tid, tidWith } from '../lib/testid'
 import { hit, radius, space, type as typeTokens, typeStyles } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
 
@@ -196,16 +197,32 @@ export function Button({
 export function PressableTile({
   id,
   onPress,
+  onLongPress,
+  delayLongPress,
   children,
   style,
+  dataSet,
+  accessibilityState,
 }: {
   id: string
   onPress: () => void
+  /** Optional long-press (the collection-grid tile enters multi-select on long-press). undefined → RN omits the
+   *  handler (onPress-only behavior on every other PressableTile call site is byte-unchanged). */
+  onLongPress?: () => void
+  /** Optional long-press delay (ms). undefined → RN's stock 500ms default. */
+  delayLongPress?: number
   children: React.ReactNode
   style?: StyleProp<ViewStyle>
+  /** Optional carried state → rendered as `data-*` on web (E2E reads via `[data-selected="true"]`) and
+   *  `accessibilityValue.text` on native. When present, switches the contract spread from `tid` to `tidWith`. */
+  dataSet?: Record<string, string>
+  /** Optional a11y state (e.g. `{ selected: true }` so VoiceOver announces "selected" — distinct from the
+   *  web-E2E `dataSet`, which is for test observability). */
+  accessibilityState?: AccessibilityState
 }): React.ReactElement {
+  const tidProps = dataSet ? tidWith(id, dataSet) : tid(id)
   return (
-    <Pressable {...tid(id)} accessibilityRole="button" onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }, style]}>
+    <Pressable {...tidProps} accessibilityRole="button" accessibilityState={accessibilityState} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }, style]}>
       {children}
     </Pressable>
   )

@@ -32,12 +32,14 @@ export const Sparkles = Stub
 export const Settings = Stub
 export const Plus = Stub
 export const Search = Stub
-// ANALYSIS-UX reveal dock glyphs (what/purpose/maker/facts + conversation + retry)
+// ANALYSIS-UX reveal dock glyphs (details + conversation + retry; the per-bucket glyphs are retained for the
+// app-side ICON map though the dock no longer renders them post-collapse)
 export const BookOpen = Stub
 export const Target = Stub
 export const Stamp = Stub
 export const Lightbulb = Stub
 export const AudioLines = Stub
+export const ScrollText = Stub // the Details dock icon (the research lane collapsed to one slot)
 export const MessageCircle = Stub
 export const RotateCcw = Stub
 export const RefreshCw = Stub // Deep Dive player: regenerate (left of the close X) — distinct from the ±15 rotate arrows
@@ -45,4 +47,5 @@ export const RefreshCw = Stub // Deep Dive player: regenerate (left of the close
 export const MoreHorizontal = Stub
 export const RotateCw = Stub
 export const Trash2 = Stub
+export const Check = Stub // CatalogTile multi-select badge (the selected-tile checkmark)
 export default Stub

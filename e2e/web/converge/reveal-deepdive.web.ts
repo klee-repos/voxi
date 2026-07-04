@@ -3,14 +3,15 @@
  * real testID taps, every outcome pinned deterministically.
  *
  * PROOF A — the reveal DOCK (single-screen reveal client; nav is recorded, not swapped, like reveal-menu):
- *   A1 the Deep Dive icon renders in the dock row AFTER the research buckets; A2 the chat icon is pinned right;
- *   A3 tapping Deep Dive records push:/podcast.
- *   D1/D2 — the dock's Deep Dive icon reflects BACKGROUND generation: state=generating (a spinning ring) while a
- *   compose is in flight, then state=ready (the done indicator) — the deepDiveStore drives it, so it survives
- *   leaving the player (req: navigating away must not lose the generating/ready status).
- * PROOF B — the Deep Dive PLAYER (its own entry mounts the REAL app/app/podcast.tsx with a REAL owned thread):
- *   B1 opens in IDLE with an explicit Generate CTA, NO auto-compose; B2 never says "podcast"/"episode";
- *   B3 tapping Generate starts composing.
+ *   A0 the dock is THREE icons — Explore (Deep Dive) FIRST, Details, Ask; what/purpose/maker are NOT dock icons
+ *      (collapsed under Details); A1 they're in order with clear GAPS between them; A2 the Ask icon is visible;
+ *      A3 tapping Explore records push:/podcast.
+ *   D0 — the Deep Dive AUTO-STARTS on identification: the icon leaves 'active' and reaches 'ready' with NO tap and
+ *      NO test-seed (the reveal effect fires the real generatePodcast → the harness podcast feed drives composing→ready).
+ *      Staying 'active' would mean the effect never fired — a regression. This is the no-fake-green auto-start proof.
+ * PROOF B — the Deep Dive PLAYER (its own entry mounts the REAL app/app/podcast.tsx with a REAL owned thread; the
+ *   reveal auto-start does NOT fire here — no reveal.tsx — so this exercises the player's idle-fallback path):
+ *   B1 opens in IDLE with an explicit Generate CTA; B2 never says "podcast"/"episode"; B3 tapping Generate starts composing.
  *   C0 composing shows the LARGE progress hero + a live elapsed "how long" indicator; C1 it reaches READY with the
  *   Spotify transport (scrubber + ±15 + play); C2 the karaoke transcript renders; C3 the karaoke COUPLES to the
  *   playhead — the active-word index STRICTLY ADVANCES as currentTime advances (the no-fake-green proof that the
@@ -28,53 +29,68 @@ const { check, fails } = makeChecker()
   const rig = await standUp('client.tsx', { seed: { converge: { scan: 5, podcast: 1, voiceMin: 10 } } })
   const { driver: d, page, base } = rig
   const lastNav = (): Promise<string | null> => page.evaluate(() => document.body.getAttribute('data-last-nav'))
-  const boxX = async (id: string): Promise<number> => {
+  const box = async (id: string): Promise<{ x: number; width: number }> => {
     const b = await page.locator(`[data-testid="${id}"]`).first().boundingBox()
     if (!b) throw new Error(`${id} is not in the layout`)
-    return b.x
+    return { x: b.x, width: b.width }
   }
-  const iconState = async (): Promise<string | undefined> => (await d.state(ids.reveal.deepDiveIcon)).attrs?.state
-  // Drive the REAL deepDiveStore for the current thread via the entry's test-only control (the store's own window
-  // seam is gated off in the converge bundle) — the dock reads the same store, so the render is the real path.
-  const driveGen = (fn: 'composing' | 'ready'): Promise<void> =>
-    page.evaluate((f) => {
-      const w = window as unknown as { __deepDiveTest?: Record<string, () => void> }
-      if (!w.__deepDiveTest) throw new Error('__deepDiveTest control not exposed by the entry')
-      w.__deepDiveTest[f]()
-    }, fn)
+  const iconStateAttr = (): Promise<string | null> =>
+    page.locator(`[data-testid="${ids.reveal.deepDiveIcon}"]`).first().getAttribute('data-state')
 
   await page.goto(`${base}/?scan=confident`)
   await d.waitFor(ids.reveal.buckets, { timeoutMs: 8000 })
   await d.waitFor(ids.reveal.title, { timeoutMs: 6000 })
 
-  await check('A1 · the Deep Dive icon renders in the dock, AFTER "What" and LEFT of the pinned chat', async () => {
+  await check('A0 · the dock is THREE icons — Explore · Details · Ask (what/purpose/maker are NOT dock icons)', async () => {
+    for (const id of [ids.reveal.bucketWhat, ids.reveal.bucketPurpose, ids.reveal.bucketWho] as const) {
+      if ((await d.state(id)).visible) throw new Error(`${id} is still rendered as a dock icon — the Details collapse missed it`)
+    }
+    for (const id of [ids.reveal.deepDiveIcon, ids.reveal.detailsIcon, ids.reveal.conversationIcon] as const) {
+      if (!(await d.state(id)).visible) throw new Error(`${id} is missing from the 3-icon dock`)
+    }
+  })
+
+  await check('A1 · three icons in order (Explore FIRST) with clear GAPS + equal slots between them', async () => {
     await d.waitFor(ids.reveal.deepDiveIcon, { timeoutMs: 5000 })
-    const whatX = await boxX(ids.reveal.bucketWhat)
-    const deepX = await boxX(ids.reveal.deepDiveIcon)
-    const askX = await boxX(ids.reveal.conversationIcon)
-    if (!(whatX < deepX)) throw new Error(`Deep Dive (${deepX}) is not right of What (${whatX}) — it must sit after the research buckets`)
-    if (!(deepX < askX)) throw new Error(`the chat icon (${askX}) is not pinned RIGHT of Deep Dive (${deepX})`)
+    await d.waitFor(ids.reveal.detailsIcon, { timeoutMs: 5000 })
+    const deep = await box(ids.reveal.deepDiveIcon)
+    const details = await box(ids.reveal.detailsIcon)
+    const ask = await box(ids.reveal.conversationIcon)
+    if (!(deep.x < details.x)) throw new Error(`Explore (${deep.x}) is not FIRST — not left of Details (${details.x})`)
+    if (!(details.x < ask.x)) throw new Error(`Details (${details.x}) is not left of Ask (${ask.x})`)
+    // Equal flex:1 slots (the three share the row evenly)…
+    const widths = [deep.width, details.width, ask.width]
+    if (Math.max(...widths) - Math.min(...widths) > 4) throw new Error(`dock slots are not equal flex:1: ${widths}`)
+    // …with a real gap between them (the old 5-up row was edge-to-edge; ≥12 proves the spacing shipped).
+    const gap1 = details.x - (deep.x + deep.width)
+    const gap2 = ask.x - (details.x + details.width)
+    if (!(gap1 >= 12 && gap2 >= 12)) throw new Error(`dock gaps too small (${gap1.toFixed(0)}, ${gap2.toFixed(0)}) — need ≥12 between slots`)
   })
 
-  await check('A2 · the chat (Ask Voxi) icon is PINNED and visible (the special people lane, set off by the divider)', async () => {
-    if (!(await d.state(ids.reveal.conversationIcon)).visible) throw new Error('the pinned Ask/conversation icon is not visible')
+  await check('A2 · the Ask (Ask Voxi) icon is visible (the pinned people lane, last in the dock)', async () => {
+    if (!(await d.state(ids.reveal.conversationIcon)).visible) throw new Error('the Ask/conversation icon is not visible')
   })
 
-  await check('D1 · the dock Deep Dive icon shows a GENERATING ring while a compose is in flight (survives leaving the player)', async () => {
-    await driveGen('composing')
-    await page.waitForTimeout(200)
-    const st = await iconState()
-    if (st !== 'generating') throw new Error(`expected the Deep Dive icon state=generating during compose, got ${st}`)
+  await check('D0 · the Deep Dive AUTO-STARTS on identification — generating→ready with NO tap and NO test-seed (the reveal effect fired)', async () => {
+    await d.waitFor(ids.reveal.deepDiveIcon, { timeoutMs: 5000 })
+    // (1) Leaves 'active': the reveal effect calls startDeepDive → launchJob writes 'composing' SYNCHRONOUSLY
+    //     before any await, so the icon must leave 'active' on band-settle. We do NOT drive __deepDiveTest here —
+    //     that would seed the store and fake-green this proof (it would pass even with the F5 effect deleted).
+    //     Staying 'active' = the effect never fired = a regression.
+    await page.waitForFunction(
+      () => { const el = document.querySelector('[data-testid="reveal.deepDiveIcon"]'); return !!el && el.getAttribute('data-state') !== 'active' },
+      { timeout: 8000 },
+    )
+    // (2) Reaches 'ready' via the REAL harness podcast feed (the same one PROOF B's Generate→ready uses).
+    await page.waitForFunction(
+      () => { const el = document.querySelector('[data-testid="reveal.deepDiveIcon"]'); return !!el && el.getAttribute('data-state') === 'ready' },
+      { timeout: 25000 },
+    )
+    const st = await iconStateAttr()
+    if (st !== 'ready') throw new Error(`expected the auto-started Deep Dive icon to settle 'ready', got ${st}`)
   })
 
-  await check('D2 · when generation completes the dock icon flips to READY (the "it\'s done" indicator)', async () => {
-    await driveGen('ready')
-    await page.waitForTimeout(200)
-    const st = await iconState()
-    if (st !== 'ready') throw new Error(`expected the Deep Dive icon state=ready when done, got ${st}`)
-  })
-
-  await check('A3 · tapping Deep Dive navigates to the Deep Dive player (records push:/podcast)', async () => {
+  await check('A3 · tapping Explore navigates to the Deep Dive player (records push:/podcast)', async () => {
     await d.tap(ids.reveal.deepDiveIcon)
     await page.waitForTimeout(200)
     const nav = await lastNav()
@@ -204,12 +220,17 @@ const { check, fails } = makeChecker()
     if (!(back < 0.25)) throw new Error(`dragging the scrubber back to ~10% did not pull the playhead down to it: ${near} → ${back}`)
   })
 
-  // ── PROOF R — the retest REGENERATE button (left of the close X → a genuine fresh generation) ───────────────
-  await check('R1 · the ready player shows a Regenerate control positioned LEFT of the close X', async () => {
+  // ── PROOF R — the retest REGENERATE button (far LEFT side, clear across the bar from the close X → a genuine fresh generation)
+  await check('R1 · the ready player shows Regenerate on the LEFT side, with space between it and the close X', async () => {
     if (!(await d.state(ids.podcast.regenerate)).visible) throw new Error('the Regenerate control is missing from the ready player header')
-    const regenX = await boxX(ids.podcast.regenerate)
-    const closeX = await boxX(ids.nav.close)
-    if (!(regenX < closeX)) throw new Error(`Regenerate (${regenX}) is not LEFT of the close X (${closeX}) — the requested placement`)
+    const regen = await page.locator(`[data-testid="${ids.podcast.regenerate}"]`).first().boundingBox()
+    const close = await page.locator(`[data-testid="${ids.nav.close}"]`).first().boundingBox()
+    if (!regen || !close) throw new Error('Regenerate or close box missing')
+    if (!(regen.x < close.x)) throw new Error(`Regenerate (${regen.x}) is not LEFT of the close X (${close.x})`)
+    // The gap between the two controls must exceed the control's own width — proves Regenerate sits on the far
+    // left (not crammed immediately next to the close X in the right slot).
+    const gap = close.x - (regen.x + regen.width)
+    if (!(gap > regen.width)) throw new Error(`Regenerate is crammed next to close (gap ${gap.toFixed(0)} <= control width ${regen.width.toFixed(0)}) — it should sit on the far left with space between`)
   })
 
   await check('R2 · tapping Regenerate leaves the ready player and re-enters composing (a genuine fresh generation, not a UI reset)', async () => {
@@ -229,7 +250,7 @@ const { check, fails } = makeChecker()
 
 console.log(
   fails() === 0
-    ? '\nDEEP DIVE PROOF GREEN — dock: the Deep Dive icon sits after the buckets, reflects background generation (generating→ready) and taps to the player; player: opens IDLE (no auto-compose), never says "podcast/episode", Generate → a large composing hero with a live elapsed indicator → a dark Spotify player whose karaoke highlight COUPLES to the playhead (advances with currentTime, moves on ±15); a Regenerate control sits LEFT of the close X and re-runs a genuine fresh generation (ready → composing → ready) through the real gate + worker'
+    ? '\nDEEP DIVE PROOF GREEN — dock: THREE icons (Explore FIRST · Details · Ask), what/purpose/maker collapsed under Details with clear gaps + equal slots; the Deep Dive AUTO-STARTS on identification (active→generating→ready with no tap, no test-seed — the reveal effect fired); tapping Explore → /podcast; player (idle-fallback path): opens IDLE, never says "podcast/episode", Generate → a large composing hero with a live elapsed indicator → a dark Spotify player whose karaoke highlight COUPLES to the playhead (advances with currentTime, moves on ±15); a Regenerate control sits on the LEFT side (space between it and the close X) and re-runs a genuine fresh generation (ready → composing → ready) through the real gate + worker'
     : `\nDEEP DIVE FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

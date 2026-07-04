@@ -1,15 +1,17 @@
 /**
  * Deep Dive player (§F2) — an on-demand, NPR/Serial-style two-voice story (Arlo & Mave), presented as a
  * DARK, full-screen, Spotify-style player: a large word-level karaoke read-along (the hero), a seekable scrubber,
- * and ±15 / play-pause transport. It is NEVER auto-generated: opening PROBES for a durable episode
- * (GET /v1/threads/:id) and, absent one, shows an EXPLICIT "Generate a Deep Dive" CTA; generation (which spends a
- * credit) only fires on that tap (adversarial D2/D7).
+ * and ±15 / play-pause transport. Generation AUTO-STARTS on identification (reveal.tsx fires it on band-settle,
+ * like the rest of the reveal); this screen PROBES for a durable episode (GET /v1/threads/:id) and reflects the live
+ * state. The idle "Generate a Deep Dive" CTA below is the FALLBACK — a durable-ready miss, arriving before
+ * band-settle, or a revisit where auto-start is skipped. Tapping it spends a credit (the manual-only policy this
+ * replaced was adversarial D2/D7's cost-transparency guard; auto-start is an explicit product override).
  *
  * Generation is owned by `deepDiveStore` — a MODULE-LEVEL poller that survives this screen's unmount, so leaving
  * mid-compose does not stop it (the reveal dock shows a "generating" ring meanwhile), and returning shows the live
  * state or the finished audio. This screen renders from that store; it holds only playhead + playing UI state.
  *
- * State (honest, never masked): probing · idle (Generate CTA) · composing (the large ComposeHero + elapsed) ·
+ * State (honest, never masked): probing · idle (Generate CTA fallback) · composing (the large ComposeHero + elapsed) ·
  * slow (non-terminal "still rendering", NOT a failure) · ready (the player) · failed (apology + retry/paywall) ·
  * empty (no thread → back to capture). Route/file stay `/podcast`; only user-facing copy is "Deep Dive".
  */
@@ -33,7 +35,7 @@ import { space, typeStyles, type as typeTokens, hit } from '../src/lib/theme'
 import { useApi } from '../src/lib/api'
 import { useConnectivity } from '../src/lib/connectivity'
 import { useCaptureStore } from '../src/state/captureStore'
-import { startDeepDive, regenerateDeepDive, seedReadyDeepDive, useDeepDiveStatus } from '../src/state/deepDiveStore'
+import { startDeepDive, regenerateDeepDive, reconcileDeepDive, useDeepDiveStatus } from '../src/state/deepDiveStore'
 
 function DeepDiveBody(): React.ReactElement {
   const api = useApi()
@@ -54,7 +56,10 @@ function DeepDiveBody(): React.ReactElement {
 
   const closeHeader = <AppHeader leading="none" showClose />
 
-  // PROBE on mount — a durable Deep Dive already? seed the store to READY (no charge, no generate). NEVER compose here.
+  // PROBE on mount — a durable Deep Dive already? Reconcile the store with the server's podcast truth (no charge,
+  // no generate). NEVER compose here. Reconciling (not just seeding) means a stale `ready` whose cached audio URL
+  // the BFF withheld (it 404s after the worker GCS rework) is CLEARED so the player shows Generate instead of
+  // spinning on a dead episode until a force-quit.
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -62,8 +67,7 @@ function DeepDiveBody(): React.ReactElement {
       try {
         const t = await api.getThread(threadId)
         if (!alive) return
-        const p = t.podcast
-        if (p?.state === 'ready' && p.audioUrl) seedReadyDeepDive(threadId, p.audioUrl, p.transcript as { speaker: 'ARLO' | 'MAVE'; text: string }[] | undefined)
+        reconcileDeepDive(threadId, t.podcast ?? null)
       } catch {
         /* probe is best-effort — an idle CTA is the safe fallback */
       } finally {
@@ -200,12 +204,13 @@ function DeepDiveBody(): React.ReactElement {
     // the transport bug: pause bounced back to play, and skip/seek looked dead because playback never settled).
     if (Number.isFinite(dur) && dur > 0 && pos >= dur - 0.35) setPlaying(false)
   }
-  // The ready player's header carries a regenerate control immediately LEFT of the close X (retest affordance).
+  // The ready player's header carries a regenerate control on the LEFT side — clear across the bar from the
+  // close X (which stays top-right). A retest affordance: force a genuinely fresh generation at a new version.
   const readyHeader = (
     <AppHeader
       leading="none"
       showClose
-      rightAccessory={
+      leftAccessory={
         <Pressable {...tid(ids.podcast.regenerate, 'Regenerate Deep Dive')} accessibilityRole="button" onPress={onRegenerate} hitSlop={12} style={styles.headerCtrl}>
           <RefreshCw size={22} color={surface.text} strokeWidth={2.5} />
         </Pressable>

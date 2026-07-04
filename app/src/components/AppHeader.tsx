@@ -48,6 +48,7 @@ export function AppHeader({
   showMore = false,
   onMore,
   rightAccessory,
+  leftAccessory,
 }: {
   leading?: 'back' | 'menu' | 'none'
   /** render the dismiss X in the right slot (modals). */
@@ -68,10 +69,14 @@ export function AppHeader({
    *  exclusive with the close X in practice (a media/back header has no X). */
   showMore?: boolean
   onMore?: () => void
-  /** An extra control rendered in the right region, immediately LEFT of the close X (e.g. the Deep Dive
-   *  regenerate button). The region only WIDENS when this is set — absent, the right slot is a single control
-   *  exactly as before, so no other screen's centering shifts. */
+  /** An extra control rendered in the right region, immediately LEFT of the close X. The region only WIDENS
+   *  when this is set — absent, the right slot is a single control exactly as before, so no other screen's
+   *  centering shifts. */
   rightAccessory?: React.ReactNode
+  /** An extra control rendered in the LEFT region, in place of the empty leading placeholder (only when
+   *  `leading='none'`). The Deep Dive player puts its Regenerate button here so it sits on the far left, clear
+   *  across the bar from the close X (which stays top-right by convention). */
+  leftAccessory?: React.ReactNode
 }): React.ReactElement {
   const { surface } = useTheme()
   const { open, isOpen } = useDrawer()
@@ -109,6 +114,8 @@ export function AppHeader({
             {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <Menu size={26} color={tint} strokeWidth={2} />
           </Pressable>
+        ) : leftAccessory ? (
+          leftAccessory
         ) : (
           <View style={styles.ctrl} />
         )}
@@ -137,7 +144,11 @@ export function AppHeader({
             {onMedia ? <GlassFill radiusStyle={styles.discRadius} /> : null}
             <MoreHorizontal size={24} color={tint} strokeWidth={2.5} />
           </Pressable>
-        ) : (
+        ) : rightAccessory ? null : (
+          // The empty ctrl exists to keep the title centered (a symmetric 44pt box mirroring the leading ctrl).
+          // When a rightAccessory is present (and there's no close/more), render NOTHING instead — the empty box
+          // would overlap the accessory (which is pulled to the right gutter) and, on web, intercept its pointer
+          // events. threads is the only rightAccessory user today (it has no title to center anyway).
           <View style={styles.ctrl} />
         )}
       </View>

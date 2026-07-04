@@ -35,7 +35,7 @@ import { useConnectivity } from '../src/lib/connectivity'
 import { useApi } from '../src/lib/api'
 import { ApiError } from '../src/lib/apiClient'
 import { useCaptureStore, deriveBucketStatus } from '../src/state/captureStore'
-import { useDeepDiveStatus, deepDiveIconState, cancelDeepDive } from '../src/state/deepDiveStore'
+import { useDeepDiveStatus, deepDiveIconState, cancelDeepDive, startDeepDive, getDeepDiveStatus } from '../src/state/deepDiveStore'
 import { threadsKey } from '../src/lib/queryKeys'
 import { pageableThreads } from '../src/lib/collectionOrder'
 import { beginThreadStream, consumeThreadStream, type StreamActions } from '../src/lib/threadStream'
@@ -51,19 +51,24 @@ import { registerFor } from '../../packages/shared/src/confidence'
 import { haptics } from '../src/lib/haptics'
 import type { Edge } from 'react-native-safe-area-context'
 
-// Full-bleed states run the photo to the physical bottom; the dock pads itself up by `insets.bottom`, so the
-// Screen must NOT also inset the bottom — otherwise a strip of photo shows beneath the dock (the "gap").
+// Full-bleed states run the photo to the physical bottom, so the Screen must NOT also inset the bottom —
+// otherwise a strip of photo shows beneath the dock card (the "gap").
 const FULL_BLEED_EDGES: readonly Edge[] = ['top', 'left', 'right']
 
 /** A research bucket maps 1:1 to its audio bucket — the morph buckets only (both `conversation` and `deepdive`
  *  NAVIGATE, so neither leaks into the morph-card / audio-bucket / deriveBucketStatus paths; adversarial D4). */
-type ResearchKey = Exclude<DockKey, 'conversation' | 'deepdive'>
+type ResearchKey = Exclude<DockKey, 'conversation' | 'deepdive' | 'details'>
 
 // Page 0 of the ONE home pager is the LIVE VIEWFINDER (the fixed CameraView shows through a transparent page).
 // Pages 1..N are the catalogued items. Sliding viewfinder⇄item is pure scrolling — no navigation, no screen
 // swap — so there is nothing to fade or remount (the camera-as-a-page merge; camera.tsx re-exports this Home).
 const VIEWFINDER_KEY = '__viewfinder__'
 const VIEWFINDER_PAGE: ThreadSummary = { threadId: VIEWFINDER_KEY, title: '', createdAt: 0 }
+
+// The floating dock card's corner radius — echoes the phone's screen-corner radius as a concentric inner curve
+// (inset by the side gap), so the card reads as a smaller, rounder echo of the device rather than a generic card.
+// Kept in sync between `floatCard.borderRadius` and the `GlassFill radiusStyle` so the glass clips to the card.
+const DOCK_CARD_RADIUS = 36
 
 function RevealBody(): React.ReactElement {
   const router = useRouter()
@@ -144,6 +149,15 @@ function RevealBody(): React.ReactElement {
     api,
     reduceMotion,
     onOutcome: (dest) => { if (dest === 'interview') router.replace('/interview') },
+    // Keep the cascade stream alive across THIS screen's unmount so Details generation (the async
+    // purpose/maker/facts research that streams AFTER band-settle) keeps progressing in the
+    // background when the user navigates away — the same detached-pump primitive /processing uses
+    // for its handoff, now applied to the reveal's "user left mid-research" case. The BFF cascade is
+    // request-scoped and only pins a reveal on a FULL drain (app.ts:694); an aborted stream loses
+    // everything + a reconnect re-runs the whole cascade. So the client must keep consuming.
+    // Combined with the durable latch in useThreadStreamRun (a re-fire never strips the flag), the
+    // survivor is immortal across the reveal's mount/unmount cycles until a single-owner cancel.
+    keepAliveAcrossUnmount: true,
   })
 
   // Loading is the ORIGINAL orb experience as a dark OVERLAY (scrim + scan-line + the narrator Orb pill), fading
@@ -261,6 +275,22 @@ function RevealBody(): React.ReactElement {
     if (threadId && band && band !== 'UNKNOWN' && !audioStates.what) fetchAudio('what')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, band])
+
+  // Auto-start the Deep Dive AFTER the reveal's research completes (researchComplete) — the on-demand story generates
+  // automatically, like the rest of the reveal. The trigger is researchComplete, NOT band-settle: firing at band-settle
+  // raced the podcast worker's OWN Firecrawl+GLM research (groundedFacts) against the reveal's research phase for the
+  // same APIs, starving purpose/maker/facts (the reveal read as "no details"). researchComplete = the full reveal is
+  // done, matching "after the item's generated". `researchError` is also gated (defensive — a network drop sets
+  // researchError WITHOUT researchComplete, so `!researchComplete` already covers today's error path; the explicit
+  // OR keeps the gate honest if that invariant ever changes). Skipped on revisits, offline, UNKNOWN bands; fires ONCE
+  // per thread (the store's `idle` gate + startDeepDive's idempotency are the double-charge backstop). The idle Generate
+  // CTA in podcast.tsx stays as the fallback (a durable-ready miss / a tap before research completes).
+  useEffect(() => {
+    if (offline || isRevisit || !threadId || !band || band === 'UNKNOWN' || !researchComplete || researchError) return
+    if (getDeepDiveStatus(threadId).state !== 'idle') return
+    startDeepDive(api, { threadId, subject: title })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, band, isRevisit, researchComplete, researchError])
 
   // ---- Swipe paging across catalogued items (Feature A): a horizontal paging FlatList (the standard RN pager). ----
   // `pages` is the newest-first REVEALABLE subset from the same `['threads']` cache the collection uses (skips
@@ -556,6 +586,22 @@ function RevealBody(): React.ReactElement {
     haptics.tick()
     if (k === 'conversation') { router.push('/conversation'); return } // blue lane → the full conversation screen
     if (k === 'deepdive') { router.push('/podcast'); return } // green audio lane → the on-demand Deep Dive player
+    if (k === 'details') {
+      // The research lane collapsed to one icon: open the morph card at the first bucket with grounded content, in
+      // canonical order (its tabs are still all four). If none is active yet but at least one is retriable (a dropped
+      // post-band research stream), resume via /processing — the sole dock path to recover it. All-loading or
+      // all-empty → no-op (the Details icon's aggregate ring / "?" already signals that state on the dock).
+      const order = ['what', 'purpose', 'maker', 'facts'] as const
+      const active = order.find((b) => statuses[b] === 'active')
+      if (active) {
+        setOpenBucket(active)
+        fetchAudio(active)
+        if (speakAloud) setPlaying(active) // best-effort autoplay on OPEN only, gated on the pref (mirrors per-bucket)
+        return
+      }
+      if (order.some((b) => statuses[b] === 'unavailable')) { router.replace('/processing'); return }
+      return
+    }
     const status = statuses[k]
     if (status === 'hidden' || status === 'loading') return // nothing to open yet
     if (status === 'unavailable') { router.replace('/processing') ; return } // resume the dropped research stream
@@ -572,9 +618,11 @@ function RevealBody(): React.ReactElement {
   }
   const closeCard = (): void => { setPlaying(null); setOpenBucket(null) }
 
-  // The card header tabs = the active research buckets, in canonical order, ALWAYS including the open bucket (even
-  // when it settled 'empty') so the header always shows a selected section title — the sole heading now (no eyebrow).
-  const cardTabs = (['what', 'purpose', 'maker', 'facts'] as const).filter((k) => statuses[k] === 'active' || k === openBucket)
+  // The Details card shows ALL research sections as tabs — the navigation now that the dock collapsed to one icon.
+  // Filtering to active-only left a still-streaming or empty section UNREACHABLE (the card read as "one section");
+  // only 'hidden' (a legacy revisit with truly no content) is omitted. A non-active tab shows an honest loading/
+  // empty body (see BucketCard), never a fake "nothing grounded".
+  const cardTabs = (['what', 'purpose', 'maker', 'facts'] as const).filter((k) => statuses[k] !== 'hidden')
   // Prose buckets show ONLY their grounded text (no source row, no quote); facts carry their own per-fact source
   // under each fact (via the `facts` prop). `what` rides `whatItIs`; purpose/maker ride their section text.
   const cardBody = (k: ResearchKey): { body: string } => {
@@ -647,9 +695,9 @@ function RevealBody(): React.ReactElement {
       {/* The floating dock CARD — shown on an item page once the band settles (never on the viewfinder). During
           loading it's the Orb pill overlay above. STATIC glass card; only the content fades in on settle. */}
       {band && !onViewfinder ? (
-        <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, chromeHidden ? styles.dockHidden : null]} pointerEvents={chromeHidden ? 'none' : 'box-none'}>
+        <View style={[styles.floatWrap, { paddingBottom: space.md }, chromeHidden ? styles.dockHidden : null]} pointerEvents={chromeHidden ? 'none' : 'box-none'}>
           <View style={[styles.floatCard, floatShadow]}>
-            <GlassFill radiusStyle={{ borderRadius: radius.xl }} />
+            <GlassFill radiusStyle={{ borderRadius: DOCK_CARD_RADIUS }} />
             <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
               <SurfaceProvider surface="dark">
                 {/* The object NAME now rides the top bar (see mediaBackHeader) — the card holds only the dock + the
@@ -710,6 +758,7 @@ function RevealBody(): React.ReactElement {
       {openBucket && openAudio ? (
         <BucketCard
           bucket={openBucket}
+          status={statuses[openBucket]}
           {...cardBody(openBucket)}
           whenMade={openBucket === 'maker' ? (sections.made?.text ?? '') : ''}
           facts={openBucket === 'facts' ? facts : undefined}
@@ -836,11 +885,11 @@ export default function Reveal(): React.ReactElement {
 
 const styles = StyleSheet.create({
   headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-  // A floating dock CARD (not flush): `floatWrap` anchors it above the home indicator with a side gap; `floatCard`
-  // is the rounded card itself. The bottom inset rides floatWrap's paddingBottom so the card floats clear of the
-  // home indicator, with a comfortable side + bottom margin (reads more elegant than an edge-to-edge bar).
+  // A floating dock CARD (not flush): `floatWrap` anchors it with a side + bottom gap; `floatCard` is the rounded
+  // card itself. The bottom gap EQUALS the side gap (no home-indicator inset — the card extends down so the indicator
+  // floats over its bottom padding, like a tab bar; reads as a smaller echo of the device, not an edge-to-edge bar).
   floatWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: space.md, alignItems: 'center' },
-  floatCard: { width: '100%', maxWidth: 460, borderRadius: radius.xl, paddingHorizontal: space.lg, paddingVertical: space.lg },
+  floatCard: { width: '100%', maxWidth: 460, borderRadius: DOCK_CARD_RADIUS, paddingHorizontal: space.lg, paddingVertical: space.lg },
   // (The reveal ITEM's top bar now lives in RevealTopBar — the "One bar" glass pill; its styles moved with it.)
   // While a morph card is open it fully replaces the dock — hide the dock so it doesn't bleed through the card's
   // translucent glass (and so the card's backdrop-filter isn't sampling a second glass layer beneath it).

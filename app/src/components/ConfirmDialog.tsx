@@ -1,20 +1,19 @@
 /**
- * ConfirmDialog — a centered, scrim-backed decision surface (the SECOND step of a two-step destructive flow, and the
- * regenerate confirm). Deliberately a SOLID card (not glass) so the warning + the destructive action read at full
- * legibility over the reveal's bright photo. Cancel is the low-emphasis default (left); confirm is a filled pill
- * (accent, or `danger` terracotta when `destructive`). Tapping the scrim cancels. Buttons are 44pt leaf Pressables.
+ * ConfirmDialog — a FULL-SCREEN take-over decision surface (the SECOND step of a two-step destructive flow, and the
+ * regenerate confirm). Per product direction the confirm fills the entire screen (no small centered card floating
+ * over a dimmed grid — that read as weird); a solid `surface.bg` replaces the backdrop so the confirm IS the screen.
+ * The title + message sit centered; Cancel + the confirm action are full-width pills stacked at the bottom (above
+ * the home indicator). The confirm fill is `destructiveColor` (bulk-delete passes a clear red) or the theme's
+ * terracotta danger / accent. Backed by RN `Modal` so it covers the header + status bar too, not just the body.
  */
 import React, { useEffect, useRef } from 'react'
-import { View, Text, Pressable, Animated, StyleSheet } from 'react-native'
-import { ids, tid } from '../lib/testid'
-import { radius, space, typeStyles, hit, shadow } from '../lib/theme'
+import { View, Text, Pressable, Animated, StyleSheet, Modal } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { tid } from '../lib/testid'
+import { space, typeStyles, hit } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
 
 type Surface = ReturnType<typeof useTheme>['surface']
-
-// A denser scrim than the shared drawer scrim (0.35): a confirm dialog is a modal decision over the bright photo,
-// so the backdrop must dim enough to focus on the card + read the destructive warning.
-const DIALOG_SCRIM = 'rgba(20,18,14,0.6)'
 
 export function ConfirmDialog({
   visible,
@@ -23,6 +22,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = 'Cancel',
   destructive = false,
+  destructiveColor,
   busy = false,
   onConfirm,
   onCancel,
@@ -38,6 +38,9 @@ export function ConfirmDialog({
   confirmLabel: string
   cancelLabel?: string
   destructive?: boolean
+  /** Override the destructive fill (defaults to the theme's terracotta danger). Bulk-delete passes a clear red
+   *  here per explicit product direction, without changing the global token (which reveal/refusal/safety share). */
+  destructiveColor?: string
   /** disable the buttons while the action is in flight (prevents a double-submit). */
   busy?: boolean
   onConfirm: () => void
@@ -47,7 +50,8 @@ export function ConfirmDialog({
   dialogTestId: string
   cancelTestId: string
   confirmTestId: string
-}): React.ReactElement | null {
+}): React.ReactElement {
+  const insets = useSafeAreaInsets()
   const enter = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current
   useEffect(() => {
     if (!visible) return
@@ -55,50 +59,54 @@ export function ConfirmDialog({
     enter.setValue(0)
     Animated.timing(enter, { toValue: 1, duration: 180, useNativeDriver: false }).start()
   }, [visible, reduceMotion, enter])
-  if (!visible) return null
 
-  const cardStyle = {
-    opacity: enter,
-    transform: reduceMotion ? [] : [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
-  }
-  const confirmBg = destructive ? surface.danger : surface.accent
+  const confirmBg = destructive ? (destructiveColor ?? surface.danger) : surface.accent
 
   return (
-    <View style={styles.overlay} accessibilityViewIsModal>
-      <Pressable accessibilityLabel="Cancel" onPress={busy ? undefined : onCancel} style={[StyleSheet.absoluteFill, { backgroundColor: DIALOG_SCRIM }]} />
-      <Animated.View {...tid(dialogTestId)} style={[styles.card, shadow, { backgroundColor: surface.card }, cardStyle]}>
-        <Text accessibilityRole="header" style={[typeStyles.headline, { color: surface.text }]}>{title}</Text>
-        <Text style={[typeStyles.body, styles.message, { color: surface.textMuted }]}>{message}</Text>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={busy ? undefined : onCancel} accessibilityViewIsModal>
+      {/* Solid full-screen surface (the confirm IS the screen — no small card over a dimmed grid). Tapping it cancels. */}
+      <Pressable accessibilityLabel="Cancel" onPress={busy ? undefined : onCancel} style={[StyleSheet.absoluteFill, { backgroundColor: surface.bg }]} />
+      <Animated.View
+        {...tid(dialogTestId)}
+        style={[styles.sheet, { paddingTop: space.xxxl + insets.top, paddingBottom: space.xxxl + insets.bottom, opacity: enter }]}
+      >
+        <View style={styles.sheetBody}>
+          <Text accessibilityRole="header" style={[typeStyles.heading, { color: surface.text, textAlign: 'center' }]}>{title}</Text>
+          <Text style={[typeStyles.body, styles.message, { color: surface.textMuted, textAlign: 'center' }]}>{message}</Text>
+        </View>
         <View style={styles.actions}>
           <Pressable
             {...tid(cancelTestId, cancelLabel)}
             accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
             disabled={busy}
             onPress={onCancel}
-            style={({ pressed }) => [styles.btn, styles.cancelBtn, { backgroundColor: surface.sunken, opacity: pressed ? 0.7 : 1 }]}
+            style={({ pressed }) => [styles.btn, { backgroundColor: surface.sunken, opacity: pressed ? 0.7 : 1 }]}
           >
-            <Text style={[typeStyles.subhead, { color: surface.text }]}>{cancelLabel}</Text>
+            <Text style={[typeStyles.headline, { color: surface.text }]}>{cancelLabel}</Text>
           </Pressable>
           <Pressable
             {...tid(confirmTestId, confirmLabel)}
             accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
             disabled={busy}
             onPress={onConfirm}
             style={({ pressed }) => [styles.btn, { backgroundColor: confirmBg, opacity: pressed || busy ? 0.7 : 1 }]}
           >
-            <Text style={[typeStyles.subhead, { color: surface.onAccent, fontWeight: '700' }]}>{busy ? '…' : confirmLabel}</Text>
+            <Text style={[typeStyles.headline, { color: surface.onAccent }]}>{busy ? '…' : confirmLabel}</Text>
           </Pressable>
         </View>
       </Animated.View>
-    </View>
+    </Modal>
   )
 }
 
 const styles = StyleSheet.create({
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl, zIndex: 40 },
-  card: { width: '100%', maxWidth: 360, borderRadius: radius.xl, padding: space.xl },
-  message: { marginTop: space.sm, lineHeight: 22 },
-  actions: { flexDirection: 'row', gap: space.md, marginTop: space.xl },
-  btn: { flex: 1, minHeight: hit.min, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.lg },
-  cancelBtn: {},
+  // The sheet fills the screen; the title + message center vertically, the actions pin to the bottom (above the
+  // safe-area inset, applied inline). Transparent bg — the solid surface comes from the absoluteFill Pressable.
+  sheet: { flex: 1, paddingHorizontal: space.xxl },
+  sheetBody: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: space.md },
+  message: { lineHeight: 24 },
+  actions: { flexDirection: 'column', gap: space.sm },
+  btn: { minHeight: hit.min, borderRadius: hit.min, alignItems: 'center', justifyContent: 'center', paddingVertical: space.md, paddingHorizontal: space.xl },
 })

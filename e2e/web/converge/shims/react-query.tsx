@@ -20,6 +20,12 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 // Active-query registry (key → set of refetchers), so invalidateQueries can re-run matching mounted queries —
 // the faithful analogue of TanStack invalidating a cache entry and refetching its active observers.
 const registry = new Map<string, Set<() => void>>()
+// Cache + observer registry for setQueryData: a successful fetch seeds the cache, setQueryData reads `old` off
+// it, computes `next`, stores it, and pushes `next` to every active observer (which setData → re-render). This is
+// the faithful analogue of TanStack's optimistic cache write notifying active observers WITHOUT a refetch — the
+// exact mechanism the single + bulk delete use to drop tiles instantly before the invalidate refetch reconciles.
+const cache = new Map<string, unknown>()
+const observers = new Map<string, Set<(data: unknown) => void>>()
 const keyOf = (queryKey: unknown[]): string => JSON.stringify(queryKey)
 function invalidate(queryKey: unknown[]): Promise<void> {
   registry.get(keyOf(queryKey))?.forEach((refetch) => refetch())
@@ -31,6 +37,18 @@ export class QueryClient {
   constructor(_opts?: unknown) {}
   invalidateQueries(opts: { queryKey: unknown[] }): Promise<void> {
     return invalidate(opts.queryKey)
+  }
+  setQueryData<T>(queryKey: unknown[], updater: T | ((old: T | undefined) => T)): void {
+    const k = keyOf(queryKey)
+    const old = cache.get(k) as T | undefined
+    const next = typeof updater === 'function' ? (updater as (o: T | undefined) => T)(old) : updater
+    cache.set(k, next)
+    observers.get(k)?.forEach((fn) => fn(next))
+  }
+  removeQueries(opts: { queryKey: unknown[]; exact?: boolean }): void {
+    // Minimal faithful analogue: drop the cache entry. (The deepDiveReady queries removed on bulk delete are not
+    // mounted on the collection screen, so there are no active observers to reset.)
+    cache.delete(keyOf(opts.queryKey))
   }
 }
 
@@ -83,6 +101,7 @@ export function useQuery<T>({
     try {
       const res = await fnRef.current()
       if (!mounted.current) return
+      cache.set(k, res) // seed the cache so a later setQueryData updater sees the real `old`
       setData(res)
       setError(undefined)
     } catch (e) {
@@ -101,15 +120,27 @@ export function useQuery<T>({
     void run(true)
     // Register this active query so invalidateQueries({ queryKey: k }) can re-run it (TanStack cache-observer parity).
     const refetch = (): void => void run(false)
+    // Register an observer so setQueryData({ queryKey: k }) pushes the optimistic next value into React state
+    // (TanStack notifies active observers on a cache write — the optimistic-disappear mechanism).
+    const observer = (next: unknown): void => {
+      if (mounted.current) setData(next as T | undefined)
+    }
     let set = registry.get(k)
     if (!set) {
       set = new Set()
       registry.set(k, set)
     }
     set.add(refetch)
+    let obs = observers.get(k)
+    if (!obs) {
+      obs = new Set()
+      observers.set(k, obs)
+    }
+    obs.add(observer)
     return () => {
       mounted.current = false
       set!.delete(refetch)
+      obs!.delete(observer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [k])

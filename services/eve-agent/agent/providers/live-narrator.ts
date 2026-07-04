@@ -11,7 +11,7 @@
  */
 import { validateClaims, registerFor, type Clause, type Evidence, type ConfidenceBand, type EntailmentJudge } from '../../../../packages/shared/src/confidence'
 import type { IdEvidence } from '../tools/identify_object'
-import { glmJSON } from '../lib/glm'
+import { openaiJSON, OPENAI_CALL_TIMEOUT_MS } from '../lib/openai'
 import { renderPrompt } from '../prompts'
 
 export interface NarrationInput {
@@ -107,7 +107,13 @@ export function gateNarration(
 }
 
 export class LiveNarrator implements Narrator {
-  constructor(private judge?: EntailmentJudge) {}
+  constructor(
+    private judge?: EntailmentJudge,
+    /** per-call OpenAI timeout — bounds a hung call so the 3× retry below is MEANINGFUL: a true hang converts to a
+     *  throw (catch → retry), and a slow 5xx is bounded to `timeoutMs`. Defaults to `OPENAI_CALL_TIMEOUT_MS`; tests
+     *  override via the constructor. */
+    private timeoutMs: number = OPENAI_CALL_TIMEOUT_MS,
+  ) {}
 
   async narrate(input: NarrationInput): Promise<Narration> {
     const reg = registerFor(input.band)
@@ -134,19 +140,21 @@ export class LiveNarrator implements Narrator {
       noExternal: evidence.length === 1 && evidence[0]!.ref === 'id',
     })
 
-    // Retry a TRANSIENT empty/failed Gemini response. A single flaky call must not blank the maker/purpose buckets
+    // Retry a TRANSIENT empty/failed OpenAI response. A single flaky call must not blank the maker/purpose buckets
     // when the dossier HAS grounded facts to voice — that transient failure on the async dossier-UPGRADE pass is the
-    // real-world "maker missing" root cause (the code is correct; the call just returned nothing that once). We retry
-    // only on a THROW or empty RAW clauses; a gate that legitimately drops every clause is NOT retried (same input →
-    // same drop), so honest-empty stays honest-empty.
+    // real-world "maker missing" root cause (the code is correct; the call just returned nothing that once). The
+    // `timeoutMs` is load-bearing here: a HUNG call never throws on its own, so without a timeout the retry loop
+    // would await forever and never re-attempt. With it, a hang converts to a throw (catch → retry) and a slow 5xx is
+    // bounded to `timeoutMs`. We retry only on a THROW or empty RAW clauses; a gate that legitimately drops every
+    // clause is NOT retried (same input → same drop), so honest-empty stays honest-empty.
     let clauses: Array<Clause & { bucket?: NarrativeBucket }> = []
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const out = await glmJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
+        const out = await openaiJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7, this.timeoutMs)
         clauses = out.clauses ?? []
         if (clauses.length) break
       } catch {
-        /* transient Gemini failure (timeout / 5xx / malformed) → retry; narration is best-effort, never a crash */
+        /* transient OpenAI failure (timeout / 5xx / malformed) → retry; narration is best-effort, never a crash */
       }
     }
     // The REAL honesty gate: drop any falsifiable clause without valid grounding; render approved-only.

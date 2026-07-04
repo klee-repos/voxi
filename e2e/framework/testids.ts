@@ -88,20 +88,25 @@ export const ids = {
     facts: 'reveal.facts', // "Curious facts" container — grows as async research verifies each fact
     fact: 'reveal.fact', // one verified fact row (fact text + its own source link; multiple, progressive)
     factSource: 'reveal.factSource', // the per-fact source link under a fact (shows the page title; tap → opens it)
-    // Research-bucket DOCK (ANALYSIS-UX redesign): four green research icons + a blue conversation icon. Each
-    // research icon carries bucket.state: loading|active|empty|unavailable. Tap an active icon → it morphs into
-    // `reveal.bucketCard` (the grounded content + per-bucket audio via reveal.playNarration/narrationAudio).
+    // Reveal DOCK — THREE icons: Explore (Deep Dive, featured first) · Details (the research lane —
+    // what/purpose/maker/facts — collapsed to one icon; carries the aggregate state loading|active|empty) · Ask
+    // (blue conversation). Tap Explore → /podcast; Details → opens `reveal.bucketCard` (its tabs are the four
+    // buckets); Ask → /conversation. Per-bucket audio via reveal.playNarration/narrationAudio.
     buckets: 'reveal.buckets', // the dock row container
-    bucketWhat: 'reveal.bucketWhat', // "What it is" — active on band-settle
-    bucketPurpose: 'reveal.bucketPurpose', // "What it's for"
-    bucketWho: 'reveal.bucketWho', // "Who made it" (maker)
+    // The per-bucket ids below are RETAINED registry strings — no longer rendered as dock icons after the Details
+    // collapse (the dock shows only Explore/Details/Ask). Kept to avoid churn; the converge harness targets the
+    // card via `cardTab`+data-bucket, not these.
+    bucketWhat: 'reveal.bucketWhat', // (retained; was the "What it is" dock icon)
+    bucketPurpose: 'reveal.bucketPurpose', // (retained; was "What it's for")
+    bucketWho: 'reveal.bucketWho', // (retained; was "Who made it" / maker)
     whenMade: 'reveal.whenMade', // "when it was made" — a muted date line inside the Maker card (no dock slot)
-    bucketFacts: 'reveal.bucketFacts', // "Curious facts" — carries a count badge
-    deepDiveIcon: 'reveal.deepDiveIcon', // green Deep Dive (Sparkles) icon, after Facts in the dock row → /podcast; carries state: active|generating|ready (generating = a compose is in flight; ready = a durable episode exists)
+    bucketFacts: 'reveal.bucketFacts', // (retained; was "Curious facts")
+    deepDiveIcon: 'reveal.deepDiveIcon', // green Deep Dive (Sparkles) icon, FIRST in the dock → /podcast; carries state: active|generating|ready (generating = a compose is in flight; ready = a durable episode exists)
+    detailsIcon: 'reveal.detailsIcon', // the Details icon (ScrollText) — opens the morph card at the first active bucket; carries the aggregate state: loading|active|empty
     bucketCard: 'reveal.bucketCard', // the morphed content card (carries card.bucket)
     cardTab: 'reveal.cardTab', // a section-title tab in the morph card header; carries {bucket, selected} via tidWith — tap → switch section IN PLACE (replaces the old bottom tab strip)
     bucketCardScrim: 'reveal.bucketCardScrim', // tap-to-close scrim behind the morph card
-    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon → /conversation — set off by the divider, the pinned people lane (co-locates reveal.askVoxi)
+    conversationIcon: 'reveal.conversationIcon', // blue "Ask Voxi" icon, LAST in the dock → /conversation (the pinned people lane; co-locates reveal.askVoxi)
     // Swipe paging across catalogued items: a horizontal paging FlatList of the revealable collection. Swiping is
     // the native scroll paging; on settle the landed item loads in place (no /processing, no re-bill).
     pager: 'reveal.pager', // the horizontal paging FlatList (scroll container)
@@ -145,6 +150,8 @@ export const ids = {
     orb: 'conversation.orb', // the full-screen voice surface (container)
     orbVisual: 'conversation.orbVisual', // the animated orb itself — carries orb.state
     micButton: 'conversation.micButton', // push-to-talk
+    pauseButton: 'conversation.pauseButton', // F4: stop the voice stream (resume reconnects)
+    resumeButton: 'conversation.resumeButton', // F4: reconnect the paused session
     liveMicIndicator: 'conversation.liveMicIndicator',
     keyboardToggle: 'conversation.keyboardToggle',
     textInput: 'conversation.textInput',
@@ -165,6 +172,18 @@ export const ids = {
     itemPhoto: 'threads.itemPhoto', // the durable capture thumbnail on a collection tile (persisted photo)
     loadingMore: 'threads.loadingMore', // footer spinner while the infinite-scroll window has more to reveal
     window: 'threads.window', // hidden anchor carrying the infinite-scroll window (data-shown / data-total) for E2E reads
+    // Multi-select bulk delete (Google/Apple-Photos pattern). Entry = the header "Select" button (normal-mode
+    // rightAccessory) OR a long-press on any tile; long-press is the shortcut, "Select" is the visible door.
+    selectEntry: 'threads.selectEntry', // header "Select" button (normal mode) → enters selection mode
+    cancelSelect: 'threads.cancelSelect', // header "Cancel" (selection mode, leftAccessory) → exits selection mode
+    countSelected: 'threads.countSelected', // "{N} selected" centered title text (the deterministic selection-count read)
+    selectAll: 'threads.selectAll', // header "Select all" / "Deselect all" (selection mode, rightAccessory)
+    bulkBar: 'threads.bulkBar', // the floating bottom action bar (selection mode only)
+    bulkDelete: 'threads.bulkDelete', // the bottom-bar Delete pill (step 1 → opens the confirm dialog)
+    bulkFail: 'threads.bulkFail', // partial-failure retry line ("N items proved stubborn…") — present only on partial failure
+    deleteConfirm: 'threads.deleteConfirm', // ConfirmDialog container (step 2 of the two-step bulk delete)
+    deleteConfirmCancel: 'threads.deleteConfirmCancel',
+    deleteConfirmAccept: 'threads.deleteConfirmAccept', // destructive "Delete" — the deliberate second tap
   },
   interview: {
     screen: 'interview.screen',
