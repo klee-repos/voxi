@@ -85,3 +85,6 @@ ds-bundle/
 
 # Local design-system → claude.ai/design sync tooling (personal, not needed to build/run Voxi)
 .design-sync/
+
+# full-send scratchpad (plans/RCAs/proof artifacts — never committed)
+.full-send/
