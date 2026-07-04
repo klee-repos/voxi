@@ -21,7 +21,7 @@ import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native'
 import { Image } from 'expo-image'
 import { PressableTile, Body, Muted } from './ui'
 import { ids, tid } from '../lib/testid'
-import { radius, space, photoLabelScrim } from '../lib/theme'
+import { radius, space, motion, photoLabelScrim } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
 import type { ThreadSummary } from '../lib/apiClient'
 
@@ -58,13 +58,30 @@ export function CatalogTile({
       onPress={onPress}
       style={[
         variant === 'grid' ? styles.grid : styles.carousel,
-        { backgroundColor: surface.card, borderColor: surface.border, overflow: 'hidden' },
+        // grid photo tiles recess to a warm sunken fill WHILE the photo is pending — an unloaded tile reads
+        // as an intentional loading state, not "cream + dark band." VARIANT-GATED: the shared inline style
+        // is applied to BOTH variants, so without this gate the camera carousel tile would shift hue
+        // (#FBF9F3→#EDEAE0). The carousel keeps surface.card byte-identical to its shipping appearance.
+        { backgroundColor: variant === 'grid' && onPhoto ? surface.sunken : surface.card, borderColor: surface.border, overflow: 'hidden' },
         style,
       ]}
     >
-      {/* durable capture thumbnail — the persisted photo, loaded via its signed /media URL. */}
+      {/* durable capture thumbnail — the persisted photo, loaded via its signed /media URL.
+          cacheKey is a field of ImageSource (NOT a top-level Image prop), so it sits INSIDE source: it
+          keys the disk cache on the STABLE threadId so re-visits hit cache despite the signed URL changing
+          byte-for-byte every fetch (signing.ts re-mints exp+sig per listThreads). transition crossfades the
+          photo in calmly over the tile bg (fires on every visit incl. cache hits — the accepted calm-fade
+          tradeoff of ruling out a per-tile loaded-flag). recyclingKey is forward-compat for a FlashList
+          migration; on RN FlatList it's inert (cells reconcile by content-stable pair-row keys). */}
       {onPhoto ? (
-        <Image {...tid(photoId)} source={{ uri: item.photoUrl as string }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image
+          {...tid(photoId)}
+          source={{ uri: item.photoUrl as string, cacheKey: item.threadId }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={motion.base}
+          recyclingKey={item.threadId}
+        />
       ) : null}
       {/* Legibility scrim under the WHITE label. grid (photo-book) = a flat FOOT band (photoLabelScrim, AA-guarded
           in theme.test.ts) covering the whole label block; carousel keeps its lighter full-tile scrim unchanged. */}

@@ -88,3 +88,4 @@ ds-bundle/
 
 # full-send scratchpad (plans/RCAs/proof artifacts — never committed)
 .full-send/
+.full-send

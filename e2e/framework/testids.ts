@@ -160,6 +160,7 @@ export const ids = {
     captureCta: 'threads.captureCta',
     count: 'threads.count', // the "{n} catalogued" count subtitle (a real number, no ∞)
     grid: 'threads.grid',
+    skeleton: 'threads.skeleton', // the cold-load skeleton grid container (present during the first fetch, absent once the grid/empty state mounts)
     item: 'threads.item',
     itemPhoto: 'threads.itemPhoto', // the durable capture thumbnail on a collection tile (persisted photo)
     loadingMore: 'threads.loadingMore', // footer spinner while the infinite-scroll window has more to reveal

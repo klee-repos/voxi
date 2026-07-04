@@ -20,10 +20,10 @@ import { View, Text, ScrollView, Pressable, Animated, StyleSheet } from 'react-n
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CatalogTile } from './CatalogTile'
 import { FadeRise } from './FadeRise'
+import { Skeleton } from './Skeleton'
 import { ids, tid, tidWith } from '../lib/testid'
 import { radius, space, shadow, motion, typeStyles } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
-import type { Surface } from '../lib/theme'
 import type { ThreadSummary } from '../lib/apiClient'
 
 // A lighter dim than the design.md bottom-sheet scrim (0.35): the card floats, it isn't a full sheet, so the
@@ -31,23 +31,6 @@ import type { ThreadSummary } from '../lib/apiClient'
 const CARD_SCRIM = 'rgba(20,18,14,0.25)'
 // Clear the capture bar (orb 80 + its paddingBottom space.xl + a gap) so the floating card never covers the shutter.
 const BAR_CLEARANCE = 80 + space.xl + space.lg
-
-function Skeleton({ surface, reduceMotion }: { surface: Surface; reduceMotion: boolean }): React.ReactElement {
-  const a = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    if (reduceMotion) return
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(a, { toValue: 1, duration: 600, useNativeDriver: false }),
-        Animated.timing(a, { toValue: 0, duration: 600, useNativeDriver: false }),
-      ]),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [a, reduceMotion])
-  const opacity = reduceMotion ? 0.5 : a.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] })
-  return <Animated.View style={[styles.skeleton, { backgroundColor: surface.sunken, opacity }]} />
-}
 
 export function RecentCard({
   open,
@@ -124,9 +107,9 @@ export function RecentCard({
 
           {isLoading ? (
             <View style={styles.row}>
-              <Skeleton surface={surface} reduceMotion={reduceMotion} />
-              <Skeleton surface={surface} reduceMotion={reduceMotion} />
-              <Skeleton surface={surface} reduceMotion={reduceMotion} />
+              <Skeleton style={styles.skeleton} />
+              <Skeleton style={styles.skeleton} />
+              <Skeleton style={styles.skeleton} />
             </View>
           ) : isError ? (
             <View style={[styles.stateCard, { backgroundColor: surface.card }]}>

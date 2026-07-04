@@ -16,15 +16,16 @@
  * testids: threads.screen / emptyState / captureCta / count / grid / item / loadingMore.
  */
 import React, { useCallback, useMemo, useState } from 'react'
-import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native'
+import { View, Text, FlatList, ScrollView, ActivityIndicator, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { Screen, Title, Body, Muted, Button } from '../../src/components/ui'
 import { AppHeader } from '../../src/components/AppHeader'
 import { OfflineBanner } from '../../src/components/Banners'
 import { CatalogTile } from '../../src/components/CatalogTile'
+import { Skeleton } from '../../src/components/Skeleton'
 import { ids, tid, tidWith } from '../../src/lib/testid'
-import { space, typeStyles } from '../../src/lib/theme'
+import { space, radius, typeStyles } from '../../src/lib/theme'
 import { useTheme } from '../../src/lib/themeProvider'
 import { useApi } from '../../src/lib/api'
 import { useOffline, isOfflineError } from '../../src/lib/useOffline'
@@ -35,6 +36,9 @@ import { buildRows, groupByDate, type CollectionRow } from '../../src/lib/collec
 
 /** Tiles revealed per infinite-scroll page (grows `visibleCount` on onEndReached). */
 const PAGE = 12
+/** Pair rows shown in the cold-load skeleton — mirrors one full page (PAGE/2) so the loading grid reads
+ *  with the same density + geometry as the real photo-book grid that's about to replace it. */
+const SKELETON_PAIRS = PAGE / 2
 
 export default function Threads(): React.ReactElement {
   const router = useRouter()
@@ -90,12 +94,28 @@ export default function Threads(): React.ReactElement {
     [surface.textMuted, openThread],
   )
 
-  // ---- loading: first fetch with nothing cached ----
+  // ---- loading: a skeleton photo-book that mirrors the real grid's geometry (a flat opacity pulse, not a
+  // gradient sweep — design.md "flat paper"). The shape (title + count + "Today" + SKELETON_PAIRS of square
+  // tile-pairs) matches the populated grid byte-for-byte in sizing, so the cold load reads as the grid
+  // assembling itself rather than a bare spinner. resolves naturally to the empty or populated branch.
   if (isLoading) {
     return (
-      <Screen id={ids.threads.screen} center header={menuHeader}>
-        <ActivityIndicator color={surface.accent} />
-        <Muted style={{ marginTop: space.md }}>Opening your collection…</Muted>
+      <Screen id={ids.threads.screen} header={menuHeader} padded={false}>
+        <ScrollView {...tid(ids.threads.skeleton)} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.listHeader}>
+            <Skeleton style={styles.skelTitle} />
+            <Skeleton style={styles.skelCount} />
+          </View>
+          <Skeleton style={styles.skelOverline} />
+          {Array.from({ length: SKELETON_PAIRS }, (_v, i) => (
+            <View key={i} style={styles.pairRow}>
+              <Skeleton style={styles.skelTile} />
+              <Skeleton style={styles.skelTile} />
+            </View>
+          ))}
+          {/* a11y: a pure skeleton with no text is a hole for VoiceOver — keep a muted loading cue. */}
+          <Muted style={{ textAlign: 'center', marginTop: space.lg }}>Opening your collection…</Muted>
+        </ScrollView>
       </Screen>
     )
   }
@@ -188,4 +208,10 @@ const styles = StyleSheet.create({
   spacer: { flex: 1 }, // keeps a lone trailing tile at column width (never full-bleed)
   footer: { paddingVertical: space.lg, alignItems: 'center' },
   windowAnchor: { height: 0 }, // zero-height hidden anchor (data-shown / data-total only)
+  // cold-load skeleton shapes — each mirrors a real element's geometry so the loading grid reads as the
+  // populated grid assembling itself. skelTile byte-matches the CatalogTile `grid` cell (flex:1, 1:1, radius.md).
+  skelTitle: { width: 170, height: 26, borderRadius: radius.sm },
+  skelCount: { width: 92, height: 16, borderRadius: radius.sm, marginTop: space.xs },
+  skelOverline: { width: 64, height: 13, borderRadius: radius.sm, marginTop: space.lg, marginBottom: space.sm },
+  skelTile: { flex: 1, aspectRatio: 1, borderRadius: radius.md },
 })

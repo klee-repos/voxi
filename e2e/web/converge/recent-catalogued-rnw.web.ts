@@ -49,6 +49,14 @@ await check('a recent tile renders (camera.recentItem — the shared CatalogTile
   d.waitFor(ids.camera.recentItem, { timeoutMs: 5000 }),
 )
 
+await check('carousel tile keeps surface.card (#FBF9F3) — the sunken-bg polish is GRID-only (regression pin)', async () => {
+  // CatalogTile is shared by the Collection grid + the camera carousel; the sunken-while-loading bg is variant-gated
+  // to `grid`. Pin that the carousel tile's bg is still surface.card (#FBF9F3 = rgb(251,249,243)), NOT surface.sunken
+  // (#EDEAE0 = rgb(237,234,224)) — a gate leak would shift the carousel tile hue on a shipped surface.
+  const bg = await page.locator(`[data-testid="${ids.camera.recentItem}"]`).first().evaluate((el) => getComputedStyle(el).backgroundColor)
+  if (!/251\s*,\s*249\s*,\s*243/.test(bg)) throw new Error('carousel tile bg=' + JSON.stringify(bg) + ' — expected surface.card rgb(251,249,243); the grid-only sunken gate leaked to the carousel')
+})
+
 await check('the recent tile shows a persisted thumbnail <img> that ACTUALLY DECODED (naturalWidth>0) — DRY with the Collection', async () => {
   const img = page.locator(`[data-testid="${ids.camera.recentItemPhoto}"] img`).first()
   const deadline = Date.now() + 10000
