@@ -164,7 +164,7 @@ def _build_vertex_llm(system_instruction: str):
     return _GcloudVertexLLM(
         credentials="{}",  # ignored — our override supplies the gcloud-token credentials
         project_id=os.environ["GCP_PROJECT"],
-        location=os.environ.get("GCP_LOCATION", "us-central1"),
-        model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        location=os.environ.get("GEMINI_LOCATION", "global"),
+        model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
         system_instruction=system_instruction,
     )

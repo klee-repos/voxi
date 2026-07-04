@@ -16,6 +16,7 @@ import { LiveSafetyClassifier } from '../../eve-agent/agent/providers/live-safet
 import { LiveNarrator } from '../../eve-agent/agent/providers/live-narrator'
 import { LiveResearcher } from '../../eve-agent/agent/providers/live-research'
 import { dossierProviderFromEnv, type DossierProvider } from '../../eve-agent/agent/providers/live-dossier'
+import { firecrawlFromEnv } from '../../eve-agent/agent/tools/web_research'
 import { NarrationStore } from './narration-store'
 import { loadImageBytes } from '../../eve-agent/agent/lib/gcp-vision'
 import { parseEventLine, isAudioBucket, type AudioBucket } from '../../../packages/shared/src/events'
@@ -28,7 +29,7 @@ export class CascadeEveClient implements EveClient {
   private vision: LiveVisionProvider
   private safety = new LiveSafetyClassifier()
   private narrator = new LiveNarrator()
-  private researcher = new LiveResearcher()
+  private researcher = new LiveResearcher(firecrawlFromEnv() ?? null)
   /** The async deep-research provider (Firecrawl+Gemini deep path when keyed, else the Gemini-grounding path). It
    *  produces the durable, fully-cited dossier that streams the progressive `fact` chips AND the grounded
    *  `description_upgrade` that replaces the thin first-pass narration — the whole point of PROMPT-QUALITY §3.B/§3.C.

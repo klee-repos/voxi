@@ -11,7 +11,8 @@
  */
 import { smugglesFalsifiable } from '../../eve-agent/agent/providers/live-narrator'
 import { gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
-import { GeminiResearchProvider, GeminiScriptProvider, FfmpegMuxer } from './providers'
+import { firecrawlFromEnv } from '../../eve-agent/agent/tools/web_research'
+import { CompositeResearchProvider, GroundedResearchProvider, GeminiResearchProvider, GlmScriptProvider, FfmpegMuxer } from './providers'
 import { ElevenLabsTts } from './live-tts'
 import { createGcsClient, type GcsClient } from './gcs'
 import { gcsAssetStore } from './gcs-asset-store'
@@ -33,8 +34,8 @@ export function buildProductionDeps(opts: {
   const audioBucket = opts.audioBucket ?? process.env.GCS_AUDIO_BUCKET ?? 'voxi-podcast-audio'
   const stateBucket = opts.stateBucket ?? process.env.GCS_STATE_BUCKET ?? 'voxi-podcast-state'
   return {
-    research: new GeminiResearchProvider(),
-    script: new GeminiScriptProvider(),
+    research: new CompositeResearchProvider(new GroundedResearchProvider(firecrawlFromEnv() ?? null), new GeminiResearchProvider()),
+    script: new GlmScriptProvider(),
     tts: new ElevenLabsTts(),
     muxer: new FfmpegMuxer(opts.outDir, gcs, audioBucket),
     store: opts.store ?? gcsAssetStore(gcs, { stateBucket }),

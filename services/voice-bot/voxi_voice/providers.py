@@ -268,15 +268,15 @@ class GeminiLLM:
     """
 
     project: str = ""
-    location: str = "us-central1"
-    model: str = "gemini-2.5-flash"
+    location: str = "global"
+    model: str = "gemini-3.5-flash"
     item_context: str = ""
     name: str = "gemini"
 
     def __post_init__(self) -> None:
         self.project = _require("GCP_PROJECT", self.project or os.getenv("GCP_PROJECT"))
-        self.location = self.location or os.getenv("GCP_LOCATION", "us-central1")
-        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.location = self.location or os.getenv("GEMINI_LOCATION", "global")
+        self.model = self.model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 
     def _client(self):
         from google import genai

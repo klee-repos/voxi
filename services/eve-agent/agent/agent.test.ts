@@ -49,9 +49,11 @@ describe('agent.ts — config registry, model, world', () => {
     expect(AgentConfigSchema.safeParse(AGENT).success).toBe(true)
   })
 
-  test('brain default = anthropic claude-sonnet-4-6 with compaction on (§4.2)', () => {
-    expect(MODEL.provider).toBe('@ai-sdk/anthropic')
-    expect(MODEL.id).toBe('claude-sonnet-4-6')
+  // Documentation-only: pins the brain default the registry declares. The GLM construction in loadEveRuntime is
+  // validated only by the cred-gated boot spike, not here (the durable agent is codebase-only/undeployed in v1).
+  test('brain default = GLM-5-Turbo via @ai-sdk/openai-compatible, compaction on (§4.2)', () => {
+    expect(MODEL.provider).toBe('@ai-sdk/openai-compatible')
+    expect(MODEL.id).toBe('glm-5-turbo')
     expect(MODEL.compaction).toBe(true)
   })
 
@@ -84,7 +86,7 @@ describe('agent.ts — config registry, model, world', () => {
     // in the current environment, so it passes with the toolchain present (dev) OR absent (a bare CI checkout).
     if (r.ok) {
       // toolchain resolved — the world + model provider handles are live (the world's createWorld and the
-      // AI-SDK anthropic provider). eve@0.17.x exports defineAgent (not a named `Agent`), so the mapped
+      // constructed openai-compatible GLM provider). eve@0.17.x exports defineAgent (not a named `Agent`), so the mapped
       // `Agent` handle may be undefined in this version; the load succeeding is the contract that matters.
       expect(r.world).toBeDefined()
       expect(r.model).toBeDefined()

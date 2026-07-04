@@ -8,8 +8,12 @@
 import { loadPrompt } from '../prompts'
 
 const PROJECT = process.env.GCP_PROJECT ?? 'eighth-duality-354701'
+/** Cloud Vision + the multimodal embedding stay on the single-region endpoint. */
 const LOCATION = process.env.GCP_LOCATION ?? 'us-central1'
-const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+/** Generative Gemini targets the GLOBAL endpoint (hostname `aiplatform.googleapis.com`, no region prefix) —
+ *  gemini-3.5-flash is not available on us-central1, and the multi-region host is the bare apex domain. */
+const GEMINI_LOCATION = process.env.GEMINI_LOCATION ?? 'global'
+const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
 
 let _tok: { value: string; exp: number } | null = null
 
@@ -113,7 +117,7 @@ const ID_SCHEMA = {
 }
 
 export async function geminiIdentify(b64: string, mime: string): Promise<GeminiId> {
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`
+  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${GEMINI_LOCATION}/publishers/google/models/${MODEL}:generateContent`
   const prompt = loadPrompt('identify-object.md')
   const r = await fetch(url, {
     method: 'POST',
@@ -134,7 +138,7 @@ export async function geminiIdentify(b64: string, mime: string): Promise<GeminiI
  * (a narrator wants a little warmth; identification wants 0).
  */
 export async function geminiJSON<T>(system: string, user: string, schema: object, temperature = 0.6): Promise<T> {
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`
+  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${GEMINI_LOCATION}/publishers/google/models/${MODEL}:generateContent`
   const r = await fetch(url, {
     method: 'POST',
     headers: { authorization: `Bearer ${gcloudToken()}`, 'content-type': 'application/json' },
@@ -147,53 +151,6 @@ export async function geminiJSON<T>(system: string, user: string, schema: object
   const j = await r.json()
   if (!r.ok) throw new Error('gemini-json: ' + JSON.stringify(j).slice(0, 300))
   return JSON.parse(j.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}') as T
-}
-
-/** Google-Search grounding metadata (Vertex generateContent). Each support segment maps to a source chunk. */
-export interface GroundingChunk {
-  web?: { uri?: string; title?: string }
-}
-export interface GroundingSupport {
-  segment?: { startIndex?: number; endIndex?: number; text?: string }
-  groundingChunkIndices?: number[]
-}
-export interface GroundingMetadata {
-  groundingChunks?: GroundingChunk[]
-  groundingSupports?: GroundingSupport[]
-  webSearchQueries?: string[]
-}
-
-/**
- * Grounded Vertex Gemini TEXT call (Google Search grounding) — used by the reveal RESEARCH step to gather
- * citable facts about a confirmed identity.
- *
- * CRITICAL (verified against Vertex, gemini-2.5): controlled generation (`responseMimeType:'application/json'` /
- * `responseSchema`) is MUTUALLY EXCLUSIVE with the `googleSearch` tool — combining them 400s. So this call
- * returns FREE TEXT + `groundingMetadata`; the caller derives structured facts from the metadata, never a
- * schema. An `AbortController` timeout guarantees a hung grounded call can NEVER stall the reveal stream.
- */
-export async function geminiGrounded(
-  system: string,
-  user: string,
-  opts: { temperature?: number; timeoutMs?: number } = {},
-): Promise<{ text: string; grounding: GroundingMetadata }> {
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${gcloudToken()}`, 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 8000), // fail-closed: a hung grounded call can't stall the stream
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      tools: [{ googleSearch: {} }], // grounding tool — NO responseSchema (mutually exclusive on 2.5)
-      generationConfig: { temperature: opts.temperature ?? 0.2 },
-    }),
-  })
-  const j = await r.json()
-  if (!r.ok) throw new Error('gemini-grounded: ' + JSON.stringify(j).slice(0, 300))
-  const cand = j.candidates?.[0]
-  const text = ((cand?.content?.parts ?? []) as { text?: string }[]).map((p) => p.text ?? '').join('')
-  return { text, grounding: (cand?.groundingMetadata ?? {}) as GroundingMetadata }
 }
 
 export interface WebDetect {

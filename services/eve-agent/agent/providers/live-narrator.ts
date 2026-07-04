@@ -11,7 +11,7 @@
  */
 import { validateClaims, registerFor, type Clause, type Evidence, type ConfidenceBand, type EntailmentJudge } from '../../../../packages/shared/src/confidence'
 import type { IdEvidence } from '../tools/identify_object'
-import { geminiJSON } from '../lib/gcp-vision'
+import { glmJSON } from '../lib/glm'
 import { renderPrompt } from '../prompts'
 
 export interface NarrationInput {
@@ -142,7 +142,7 @@ export class LiveNarrator implements Narrator {
     let clauses: Array<Clause & { bucket?: NarrativeBucket }> = []
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const out = await geminiJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
+        const out = await glmJSON<{ clauses: Array<Clause & { bucket?: NarrativeBucket }> }>(system, user, NARRATION_SCHEMA, 0.7)
         clauses = out.clauses ?? []
         if (clauses.length) break
       } catch {

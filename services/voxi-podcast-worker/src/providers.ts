@@ -1,25 +1,28 @@
 /**
  * Production providers for the podcast render pipeline (render.ts seams), no fakes:
- *   - GeminiResearchProvider: Vertex Gemini 2.5 + the google_search grounding tool → a CLOSED facts[] whose
- *     sourceUrls are REAL grounded web URIs (never invented). If nothing grounds, it throws (fail-closed — we
- *     never ship an ungrounded episode).
- *   - GeminiScriptProvider: Gemini writes the claim-structured two-host (Arlo/Mave) script over ONLY those
- *     closed facts, refs translated back to the closed sourceUrls the honesty gate resolves against.
+ *   - CompositeResearchProvider: GLM-5.2 PRIMARY (the shared Firecrawl→GLM `groundedFacts` primitive) with a
+ *     native-Gemini grounding FALLBACK (GeminiResearchProvider) so a Firecrawl outage can't hard-fail a Deep Dive.
+ *   - GlmScriptProvider: GLM-5.2 writes the claim-structured two-host (Arlo/Mave) script over ONLY the closed
+ *     facts, refs translated back to the closed sourceUrls the honesty gate resolves against.
  *   - FfmpegMuxer: takes the concatenated multi-voice MP3, runs a real ffmpeg pass (loudnorm + clean re-encode)
  *     → a single player-safe MP3 written into the asset dir. (HLS segmentation is a later prod refinement; a
  *     normalized MP3 is a real, playable asset.)
  *
- * Auth: reuses gcloudToken() (gcloud CLI bearer, no ADC/SA-key), same as the identification cascade.
+ * Auth: GLM uses an API key (lib/glm); the native-Gemini fallback reuses gcloudToken() (gcloud CLI bearer).
  */
 import { gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
+import { glmJSON } from '../../eve-agent/agent/lib/glm'
+import { groundedFacts } from '../../eve-agent/agent/lib/grounded-research'
+import { firecrawlFromEnv, type WebResearchProvider } from '../../eve-agent/agent/tools/web_research'
 import { loadPrompt, renderPrompt } from './prompts'
 import type { GcsClient } from './gcs'
 import type { ResearchProvider, ScriptProvider, Muxer, Fact, Script, PodcastJob } from './render'
 
 const PROJECT = process.env.GCP_PROJECT ?? 'eighth-duality-354701'
-const LOCATION = process.env.GCP_LOCATION ?? 'us-central1'
-const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
-const ENDPOINT = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`
+/** Native-Gemini grounding fallback targets the GLOBAL endpoint — gemini-3.5-flash is not on us-central1. */
+const GEMINI_LOCATION = process.env.GEMINI_LOCATION ?? 'global'
+const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
+const ENDPOINT = `https://aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${GEMINI_LOCATION}/publishers/google/models/${MODEL}:generateContent`
 // Per-call bounds so a black-holed vendor socket / ffmpeg pipe can't hang the render. The whole render body is ALSO
 // bounded (renderPodcast's deadline) — these just release each hung call so the deadline's loser isn't left burning.
 const VERTEX_CALL_MS = 120_000
@@ -127,6 +130,48 @@ export class GeminiResearchProvider implements ResearchProvider {
   }
 }
 
+/**
+ * PRIMARY research path: the shared Firecrawl→GLM-5.2 `groundedFacts` primitive (same one the BFF dossier/researcher
+ * use). Each fact's sourceUrl is the real Firecrawl doc its quote was lifted from — NO round-robin (per-fact
+ * attribution is the honesty property). Fail-closed retry; a null web → throws so the composite falls back to Gemini.
+ */
+export class GroundedResearchProvider implements ResearchProvider {
+  constructor(private web: WebResearchProvider | null, private maxAttempts = 3) {}
+
+  async research(job: PodcastJob): Promise<Fact[]> {
+    if (!this.web) throw new Error('grounded research: no Firecrawl provider wired')
+    let lastErr = 'grounded research failed'
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        const { facts } = await groundedFacts({ web: this.web, subject: job.subject, query: job.subject, item: true })
+        if (!facts.length) { lastErr = 'grounded research: no facts extracted'; continue }
+        return facts.map((f) => ({ claim: f.text, sourceUrl: f.sourceUrl, confidence: 0.9 }))
+      } catch (e) {
+        lastErr = 'grounded research: ' + (e as Error).message
+      }
+    }
+    throw new Error(`${lastErr} (after ${this.maxAttempts} attempts)`)
+  }
+}
+
+/**
+ * Resilience composite: GLM-5.2 (Firecrawl) primary, native-Gemini grounding fallback. A Firecrawl outage or a missing
+ * key no longer HARD-FAILS a Deep Dive — the worker is fail-closed by design (render.ts re-throws when priorFacts is
+ * empty), so without this fallback an outage would sink every episode whose BFF dossier was also starved. The fallback
+ * is safe: the worker's honesty gate resolves evidenceRef against the closed facts[] (render.ts), NOT via the BFF's
+ * sourceMatchesSubject, so the synthetic-title concern does not apply here.
+ */
+export class CompositeResearchProvider implements ResearchProvider {
+  constructor(private primary: ResearchProvider, private fallback: ResearchProvider) {}
+  async research(job: PodcastJob): Promise<Fact[]> {
+    try {
+      return await this.primary.research(job)
+    } catch {
+      return this.fallback.research(job) // Firecrawl/GLM down → native Gemini grounding
+    }
+  }
+}
+
 const SCRIPT_SCHEMA = {
   type: 'object',
   properties: {
@@ -148,10 +193,10 @@ const SCRIPT_SCHEMA = {
 }
 
 /**
- * Gemini writes the claim-structured two-host script over ONLY the closed facts (grounded refs enforced).
- * RETRIES on a transient/parse failure and caps `maxOutputTokens` so a long script can't silently truncate
- * mid-JSON (gemini-2.5 thinking tokens count against the budget) — same no-single-failure-kills-the-render
- * discipline as research().
+ * GLM-5.2 writes the claim-structured two-host script over ONLY the closed facts (grounded refs enforced).
+ * RETRIES on a transient/parse failure. GLM enforces no json_schema, so the schema is a prompt hint + a client-side
+ * tolerant parse, and there is NO maxOutputTokens cap — GLM thinking tokens are heavy, so a tight cap would truncate
+ * a long script mid-JSON.
  */
 /**
  * Build the script model's USER prompt: the OBJECT + the server-owned reveal ORIENTATION (identity confidence +
@@ -172,7 +217,7 @@ export function buildScriptUserPrompt(job: PodcastJob, facts: Fact[]): string {
   })
 }
 
-export class GeminiScriptProvider implements ScriptProvider {
+export class GlmScriptProvider implements ScriptProvider {
   constructor(private readonly maxAttempts = 3) {}
 
   async writeScript(job: PodcastJob, facts: Fact[]): Promise<Script> {
@@ -182,24 +227,12 @@ export class GeminiScriptProvider implements ScriptProvider {
     const user = buildScriptUserPrompt(job, facts)
     let lastErr = 'script generation failed'
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
-      const r = await fetch(ENDPOINT, {
-        method: 'POST',
-        signal: AbortSignal.timeout(VERTEX_CALL_MS),
-        headers: { authorization: `Bearer ${gcloudToken()}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig: { responseMimeType: 'application/json', responseSchema: SCRIPT_SCHEMA, temperature: 0.6, maxOutputTokens: 8192 },
-        }),
-      })
-      const j = await r.json()
-      if (!r.ok) { lastErr = 'gemini script: ' + JSON.stringify(j).slice(0, 300); continue }
-      const cand = j.candidates?.[0]
       let out: { clauses: { speaker: 'arlo' | 'mave'; text: string; claimType: Script['clauses'][number]['claimType']; evidenceRef?: string }[] }
       try {
-        out = JSON.parse(cand?.content?.parts?.[0]?.text ?? '{"clauses":[]}')
+        // glmJSON sets response_format: json_object + renders the schema as a prompt hint + a tolerant extractJson parse.
+        out = await glmJSON(system, user, SCRIPT_SCHEMA, 0.6)
       } catch (e) {
-        lastErr = `script JSON parse failed (finishReason=${cand?.finishReason}): ${(e as Error).message}`
+        lastErr = 'glm script: ' + (e as Error).message
         continue
       }
       const clauses = (out.clauses ?? []).map((c) => {

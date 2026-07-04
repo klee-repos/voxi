@@ -22,10 +22,13 @@ import { assertSigningKeyConfigured } from '../../../services/voxi-api/src/signi
 import { CascadeEveClient } from '../../../services/voxi-api/src/cascade-eve-client'
 import { LiveNarrationTts } from '../../../services/voxi-api/src/live-tts'
 import { createPodcastBridge } from '../../../services/voxi-api/src/podcast-client'
+import { createVoiceRoutes } from '../../../services/voxi-api/src/voice-routes'
 import { createPodcastAudioDeleter } from '../../../services/voxi-api/src/gcs'
 import { createCloudSqlStores } from '../../../services/voxi-api/src/cloudsql-stores'
 import { createPgStores } from '../../../services/voxi-api/src/pg-stores'
 import { warmGcpToken } from '../../../services/eve-agent/agent/lib/gcp-vision'
+import { assertProdKeys } from '../../../packages/shared/src/prod-keys'
+import { LiveChatProvider } from '../../../services/eve-agent/agent/providers/live-chat'
 import { initTelemetry, logger, withRequestTelemetry } from '../../../packages/telemetry/src/index'
 import { initSentry, flushSentry } from '../../../services/voxi-api/src/sentry'
 
@@ -62,6 +65,10 @@ const databaseUrl = process.env.DATABASE_URL
 if (ON_CLOUD_RUN && !databaseUrl) {
   throw new Error('DATABASE_URL is required on Cloud Run — the collection must persist in Cloud SQL, not on the ephemeral container disk')
 }
+// GLM_API_KEY + FIRECRAWL_API_KEY: the cascade's narration/research/dossier now run on GLM-5.2 over Firecrawl. The
+// per-call clients throw at the seam but the retry loops swallow that into honest-empty output, so assert at boot — a
+// missing/typo'd secret crash-loops loudly here rather than silently serving blank reveals for hours.
+assertProdKeys()
 const durable = databaseUrl
   ? await createCloudSqlStores(databaseUrl)
   : await createPgStores(process.env.VOXI_DATA_DIR ?? '.voxi-data/bff')
@@ -107,6 +114,10 @@ const audioBucket = process.env.GCS_AUDIO_BUCKET ?? 'voxi-podcast-audio'
 const stateBucket = process.env.GCS_STATE_BUCKET ?? 'voxi-podcast-state'
 const deletePodcastAudio = createPodcastAudioDeleter({ audioBucket, stateBucket })
 
+// Shared in-memory session-owner map (per-instance). The voice sub-app reuses it so a voice session's ownership
+// ACL sees the same map; threadOwnerVerdict's durable `threads` backstop covers cross-instance + restart.
+const sessionOwnerRef = new Map<string, string>()
+
 const app = createApp({
   verifier: clerkVerifier(verifyToken as never),
   store: durable.store,
@@ -124,7 +135,7 @@ const app = createApp({
     },
   },
   bucket: process.env.GCS_PHOTO_BUCKET ?? 'voxi-photos',
-  sessionOwner: new Map<string, string>(),
+  sessionOwner: sessionOwnerRef,
   // Durable collection persistence (COLLECTION-PERSISTENCE-PLAN) — survives restarts + multi-instance autoscale.
   threads: durable.threads,
   photos: durable.photos,
@@ -133,6 +144,7 @@ const app = createApp({
   messages: durable.messages,
   refunds: durable.refunds,
   speech,
+  chat: new LiveChatProvider(), // grounded "Ask Voxi" chat (Vertex Gemini + claim-structured honesty gate)
   // Deep Dive render: enqueue to the worker (once per fresh gate) + proxy its honest status on poll.
   podcastEnqueue: podcastBridge?.enqueue,
   podcastStatus: podcastBridge?.status,
@@ -142,8 +154,24 @@ const app = createApp({
   planFor: async () => 'voyager',
 })
 
+// "Ask Voxi" realtime voice: the mountable voice sub-app re-applies the same auth + ownership ACL as the main
+// BFF (voice-routes.ts). VOICE_SERVER_BASE_URL points at the deployed voice-bot's SmallWebRTC signalling; while
+// the voice-bot is not yet deployed (F7) the route fails LOUD (503 voice_server_unconfigured) BEFORE charging a
+// voice minute (the ASK-SEC-4 ordering) — never a fake success. Mounted on /v1/voice/* exactly as the dev entry.
+const voice = createVoiceRoutes({
+  verifier: clerkVerifier(verifyToken as never),
+  store: durable.store,
+  sessionOwner: sessionOwnerRef,
+  threads: durable.threads, // durable owner backstop (the in-memory map is per-instance)
+  reveals: durable.reveals, // the voice-bot fetches the grounded item context (F5) per minted session
+  voiceServerBaseUrl: process.env.VOICE_SERVER_BASE_URL ?? '',
+})
+
 // Health probe bypasses telemetry entirely (Cloud Run probes are frequent — a span per probe floods Trace).
-const wrapped = withRequestTelemetry((req: Request) => app.fetch(req), { role: 'bff' })
+const wrapped = withRequestTelemetry((req: Request) => {
+  const url = new URL(req.url)
+  return url.pathname.startsWith('/v1/voice/') ? voice.fetch(req) : app.fetch(req)
+}, { role: 'bff' })
 const server = serve({
   port: PORT,
   hostname: '0.0.0.0',

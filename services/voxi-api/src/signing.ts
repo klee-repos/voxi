@@ -32,7 +32,10 @@ const DEFAULT_DEV_SECRET = 'test-signing-key'
  */
 function signingSecret(): string {
   const k = process.env.VOXI_URL_SIGNING_KEY
-  const isProd = process.env.VOXI_ENV === 'production' || process.env.NODE_ENV === 'production'
+  const isProd =
+    process.env.VOXI_ENV === 'production' ||
+    process.env.NODE_ENV === 'production' ||
+    !!process.env.K_SERVICE
   if (isProd && (!k || k.length < 16)) {
     throw new Error(
       'VOXI_URL_SIGNING_KEY is unset or too short (>=16 chars) — refusing to sign URLs with a default key in production',

@@ -292,8 +292,13 @@ export function buildDossier(input: DossierInput, proposed: ProposedDossier, opt
     const anchors = categoryAnchors(input.subjectTerms[0] ?? input.subject)
     const anchored = kept.some((f) => {
       const src = proposed.sources.find((s) => s.url === f.sourceUrl)
-      const realTitle = !!src && src.title.trim().length > 0 && fold(src.title) !== fold(input.subject)
-      return realTitle || anchors.some((a) => namesCategoryHead(`${f.text} ${f.quote}`, a))
+      const title = src?.title ?? ''
+      const realTitle = title.trim().length > 0 && fold(title) !== fold(input.subject)
+      // A REAL-titled source anchors the cluster only if its title names a category head as a WHOLE WORD. The per-fact
+      // gate uses a raw substring anchor, so without this word-boundary check a compound-noun drift cluster (Cardboard /
+      // Skateboard / Motherboard pages returned for a "board" query) would pass per-fact and the all-drift safety net
+      // would be gone now that the synthetic-title path is — re-armed here, NOT by re-tightening the tuned per-fact gate.
+      return (realTitle && anchors.some((a) => namesCategoryHead(title, a))) || anchors.some((a) => namesCategoryHead(`${f.text} ${f.quote}`, a))
     })
     if (anchors.length > 0 && !anchored) {
       for (const f of kept) dropped.push({ fact: { text: f.text, claimType: f.claimType, sourceUrl: f.sourceUrl, quote: f.quote }, reason: 'class-cluster-off-topic' })

@@ -2,7 +2,7 @@
  * Voxi root agent — model config + workflow world (PLAN §4.2, §4.4, §22.3).
  *
  * This is the SINGLE root eve agent ("Voxi"), filesystem-first. It declares:
- *   - the brain (model) default: `anthropic("claude-sonnet-4-6")` with compaction on;
+ *   - the brain (model) default: GLM-5-Turbo via `@ai-sdk/openai-compatible`, with compaction on;
  *   - the workflow WORLD = postgres (`@workflow/world-postgres`) — the durable seam that the G3 spike proves
  *     can be self-hosted off Vercel (split front/poller topology, §4.4);
  *   - the registry of tools / subagents / skills / schedules / channel the runtime wires up.
@@ -21,8 +21,8 @@ import { z } from 'zod'
 /** The brain default for the root agent (PLAN §4.2). */
 export const MODEL = {
   /** kept as a string so this file imports nothing live. */
-  provider: '@ai-sdk/anthropic',
-  id: 'claude-sonnet-4-6',
+  provider: '@ai-sdk/openai-compatible',
+  id: 'glm-5-turbo',
   /** compaction on — long durable threads must not blow the context window (PLAN §4.2). */
   compaction: true,
 } as const
@@ -115,16 +115,29 @@ export async function loadEveRuntime(): Promise<{
   }
   let modelMod: unknown
   try {
-    // @ts-expect-error — resolved at runtime only when installed.
-    modelMod = await import('@ai-sdk/anthropic')
+    // @ts-expect-error — resolved at runtime only when the pinned toolchain is installed.
+    modelMod = await import('@ai-sdk/openai-compatible')
   } catch (e) {
     return { ok: false, error: (e as Error).message, stage: 'model' }
   }
+  // GLM (z.ai) speaks the OpenAI-compatible protocol; the provider must be CONSTRUCTED with baseURL + apiKey (unlike
+  // @ai-sdk/anthropic's ready `anthropic` factory). Fail loud on a missing key — never a fake model handle.
+  const glmKey = process.env.GLM_API_KEY
+  if (!glmKey) return { ok: false, error: 'GLM_API_KEY is not set', stage: 'model' }
+  const createOic = (modelMod as {
+    createOpenAICompatible: (o: { baseURL: string; apiKey: string; name: string }) => unknown
+  }).createOpenAICompatible
+  if (!createOic) return { ok: false, error: 'createOpenAICompatible export not found', stage: 'model' }
+  const provider = createOic({
+    baseURL: process.env.GLM_BASE_URL ?? 'https://api.z.ai/api/paas/v4/',
+    apiKey: glmKey,
+    name: 'glm',
+  })
   return {
     ok: true,
     Agent: (eveMod as { Agent?: unknown }).Agent,
     world: (worldMod as { world?: unknown }).world ?? worldMod,
-    model: (modelMod as { anthropic?: unknown }).anthropic ?? modelMod,
+    model: provider,
   }
 }
 

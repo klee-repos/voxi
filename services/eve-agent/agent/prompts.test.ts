@@ -7,7 +7,6 @@
  */
 import { test, expect, describe } from 'bun:test'
 import { loadPrompt, renderPrompt } from './prompts'
-import { researchPrompt, type ResearchInput } from './providers/live-research'
 
 // ── identify_object (VLM) — a static prompt. The byte-exact golden was retired when the ARTWORK & ARTIFACT LANE
 //    was added (§F5, museum eval); we now pin the load-bearing INVARIANTS so a future edit can't silently drop the
@@ -108,23 +107,6 @@ describe('narration.user.md — byte-exact across evidence shapes', () => {
   })
 })
 
-// ── research.system + research.user — via the REAL exported researchPrompt() ─────────────────────────────
-function originalResearchPrompt(input: ResearchInput): { system: string; user: string } {
-  const itemSubject = [input.make, input.model].filter(Boolean).join(' ').trim() || input.label
-  const subject = input.scope === 'item' ? `the ${itemSubject}` : `the category of object: ${input.category || input.label}`
-  const system = [
-    'You are a terse research assistant. Return 3–5 SHORT declarative sentences, each ONE concrete, checkable fact grounded in a source.',
-    input.scope === 'item'
-      ? 'Facts about THIS specific make/model: what it is and what it is for, one or two defining specs or design facts, and one genuinely interesting fact. Do NOT invent a production year or sub-variant — only state a year if the search results establish it.'
-      : 'Facts about the CATEGORY/CLASS only (never a specific make, model, or year): what this kind of object is, and one genuinely interesting fact about the class.',
-    'No preamble, no lists, no markdown, no hedging — just the sentences.',
-  ].join('\n')
-  return { system, user: `Subject: ${subject}. Give the most defining, checkable facts.` }
-}
-
-describe('researchPrompt() — byte-exact vs the original for item and class scope', () => {
-  const item: ResearchInput = { scope: 'item', label: '1976 Canon AE-1', make: 'Canon', model: 'AE-1', year: 1976, category: 'camera' }
-  const klass: ResearchInput = { scope: 'class', label: 'a confident maybe', category: 'camera' }
-  test('item scope', () => expect(researchPrompt(item)).toEqual(originalResearchPrompt(item)))
-  test('class scope', () => expect(researchPrompt(klass)).toEqual(originalResearchPrompt(klass)))
-})
+// (The old researchPrompt() golden lived here — it pinned the native-grounding research.system/research.user prompt
+// rendering. That path is gone: groundedFacts (lib/grounded-research) now grounds via research-extract.system.md over
+// Firecrawl markdown. The item/class SUBJECT is still pinned, in live-research.test.ts → researchSubject().)

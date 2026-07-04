@@ -160,6 +160,38 @@ describe('buildDossier — class scope (PROBABLE) rejects model-specific facts',
   })
 })
 
+describe('buildDossier — class-scope compound-noun drift (A1 re-arm: board ↔ cardboard/motherboard)', () => {
+  // A 'board' query drags in an all-COMPOUND-NOUN cluster. The per-fact gate uses a raw SUBSTRING anchor, so
+  // 'Cardboard' admits 'board' — only the re-armed set-level backstop (word-boundary on the real title) drops this
+  // whole off-topic cluster. This is the residual the brick→Red Bull re-test CANNOT catch (zero token overlap
+  // there); here every page contains 'board' only INSIDE a compound noun.
+  const BOARD_INPUT: DossierInput = {
+    subject: 'board',
+    scope: 'class',
+    subjectTerms: ['board'],
+    provenance: { model: 'test', generatedAt: 0, toolCalls: 0 },
+  }
+  const CARDBOARD: FetchedSource = { url: 'https://en.wikipedia.org/wiki/Cardboard', title: 'Cardboard - Wikipedia', text: 'Cardboard was first manufactured in 1884.' }
+  const MOTHERBOARD: FetchedSource = { url: 'https://en.wikipedia.org/wiki/Motherboard', title: 'Motherboard - Wikipedia', text: 'A motherboard holds the principal components of a computer.' }
+  const sources: FetchedSource[] = [CARDBOARD, MOTHERBOARD]
+  const facts: ProposedFact[] = [
+    { text: 'Cardboard was first manufactured in 1884.', claimType: 'date', sourceUrl: CARDBOARD.url, quote: 'Cardboard was first manufactured in 1884.' },
+    { text: 'A motherboard holds the principal components of a computer.', claimType: 'spec', sourceUrl: MOTHERBOARD.url, quote: 'A motherboard holds the principal components of a computer.' },
+  ]
+
+  test('the substring anchor admits a compound-noun page; the word-boundary head check does NOT (the gap)', () => {
+    expect(sourceMatchesSubject(CARDBOARD, ['board'])).toBe(true) // 'board' ⊆ 'cardboard…' → per-fact substring ADMITS
+    expect(namesCategoryHead('Cardboard - Wikipedia', 'board')).toBe(false) // \bboard\b ⊄ 'Cardboard' → backstop CATCHES
+  })
+
+  test('the all-compound-noun cluster is DROPPED whole by the re-armed word-boundary backstop', () => {
+    const r = buildDossier(BOARD_INPUT, { facts, sources }, { judge: undefined })
+    // Neither compound-noun fact is about 'board' → the cluster is off-topic drift → dropped whole (no fact + no
+    // overview survives). On the PRE-re-arm code (realTitle || …) this returned ok:true with both facts admitted.
+    expect(r.ok).toBe(false)
+  })
+})
+
 describe('buildDossier — survivors + failure', () => {
   test('fewer than 3 grounded facts → surface survivors, never fabricate', () => {
     const r = build([F1], [AE1])

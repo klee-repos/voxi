@@ -14,6 +14,7 @@
 import { renderPodcast, type PodcastJob } from './render'
 import type { PodcastContext } from '../../../packages/shared/src/podcast'
 import { buildProductionDeps } from './production-deps'
+import { assertProdKeys } from '../../../packages/shared/src/prod-keys'
 import { createGcsClient } from './gcs'
 import { warmGcpToken, gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
 import { mkdirSync } from 'node:fs'
@@ -34,10 +35,10 @@ mkdirSync(OUT_DIR, { recursive: true })
 const ON_CLOUD_RUN = !!process.env.K_SERVICE
 const gcs = createGcsClient(gcloudToken)
 
-// Research/script hit Vertex via the synchronous gcloudToken(), which THROWS on Cloud Run unless the cache is warmed
-// at boot (no gcloud CLI in the container). Warm it, then FAIL LOUD if the SA can't write GCS — a missing storage
-// role would otherwise surface as an opaque render 'failed' on the first user Deep Dive, deep inside the IAM
-// propagation window (P5). Better to crash-loop at deploy than dead-end a user render.
+// GLM (research/script) needs no gcloud token, but the GCS writes do (createGcsClient uses the synchronous
+// gcloudToken(), which THROWS on Cloud Run unless the cache is warmed at boot — no gcloud CLI in the container). Warm
+// it, then FAIL LOUD if the SA can't write GCS — a missing storage role would otherwise surface as an opaque render
+// 'failed' on the first user Deep Dive, deep in the IAM propagation window (P5). Better to crash-loop at deploy.
 if (ON_CLOUD_RUN) {
   await warmGcpToken()
   // Retry the probe: a freshly-granted storage binding can take a minute to propagate, so a cold deploy shouldn't
@@ -57,6 +58,10 @@ if (ON_CLOUD_RUN) {
     warmGcpToken().catch((e) => logger.warn('gcp_token_refresh_failed', { err: String(e) }))
   }, 30 * 60_000)
 }
+
+// GLM_API_KEY + FIRECRAWL_API_KEY are required on Cloud Run (the render's research/script run on GLM-5.2 over
+// Firecrawl). Assert at boot so a missing/typo'd secret crash-loops loudly instead of failing every render opaque.
+assertProdKeys()
 
 const deps = buildProductionDeps({ outDir: OUT_DIR, audioBucket: AUDIO_BUCKET, stateBucket: STATE_BUCKET, gcs })
 

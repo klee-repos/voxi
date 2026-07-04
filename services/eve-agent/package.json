@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.4",
+    "@ai-sdk/openai-compatible": "^3.0.5",
     "@workflow/world-postgres": "4.2.0",
     "ai": "7.0.9",
     "eve": "0.17.1"
