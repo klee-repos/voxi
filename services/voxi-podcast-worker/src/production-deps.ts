@@ -10,17 +10,34 @@
  * provenance prose, so the auditor is a hard requirement here — fail-closed, mirroring the shipped reveal control.
  */
 import { smugglesFalsifiable } from '../../eve-agent/agent/providers/live-narrator'
+import { gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
 import { GeminiResearchProvider, GeminiScriptProvider, FfmpegMuxer } from './providers'
 import { ElevenLabsTts } from './live-tts'
+import { createGcsClient, type GcsClient } from './gcs'
+import { gcsAssetStore } from './gcs-asset-store'
 import type { RenderDeps, PodcastAssetStore } from './render'
 
-export function buildProductionDeps(opts: { outDir: string; store: PodcastAssetStore }): RenderDeps {
+/**
+ * Assemble the production RenderDeps. Durable-by-GCS by default (scale-to-zero): the render STATUS + finished asset
+ * live in the private `stateBucket`, the MP3 in the public `audioBucket`. `store`/`gcs` are optional overrides so a
+ * unit test can drive the wiring (e.g. the detectNamedClaim auditor) without touching GCS or gcloud.
+ */
+export function buildProductionDeps(opts: {
+  outDir: string
+  audioBucket?: string
+  stateBucket?: string
+  gcs?: GcsClient
+  store?: PodcastAssetStore
+}): RenderDeps {
+  const gcs = opts.gcs ?? createGcsClient(gcloudToken)
+  const audioBucket = opts.audioBucket ?? process.env.GCS_AUDIO_BUCKET ?? 'voxi-podcast-audio'
+  const stateBucket = opts.stateBucket ?? process.env.GCS_STATE_BUCKET ?? 'voxi-podcast-state'
   return {
     research: new GeminiResearchProvider(),
     script: new GeminiScriptProvider(),
     tts: new ElevenLabsTts(),
-    muxer: new FfmpegMuxer(opts.outDir),
-    store: opts.store,
+    muxer: new FfmpegMuxer(opts.outDir, gcs, audioBucket),
+    store: opts.store ?? gcsAssetStore(gcs, { stateBucket }),
     // The flavor auditor — without this, prod ships mislabeled-flavor falsifiable claims (see file header).
     detectNamedClaim: smugglesFalsifiable,
   }

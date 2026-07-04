@@ -123,6 +123,14 @@ export interface PodcastAssetStore {
   /** Persist the finished asset (paired with the rendering→ready transition). */
   putAsset(asset: PodcastAsset): Promise<void>
   getAsset(catalogItemId: string, version: number): Promise<PodcastAsset | null>
+  /**
+   * Steal a STALE `rendering` lease (older than `maxAgeMs`) — return true iff this caller won it. A durable store
+   * (GCS/SQL) needs this because, unlike the in-memory store, process death no longer clears a `rendering` left by
+   * an instance killed mid-render; without a staleness reclaim a scale-to-zero worker would wedge the (item,version)
+   * at `rendering` forever (render.ts only re-claims `queued`/`failed`). Optional: the memory store implements it via
+   * a tracked lease time; a store that can't tell lease age returns false (never steals an in-flight render).
+   */
+  reclaimStaleRendering?(catalogItemId: string, version: number, maxAgeMs: number): Promise<boolean>
 }
 
 export interface PushSink {
@@ -143,6 +151,8 @@ export interface RenderDeps {
   detectNamedClaim?: import('../../../packages/shared/src/confidence').NamedClaimDetector
   /** optional defamation classifier (LLM in prod; heuristic default in moderation.ts). */
   classify?: ClaimClassifier
+  /** hard render-body deadline in ms (defaults to MAX_RENDER_MS); overridable so tests don't wait minutes. */
+  maxRenderMs?: number
 }
 
 // ---- outcomes ----
@@ -169,6 +179,22 @@ export type RenderOutcome =
 // 1–~6 min, rejecting only degenerate 2-liners and runaways — the Deep Dive target is ~2.5–3.5 min (§F3).
 export const MIN_SCRIPT_WORDS = 120
 export const MAX_SCRIPT_WORDS = 900
+
+// A render is ~30-70s (research + script + per-turn TTS + ffmpeg). Bound the whole body so a hung vendor/ffmpeg can't
+// hold the lease forever: on the deadline we flip rendering→failed (RE-CLAIMABLE), instead of leaving a durable
+// `rendering` that would wedge the (item,version) under scale-to-zero. STALE_LEASE_MS > MAX_RENDER_MS so a still-honest
+// in-flight render is never stolen, but a lease abandoned by a killed instance is reclaimable by the next attempt.
+export const MAX_RENDER_MS = 5 * 60_000
+export const STALE_LEASE_MS = 10 * 60_000
+
+/** A timer that rejects after `ms`; `done()` clears it so a finished render doesn't leak a pending timeout. */
+function deadline(ms: number): { race: Promise<never>; done: () => void } {
+  let t: ReturnType<typeof setTimeout>
+  const race = new Promise<never>((_, reject) => {
+    t = setTimeout(() => reject(new Error(`render exceeded ${ms}ms deadline`)), ms)
+  })
+  return { race, done: () => clearTimeout(t) }
+}
 
 /** Pure word estimate over the spoken clauses (the pre-synthesis duration proxy). */
 export function estimateWords(script: Script): number {
@@ -297,23 +323,25 @@ export function validateScript(
 export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<RenderOutcome> {
   const { catalogItemId, version } = job
 
-  // Fast idempotency check (cheap path for duplicate Cloud Task deliveries).
+  // Fast idempotency check (cheap path for duplicate deliveries).
   const current = await deps.store.getStatus(catalogItemId, version)
   if (current === 'ready') {
     const asset = await deps.store.getAsset(catalogItemId, version)
     if (asset) return { kind: 'replayed', asset }
   }
-  if (current === 'rendering') return { kind: 'in_progress' }
 
   // Compare-and-set the lease: only the worker that flips queued→rendering proceeds. A concurrent duplicate
   // loses this CAS and bails — guaranteeing exactly one render for the (item, version). A previously FAILED item
-  // is ALSO claimable (failed→rendering), so a user's "try again" actually re-renders instead of dead-ending on
-  // the stale failure.
+  // is claimable (failed→rendering) so "try again" re-renders. A STALE `rendering` lease — one left by an instance
+  // killed mid-render, which a DURABLE store no longer clears on process death the way the in-memory store did — is
+  // reclaimable after STALE_LEASE_MS, so a lost render self-heals instead of wedging the item forever (a FRESH
+  // rendering lease is never stolen → a genuinely in-flight render stays exactly-once).
   const won =
     (await deps.store.compareAndSetStatus(catalogItemId, version, 'queued', 'rendering')) ||
-    (await deps.store.compareAndSetStatus(catalogItemId, version, 'failed', 'rendering'))
+    (await deps.store.compareAndSetStatus(catalogItemId, version, 'failed', 'rendering')) ||
+    (await (deps.store.reclaimStaleRendering?.(catalogItemId, version, STALE_LEASE_MS) ?? Promise.resolve(false)))
   if (!won) {
-    // Someone else took (or already finished) the lease between our read and CAS. Re-resolve.
+    // Someone else holds a fresh lease (or already finished). Re-resolve: ready → replay, else it's in_progress.
     const after = await deps.store.getStatus(catalogItemId, version)
     if (after === 'ready') {
       const asset = await deps.store.getAsset(catalogItemId, version)
@@ -322,7 +350,25 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
     return { kind: 'in_progress' }
   }
 
+  // Bound the whole render body: a hung vendor/ffmpeg call would otherwise hold the `rendering` lease indefinitely.
+  const dl = deadline(deps.maxRenderMs ?? MAX_RENDER_MS)
   try {
+    return await Promise.race([renderBody(job, deps), dl.race])
+  } catch (err) {
+    // Fail-closed on any exception OR the deadline: release the lease as failed (re-claimable), ship nothing. The
+    // CAS in renderBody's publish step also protects against an orphaned post-deadline body publishing after this.
+    await deps.store.compareAndSetStatus(catalogItemId, version, 'rendering', 'failed')
+    return { kind: 'failed', reason: err instanceof Error ? err.message : String(err) }
+  } finally {
+    dl.done()
+  }
+}
+
+/** The render body (research → script → gates → TTS → mux → publish), factored out so renderPodcast can race it
+ *  against a hard deadline. Assumes the caller already won the `rendering` lease. */
+async function renderBody(job: PodcastJob, deps: RenderDeps): Promise<RenderOutcome> {
+  const { catalogItemId, version } = job
+  {
     // 1. Closed facts[] = the reveal's OWN grounded facts (identity + priorFacts + sourced sections) folded in
     //    FIRST, then the additive deep-dive research merged on top. The reveal facts are authoritative and already
     //    provably sourced, so if the fresh research fails but we hold reveal facts, we DEGRADE to those alone
@@ -386,10 +432,6 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
       await deps.push?.notifyReady(asset)
     }
     return { kind: 'rendered', asset, grounding }
-  } catch (err) {
-    // Fail-closed on any exception: release the lease as failed, ship nothing.
-    await deps.store.compareAndSetStatus(catalogItemId, version, 'rendering', 'failed')
-    return { kind: 'failed', reason: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -397,10 +439,13 @@ export async function renderPodcast(job: PodcastJob, deps: RenderDeps): Promise<
 
 export function memoryAssetStore(
   initial: Record<string, PodcastStatus> = {},
+  opts: { now?: () => number } = {},
 ): PodcastAssetStore & { renderCount: () => number } {
   // key = `${catalogItemId}:v${version}`
   const status = new Map<string, PodcastStatus>(Object.entries(initial))
   const assets = new Map<string, PodcastAsset>()
+  const leaseAt = new Map<string, number>() // key → epochMs the current `rendering` lease was taken
+  const now = opts.now ?? (() => Date.now())
   const key = (i: string, v: number) => `${i}:v${v}`
 
   return {
@@ -409,6 +454,15 @@ export function memoryAssetStore(
       const cur = status.get(k) ?? 'queued' // unseen rows are implicitly queued (a freshly enqueued job)
       if (cur !== from) return false
       status.set(k, to)
+      if (to === 'rendering') leaseAt.set(k, now())
+      return true
+    },
+    async reclaimStaleRendering(catalogItemId, version, maxAgeMs) {
+      const k = key(catalogItemId, version)
+      if ((status.get(k) ?? 'queued') !== 'rendering') return false
+      const since = leaseAt.get(k) ?? 0
+      if (now() - since <= maxAgeMs) return false // fresh in-flight lease — never steal it
+      leaseAt.set(k, now())
       return true
     },
     async getStatus(catalogItemId, version) {

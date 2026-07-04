@@ -13,12 +13,17 @@
  */
 import { gcloudToken } from '../../eve-agent/agent/lib/gcp-vision'
 import { loadPrompt, renderPrompt } from './prompts'
+import type { GcsClient } from './gcs'
 import type { ResearchProvider, ScriptProvider, Muxer, Fact, Script, PodcastJob } from './render'
 
 const PROJECT = process.env.GCP_PROJECT ?? 'eighth-duality-354701'
 const LOCATION = process.env.GCP_LOCATION ?? 'us-central1'
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 const ENDPOINT = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`
+// Per-call bounds so a black-holed vendor socket / ffmpeg pipe can't hang the render. The whole render body is ALSO
+// bounded (renderPodcast's deadline) — these just release each hung call so the deadline's loser isn't left burning.
+const VERTEX_CALL_MS = 120_000
+const FFMPEG_KILL_MS = 120_000
 
 /**
  * Extract the first JSON value (object or array) from a model text response that may wrap it in prose/fences.
@@ -95,6 +100,7 @@ export class GeminiResearchProvider implements ResearchProvider {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       const r = await fetch(ENDPOINT, {
         method: 'POST',
+        signal: AbortSignal.timeout(VERTEX_CALL_MS),
         headers: { authorization: `Bearer ${gcloudToken()}`, 'content-type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -178,6 +184,7 @@ export class GeminiScriptProvider implements ScriptProvider {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       const r = await fetch(ENDPOINT, {
         method: 'POST',
+        signal: AbortSignal.timeout(VERTEX_CALL_MS),
         headers: { authorization: `Bearer ${gcloudToken()}`, 'content-type': 'application/json' },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
@@ -206,15 +213,22 @@ export class GeminiScriptProvider implements ScriptProvider {
   }
 }
 
-/** Real ffmpeg muxer: loudnorm + clean re-encode of the concatenated multi-voice MP3 → one player-safe MP3. */
+/**
+ * Real ffmpeg muxer: loudnorm + clean re-encode of the concatenated multi-voice MP3 → one player-safe MP3, then
+ * UPLOAD it to the PUBLIC audio bucket so the (scale-to-zero) worker doesn't have to be up to serve it — the iOS
+ * player fetches the stable public GCS URL directly (GCS serves Range natively). The local /tmp file is transient
+ * ffmpeg staging, deleted after upload.
+ */
 export class FfmpegMuxer implements Muxer {
   constructor(
     private outDir: string,
+    private gcs: GcsClient,
+    private audioBucket: string,
     private ffmpeg = process.env.FFMPEG_PATH ?? 'ffmpeg',
   ) {}
 
   async assemble({ catalogItemId, version, audio }: { catalogItemId: string; version: number; audio: Uint8Array; durationSec: number }) {
-    const base = `${catalogItemId}__v${version}`
+    const base = `${catalogItemId}__v${version}`.replace(/[^\w.-]/g, '_')
     const inPath = `${this.outDir}/${base}.raw.mp3`
     const outPath = `${this.outDir}/${base}.mp3`
     await Bun.write(inPath, audio)
@@ -223,14 +237,25 @@ export class FfmpegMuxer implements Muxer {
       [this.ffmpeg, '-y', '-i', inPath, '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', outPath],
       { stdout: 'pipe', stderr: 'pipe' },
     )
-    const code = await proc.exited
+    // Kill a wedged ffmpeg so it can't hold the render lease past the deadline (P2).
+    const killer = setTimeout(() => proc.kill(), FFMPEG_KILL_MS)
+    let code: number
+    try {
+      code = await proc.exited
+    } finally {
+      clearTimeout(killer)
+    }
     if (code !== 0) {
       const err = new TextDecoder().decode(await new Response(proc.stderr).arrayBuffer())
       throw new Error(`ffmpeg failed (${code}): ${err.slice(-400)}`)
     }
-    // best-effort cleanup of the raw intermediate
-    try { await Bun.file(inPath).unlink?.() } catch { /* ignore */ }
+    // Upload the finished MP3 to the public bucket at the stable, versioned key, then drop both local files.
     const playlistKey = `podcasts/${catalogItemId}/v${version}/episode.mp3`
+    const bytes = new Uint8Array(await Bun.file(outPath).arrayBuffer())
+    await this.gcs.put(this.audioBucket, playlistKey, bytes, 'audio/mpeg')
+    for (const p of [inPath, outPath]) {
+      try { await Bun.file(p).unlink?.() } catch { /* transient staging; ignore */ }
+    }
     return { playlistKey, segmentKeys: [playlistKey] }
   }
 }

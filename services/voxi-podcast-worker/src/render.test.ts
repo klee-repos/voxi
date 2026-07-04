@@ -491,6 +491,37 @@ describe('render: P3 — naming a branded object survives ONLY when grounded (pr
   })
 })
 
+describe('render: the outro/landing bookend survives ONLY when grounded (R1 — the proper-noun auditor at the FINAL clause)', () => {
+  // The Deep Dive §6 "LAND IT" outro may bookend the opener by naming the object one last time. A bare name in a
+  // FLAVOR line at the end trips the two-word proper-noun auditor and is CUT — so the landing evaporates and the
+  // episode ships stopping on its previous fact (the exact abruptness §6 exists to fix). The escape hatch: name it
+  // as the SAME grounded `provenance` clause the opener uses. This pins that at the FINAL clause position (distinct
+  // from the P3 opener test, which asserts on "some clause", not the last one).
+  const filler: ScriptClause[] = Array.from({ length: 14 }, (_, i) => ({
+    speaker: (i % 2 ? 'mave' : 'arlo') as ScriptClause['speaker'],
+    text: 'It sits there quietly and asks almost nothing of you at all.',
+    claimType: 'flavor',
+  }))
+  const bookend = 'And the Herman Miller settles back into being ordinary furniture.'
+  const idFact: Fact = { claim: 'The object is a Herman Miller Eames Lounge Chair.', sourceUrl: 'voxi:cascade', confidence: 1 }
+  const lastText = (r: ReturnType<typeof validateScript>) => ('ok' in r ? r.script.clauses[r.script.clauses.length - 1]?.text : undefined)
+
+  test('the auditor flags a maker-named bookend (why a flavor landing is unsafe)', () => {
+    expect(smugglesFalsifiable(bookend)).toBe(true)
+  })
+
+  test('a maker-named bookend as the FINAL clause is CUT as flavor but KEPT as grounded provenance', () => {
+    const asFlavor: Script = { facts: [idFact], clauses: [...filler, { speaker: 'arlo', text: bookend, claimType: 'flavor' }] }
+    const asProvenance: Script = { facts: [idFact], clauses: [...filler, { speaker: 'arlo', text: bookend, claimType: 'provenance', evidenceRef: 'voxi:cascade' }] }
+    const flav = validateScript(asFlavor, { detectNamedClaim: smugglesFalsifiable })
+    const prov = validateScript(asProvenance, { detectNamedClaim: smugglesFalsifiable })
+    // Flavor landing: dropped → the episode ships WITHOUT its bookend (the abrupt stop §6 must avoid).
+    expect(lastText(flav)).not.toBe(bookend)
+    // Grounded as provenance (the §6 escape hatch): the SAME words survive as the closing clause.
+    expect(lastText(prov)).toBe(bookend)
+  })
+})
+
 describe('render: resilience — research failure degrades to reveal facts (observable), never a silent success', () => {
   test('research throws but reveal priorFacts exist → renders with grounding "priorFacts"', async () => {
     const { deps } = capturingDeps(CTX_CLAUSES, async () => { throw new Error('grounded research failed (all attempts)') })
@@ -534,5 +565,39 @@ describe('contextFacts / mergeFacts (pure)', () => {
     const a: Fact[] = [{ claim: 'Same fact.', sourceUrl: 'u1', confidence: 1 }]
     const b: Fact[] = [{ claim: 'same   FACT.', sourceUrl: 'u2', confidence: 1 }, { claim: 'Other.', sourceUrl: 'u3', confidence: 1 }]
     expect(mergeFacts(a, b).map((f) => f.claim)).toEqual(['Same fact.', 'Other.'])
+  })
+})
+
+// The scale-to-zero blockers (adversarial P1+P2): a durable store keeps a `rendering` lease across the instance
+// death that used to clear the in-memory Map — so a lost/hung render must become RE-CLAIMABLE, or the (item,version)
+// wedges at 'composing' forever.
+describe('render: a lost/hung render is recoverable (scale-to-zero lease safety)', () => {
+  test('a STALE `rendering` lease (instance killed mid-render) is reclaimed and re-rendered by the next attempt', async () => {
+    let clock = 1_000_000
+    const store = memoryAssetStore({}, { now: () => clock })
+    // Simulate a crashed prior render: it won the lease at t0 and never finished (durable status stuck 'rendering').
+    expect(await store.compareAndSetStatus(job.catalogItemId, job.version, 'queued', 'rendering')).toBe(true)
+    // A fresh attempt while the lease is young must NOT steal it (a genuinely in-flight render stays exactly-once).
+    clock += 60_000
+    const fresh = await renderPodcast(job, fakeDeps(cleanScript, { store }).deps)
+    expect(fresh.kind).toBe('in_progress')
+    // Once the lease is older than STALE_LEASE_MS, the next attempt reclaims it and actually renders.
+    clock += 12 * 60_000
+    const { deps, calls } = fakeDeps(cleanScript, { store })
+    const out = await renderPodcast(job, deps)
+    expect(out.kind).toBe('rendered')
+    expect(calls.tts).toBe(1)
+    expect(await store.getStatus(job.catalogItemId, job.version)).toBe('ready')
+  })
+
+  test('a hung render hits the deadline and flips the lease to `failed` (re-claimable), never a permanent wedge', async () => {
+    const store = memoryAssetStore()
+    const hung: ResearchProvider = { research: () => new Promise<Fact[]>(() => {}) } // never resolves
+    const out = await renderPodcast(job, fakeDeps(cleanScript, { store, research: hung, maxRenderMs: 30 }).deps)
+    expect(out.kind).toBe('failed')
+    // Failed is re-claimable: a subsequent (healthy) attempt re-renders instead of dead-ending.
+    expect(await store.getStatus(job.catalogItemId, job.version)).toBe('failed')
+    const retry = await renderPodcast(job, fakeDeps(cleanScript, { store }).deps)
+    expect(retry.kind).toBe('rendered')
   })
 })

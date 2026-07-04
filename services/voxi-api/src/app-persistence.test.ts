@@ -79,7 +79,7 @@ async function openStores(dir: string): Promise<PgStores> {
 /** Build a BFF over durable stores. `workerReady` controls the fake podcast worker; null = worker unreachable. */
 function build(pg: PgStores, eve: EveClient, workerReady: null | { audioUrl: string; transcript: { speaker: 'ARLO' | 'MAVE'; text: string }[] }): Deps {
   const podcastStatus: PodcastStatusService = {
-    async status(_token, _userId) {
+    async status(_catalogItemId, _version) {
       if (workerReady === null) return null // worker unreachable → the BFF must fall back to the durable asset
       return { state: 'ready', audioUrl: workerReady.audioUrl, transcript: workerReady.transcript }
     },

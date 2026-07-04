@@ -143,6 +143,9 @@ export interface PodcastAssetStore {
   /** Delete every episode (all versions) for a catalog item, OWNER-SCOPED — catalog_item_id is not user-unique
    *  for a global catalog id, so the user_id predicate is required to avoid wiping another user's episodes. */
   deleteByItem?(catalogItemId: string, userId: string): Promise<void>
+  /** The distinct catalogItemIds this user has episodes for — enumerated BEFORE an account purge deletes the rows,
+   *  so the deletion cascade can find + purge the corresponding GCS audio/state objects (which the rows index). */
+  listItemIdsByUser?(userId: string): Promise<string[]>
 }
 
 /** Durable conversation history (== app.messages). The single writer is idempotent on (threadId, clientKey). */
@@ -180,10 +183,10 @@ export interface RefundStore {
 
 /** Worker-reported status of a paid podcast render (the BFF polls/proxies; it never fabricates "ready"). */
 export interface PodcastStatusService {
-  /** status for a previously-gated generation token, scoped to the owning user. */
+  /** status for an (item,version) the CALLER already owner-scoped (app.ts resolves it from getByToken(token,userId)). */
   status(
-    token: string,
-    userId: string,
+    catalogItemId: string,
+    version: number,
   ): Promise<{ state: 'composing' | 'ready' | 'failed'; audioUrl?: string; transcript?: { speaker: 'ARLO' | 'MAVE'; text: string; endSec?: number }[] } | null>
 }
 
@@ -234,6 +237,10 @@ export interface Deps {
    *  `context` is the server-owned reveal projection (identity + what/purpose/maker + grounded facts) so the Deep
    *  Dive is built from everything the reveal already learned — never re-derived from a client-supplied subject. */
   podcastEnqueue?: (args: { token: string; catalogItemId: string; version: number; subject: string; userId: string; context?: PodcastContext }) => Promise<void>
+  /** Purge a catalog item's rendered podcast objects from GCS (audio + private state), across all versions. Wired to
+   *  the deletion cascade so the audio the render worker produced is actually removed — the SQL row delete alone
+   *  would orphan it. Best-effort: a GCS failure must not block the owner-scoped row cascade. */
+  deletePodcastAudio?: (catalogItemId: string) => Promise<void>
   contributions?: ContributionService
   interviews?: InterviewService
   /** plan label for the settings/subscription surface (free|explorer|voyager). */
@@ -528,6 +535,9 @@ export function createApp(deps: Deps): Hono {
     await deps.messages?.deleteByThread?.(id)
     await deps.refunds?.delete?.(id)
     await deps.podcasts?.deleteByItem?.(id, userId)
+    // The rendered audio + state live in GCS (the row above only indexes them); purge them too. Best-effort so a
+    // GCS blip never leaves the item half-deleted — the row is already gone, and a re-render re-creates the objects.
+    await deps.deletePodcastAudio?.(id).catch(() => {})
     await deps.photos?.delete?.(id)
     await deps.threads?.deleteOwned?.(id, userId)
     // In-process scan artifacts a durable purge can't reach: the eve client's photo+narration, the ownership map,
@@ -747,10 +757,16 @@ export function createApp(deps: Deps): Hono {
     const alreadyReady = prior?.status === 'ready' && !!prior.audioUrl
     // Record the item's episode durably (composing) so the collection item "remembers" it — owner-scoped keyspace.
     // Never downgrade a ready episode back to composing.
-    if (!alreadyReady) {
-      await deps.podcasts
-        ?.upsert({ token: r.token, userId, catalogItemId: body.catalogItemId, version, status: 'composing', createdAt: now(), updatedAt: now() })
-        .catch(() => {})
+    if (!alreadyReady && deps.podcasts) {
+      // NON-swallowing (P6b): a durable composing row MUST land before we enqueue, so the deletion cascade can always
+      // find the render's GCS objects and the status poll can resolve (item,version) from the token. A transient
+      // store failure → 503 (retryable); the retry is an idempotent_replay so the credit is never double-spent.
+      try {
+        await deps.podcasts.upsert({ token: r.token, userId, catalogItemId: body.catalogItemId, version, status: 'composing', createdAt: now(), updatedAt: now() })
+      } catch (e) {
+        logger.error('podcast_compose_upsert_failed', e instanceof Error ? e : new Error(String(e)), { catalogItemId: body.catalogItemId })
+        return c.json({ error: 'unavailable' }, 503)
+      }
     }
     // Build the server-owned reveal context (identity + what/purpose/maker + grounded facts) so the Deep Dive is
     // written from everything the reveal already learned. Owner-scoped and NEVER client-trusted: the subject is the
@@ -782,15 +798,21 @@ export function createApp(deps: Deps): Hono {
   app.get('/v1/podcast/:token', async (c) => {
     const userId = uid(c)
     const token = c.req.param('token')
-    const st = (await deps.podcastStatus?.status(token, userId)) ?? null
-    if (st?.state === 'ready' && deps.podcasts) {
-      const existing = await deps.podcasts.getByToken(token, userId)
+    // Resolve the (item,version) from the OWNER-SCOPED durable record — this is the ACL (getByToken requires the
+    // owning userId) AND how the stateless worker is addressed (it keys on item+version, not the token). A durable
+    // READY is served straight off (survives the worker scaling to zero); otherwise we proxy the worker's honest state.
+    const rec = deps.podcasts ? await deps.podcasts.getByToken(token, userId) : null
+    if (rec?.status === 'ready') {
+      return c.json({ state: 'ready', audioUrl: rec.audioUrl ?? undefined, transcript: rec.transcript ?? undefined })
+    }
+    const st = rec ? ((await deps.podcastStatus?.status(rec.catalogItemId, rec.version)) ?? null) : null
+    if (st?.state === 'ready' && deps.podcasts && rec) {
       await deps.podcasts
         .upsert({
           token,
           userId,
-          catalogItemId: existing?.catalogItemId ?? token,
-          version: existing?.version ?? 1,
+          catalogItemId: rec.catalogItemId,
+          version: rec.version,
           status: 'ready',
           audioUrl: st.audioUrl ?? null,
           transcript: st.transcript ?? null,
@@ -799,12 +821,9 @@ export function createApp(deps: Deps): Hono {
         })
         .catch(() => {})
     }
-    // Prefer a durable READY over a worker 'composing'/'failed'/unreachable (survives restart; A9 owner-scoped).
-    const durable = deps.podcasts ? await deps.podcasts.getByToken(token, userId) : null
-    if (durable?.status === 'ready') {
-      return c.json({ state: 'ready', audioUrl: durable.audioUrl ?? undefined, transcript: durable.transcript ?? undefined })
-    }
     if (st) return c.json(st)
+    // No worker word yet but a durable row exists → report its (composing) state; no row at all → not_found.
+    if (rec) return c.json({ state: rec.status })
     return c.json({ error: 'not_found' }, 404)
   })
 

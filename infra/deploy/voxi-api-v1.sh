@@ -142,7 +142,9 @@ gcloud secrets describe voxi-sentry-dsn --project "$PROJECT" >/dev/null 2>&1 \
 # REPLACES the full secret/env set, so this MUST be recomputed on every deploy or a later STEP=images redeploy
 # silently drops the wiring and Deep Dive 402s. A redeploy BEFORE the worker is stood up is still clean (Deep Dive
 # just stays disabled). See infra/deploy/voxi-podcast-worker-v1.sh.
-ENVVARS="GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production,SENTRY_RELEASE=${SHA}"
+# The BFF needs the podcast GCS bucket names to purge rendered audio + state in the deletion cascade (the SQL row
+# delete alone would orphan the objects). Same names the worker deploy creates.
+ENVVARS="GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GEMINI_MODEL=$(envval GEMINI_MODEL),VOXI_ENV=production,SENTRY_RELEASE=${SHA},GCS_AUDIO_BUCKET=voxi-podcast-audio-${PROJECT},GCS_STATE_BUCKET=voxi-podcast-state-${PROJECT}"
 gcloud secrets describe voxi-podcast-worker-secret --project "$PROJECT" >/dev/null 2>&1 \
   && SECRETS="${SECRETS},PODCAST_WORKER_SECRET=voxi-podcast-worker-secret:latest"
 WORKER_URL="$(gcloud run services describe voxi-podcast-worker --project "$PROJECT" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"

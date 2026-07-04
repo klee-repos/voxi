@@ -65,6 +65,8 @@ export class ElevenLabsTts implements TtsProvider {
       try {
         const r = await this.fetchImpl(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
           method: 'POST',
+          // Bound each turn so a black-holed socket can't hang the render past its deadline (a timeout throw is retryable).
+          signal: AbortSignal.timeout(60_000),
           headers: { 'xi-api-key': this.apiKey, 'content-type': 'application/json' },
           body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.2 } }),
         })

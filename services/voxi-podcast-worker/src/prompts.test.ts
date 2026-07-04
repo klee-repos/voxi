@@ -69,6 +69,25 @@ describe('script.system.md — the Deep Dive two-voice interview prompt', () => 
     expect(sys).toMatch(/background/i)
     expect(sys).toMatch(/cut the line|keep it as (plain )?flavor/i)
   })
+
+  // The OUTRO / "LAND IT" move (the fix for "it ends abruptly"): a real landing that bookends the open, in
+  // character, gate-safe. Drift-guards on the load-bearing wording so a future reformat can't silently drop it.
+  test('directs a real OUTRO that bookends the open and does not just stop (LAND IT)', () => {
+    expect(sys).toContain('LAND IT')
+    expect(sys).toMatch(/bookend|closes the loop/i)
+    expect(sys).toMatch(/final word|sign off|sign-off|landing/i)
+  })
+  test('forbids radio-DJ boilerplate as the outro (so it stays in-story, not "thanks for listening")', () => {
+    expect(sys).toMatch(/thanks for listening|tune in next time/i)
+    expect(sys).toMatch(/do not|never|don't/i)
+  })
+  test('routes an object-naming bookend through the GROUNDED provenance clause (gate-safe outro, not a cut flavor name)', () => {
+    // the outro must reuse the opener's grounding trick if it names the object, or the proper-noun auditor cuts it
+    expect(sys).toMatch(/provenance/i)
+  })
+  test('the required-beats sentence now demands the LANDING alongside zoom and people (amended MUST sentence)', () => {
+    expect(sys).toMatch(/MUST land[\s\S]*zoom[\s\S]*people[\s\S]*landing/i)
+  })
 })
 
 describe('research.md — the wider, story-biased research brief', () => {

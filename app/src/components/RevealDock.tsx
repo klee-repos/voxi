@@ -155,7 +155,9 @@ function BucketIcon({
             <Text style={[typeStyles.caption, { color: surface.textTertiary }]}>?</Text>
           </View>
         ) : null}
-        {dkey === 'deepdive' && ready && !generating ? <View style={[styles.dot, { backgroundColor: surface.accent }]} /> : null}
+        {/* Deep Dive "ready": the same green indicator dot as an unread research bucket (design.md's single 10px
+            unread-dot) — same size + position, so the Explore icon's dot never reads as a different shape. */}
+        {dkey === 'deepdive' && ready && !generating ? <View style={[styles.unreadDot, { backgroundColor: surface.accent }]} /> : null}
         {status === 'unavailable' ? (
           <View style={[styles.badge, { backgroundColor: surface.sunken, borderColor: surface.border, borderWidth: 1 }]}>
             <RotateCcw size={11} color={surface.textTertiary} strokeWidth={2.5} />
@@ -439,8 +441,7 @@ const styles = StyleSheet.create({
   iconCircle: { width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radius.pill, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', width: ICON_CIRCLE, height: ICON_CIRCLE, borderRadius: radius.pill, borderWidth: 2, backgroundColor: 'transparent' },
   badge: { position: 'absolute', top: -2, right: 2, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
-  dot: { position: 'absolute', top: 2, right: 6, width: 6, height: 6, borderRadius: 3 },
-  unreadDot: { position: 'absolute', top: -1, right: 2, width: 10, height: 10, borderRadius: 5 }, // "new / unread" — an active bucket the user hasn't opened yet
+  unreadDot: { position: 'absolute', top: -1, right: 2, width: 10, height: 10, borderRadius: 5 }, // the dock's ONE green "new content" indicator (design.md unread-dot, 10px): an unread research bucket OR a ready Deep Dive
   caption: { marginTop: space.xs, textAlign: 'center' },
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'flex-end', zIndex: 20 },
   // paddingTop trimmed — the grab handle carries the top breathing room; the card hugs its content up to 82% height.

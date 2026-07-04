@@ -402,6 +402,16 @@ export async function buildPgStores(db: PgLike): Promise<PgStores> {
     async deleteByItem(catalogItemId, userId) {
       await db.query(`DELETE FROM podcast_assets WHERE catalog_item_id = $1 AND user_id = $2`, [catalogItemId, userId])
     },
+    // Distinct items this user has episodes for — read BEFORE purgeUser deletes the rows so the cascade can purge
+    // each item's GCS objects (audio + state). The non-swallowing composing upsert guarantees a row exists for every
+    // render, so this index is complete.
+    async listItemIdsByUser(userId) {
+      const res = await db.query<{ catalog_item_id: string }>(
+        `SELECT DISTINCT catalog_item_id FROM podcast_assets WHERE user_id = $1`,
+        [userId],
+      )
+      return res.rows.map((r) => r.catalog_item_id)
+    },
   }
 
   const messages: MessageStore = {

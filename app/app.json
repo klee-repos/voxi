@@ -25,6 +25,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Voxi uses the camera to photograph objects for the Guide.",
         "NSMicrophoneUsageDescription": "Voxi uses the microphone for voice chat with the Guide.",
+        "NSLocationWhenInUseUsageDescription": "Voxi's real-time voice chat uses a networking component that may check your location to keep the voice connection reliable. Voxi does not track or store your location.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
@@ -32,7 +33,7 @@
         "NSAllowsLocalNetworking": true
       },
       "bitcode": false,
-      "buildNumber": "4"
+      "buildNumber": "7"
     },
     "android": {
       "package": "com.kvnlee.voxi",

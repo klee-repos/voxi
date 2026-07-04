@@ -22,6 +22,7 @@ import { assertSigningKeyConfigured } from '../../../services/voxi-api/src/signi
 import { CascadeEveClient } from '../../../services/voxi-api/src/cascade-eve-client'
 import { LiveNarrationTts } from '../../../services/voxi-api/src/live-tts'
 import { createPodcastBridge } from '../../../services/voxi-api/src/podcast-client'
+import { createPodcastAudioDeleter } from '../../../services/voxi-api/src/gcs'
 import { createCloudSqlStores } from '../../../services/voxi-api/src/cloudsql-stores'
 import { createPgStores } from '../../../services/voxi-api/src/pg-stores'
 import { warmGcpToken } from '../../../services/eve-agent/agent/lib/gcp-vision'
@@ -99,6 +100,13 @@ const podcastBridge =
     : undefined
 if (!podcastBridge) logger.warn('no_podcast_worker', { effect: 'Deep Dive render disabled (missing PODCAST_WORKER_URL/SECRET)' })
 
+// Deep Dive audio + render state live in GCS (so the worker scales to zero). The deleter purges an item's objects
+// from both the public audio bucket and the private state bucket, wired into the per-item delete AND the account
+// purge below — the SQL row delete alone would orphan the GCS objects (deletion-completeness / P6).
+const audioBucket = process.env.GCS_AUDIO_BUCKET ?? 'voxi-podcast-audio'
+const stateBucket = process.env.GCS_STATE_BUCKET ?? 'voxi-podcast-state'
+const deletePodcastAudio = createPodcastAudioDeleter({ audioBucket, stateBucket })
+
 const app = createApp({
   verifier: clerkVerifier(verifyToken as never),
   store: durable.store,
@@ -106,9 +114,13 @@ const app = createApp({
   deletion: {
     // Account deletion cascades across the durable stores AND the cascade's per-session photo/narration caches.
     async cascade(userId: string) {
+      // Purge the user's rendered podcast GCS objects BEFORE the row cascade deletes the podcast_assets index that
+      // finds them (else the objects orphan, un-purgeable). Best-effort: a GCS failure must not block the SQL purge.
+      const items = (await (durable.podcasts.listItemIdsByUser?.(userId).catch(() => [] as string[]))) ?? []
+      for (const item of items) await deletePodcastAudio(item).catch((e) => logger.warn('podcast_audio_purge_failed', { item, err: String(e) }))
       const evePhotos = eve.purgeUser(userId)
       const counts = await durable.purgeUser(userId)
-      return { deleted: [`eve-photos:${evePhotos}`, ...Object.entries(counts).map(([k, v]) => `${k}:${v}`)] }
+      return { deleted: [`eve-photos:${evePhotos}`, `podcast-audio-items:${items.length}`, ...Object.entries(counts).map(([k, v]) => `${k}:${v}`)] }
     },
   },
   bucket: process.env.GCS_PHOTO_BUCKET ?? 'voxi-photos',
@@ -124,6 +136,7 @@ const app = createApp({
   // Deep Dive render: enqueue to the worker (once per fresh gate) + proxy its honest status on poll.
   podcastEnqueue: podcastBridge?.enqueue,
   podcastStatus: podcastBridge?.status,
+  deletePodcastAudio,
   // v1 has no paywall: full access so the TestFlight loop is never entitlement-blocked. Real StoreKit 2
   // verification (appstore.ts) lands with billing; until then everyone is a voyager.
   planFor: async () => 'voyager',
