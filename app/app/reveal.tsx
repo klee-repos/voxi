@@ -586,6 +586,11 @@ function RevealBody(): React.ReactElement {
   const openAudio = openBucket ? (openBucket as AudioBucket) : null
   const onViewfinder = currentIndex <= 0 // page 0 = the live viewfinder; ≥1 = a catalogued item
   const onFeed = Platform.OS !== 'web' // a live camera feed (native) vs the cream canvas (web/harness)
+  // The floating dock hides behind a modal sheet (the ⋯ MORE menu) or an open morph card, and while the pager
+  // is mid-swipe — ONE predicate so the wrapper opacity + pointerEvents can't drift apart. Hiding on `menuOpen`
+  // is the fix for the ⋯ sheet's Regenerate/Delete rows colliding with the dock (both are bottom-anchored, and the
+  // sheet is translucent glass — without this the dock reads through it). Mirrors the existing openBucket hide.
+  const chromeHidden = !!(openBucket || menuOpen || transitioning)
 
   return (
     <Screen id={ids.reveal.card} padded={false} edges={FULL_BLEED_EDGES} style={{ minHeight: winH }}>
@@ -642,7 +647,7 @@ function RevealBody(): React.ReactElement {
       {/* The floating dock CARD — shown on an item page once the band settles (never on the viewfinder). During
           loading it's the Orb pill overlay above. STATIC glass card; only the content fades in on settle. */}
       {band && !onViewfinder ? (
-        <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, openBucket || transitioning ? styles.dockHidden : null]} pointerEvents={openBucket || transitioning ? 'none' : 'box-none'}>
+        <View style={[styles.floatWrap, { paddingBottom: space.lg + insets.bottom }, chromeHidden ? styles.dockHidden : null]} pointerEvents={chromeHidden ? 'none' : 'box-none'}>
           <View style={[styles.floatCard, floatShadow]}>
             <GlassFill radiusStyle={{ borderRadius: radius.xl }} />
             <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
