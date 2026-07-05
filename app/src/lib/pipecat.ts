@@ -1,14 +1,16 @@
 /**
- * Realtime voice session seam (PLAN §6.3 / D4 — Pipecat over SmallWebRTC).
+ * Realtime voice session seam (LiveKit edition).
  *
- * Voxi is always 1 user ↔ 1 bot, so the transport is peer-to-peer SmallWebRTC (no SFU). The client connects
- * to a BFF-minted, per-session scoped endpoint; the persona, item record, and prior transcript are loaded by
- * the sidecar on connect. Mic model = push-to-hold / tap-to-toggle by default (protects minute caps; clear
- * privacy indicator) — VAD/barge-in is a paid-tier flag, not the default.
+ * The voice layer runs on LiveKit: the app's @livekit/react-native Room connects to a BFF-minted per-session
+ * token (POST /v1/voice/session → { url, token }); LiveKit dispatches the voice-bot (services/voice-bot, a
+ * livekit-agents Worker) into the room; the cascade (Deepgram→OpenAI→ElevenLabs) runs server-side. LiveKit owns
+ * the WebRTC media plane + ICE/TURN — the pipecat SmallWebRTC transport (pipecat-ai #2755 + a deeper
+ * MediaStreamError) is retired. The mic is ALWAYS on (VAD detects speech server-side; the #2755 disabled-mic
+ * lesson carries over).
  *
  * This module is a SEAM, not the wire implementation: a `VoiceSession` interface + a `createVoiceSession`
- * factory that returns a deterministic in-process stub by default (so the conversation screen renders and the
- * E2E push-to-talk flow runs without react-native-webrtc). The real Pipecat transport is a drop-in factory.
+ * factory that returns a deterministic in-process stub by default (so the conversation screen renders + the
+ * E2E watchdog/keyboard tests run without @livekit/react-native). The real LiveKit transport is a drop-in.
  */
 
 export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'uncertain'
@@ -17,14 +19,13 @@ export interface TranscriptTurn {
   id: string
   role: 'user' | 'voxi'
   text: string
-  /** finalized vs in-flight partial (barge-in turns are committed-as-interrupted or discarded). */
+  /** finalized vs in-flight partial. */
   final: boolean
 }
 
 export interface VoiceSessionEvents {
   onOrbState?: (state: OrbState) => void
   onTranscript?: (turn: TranscriptTurn) => void
-  /** minute-cap signals (soft warning at 80/90%; hard disconnect at the cap with an in-persona message). */
   onMinutesWarning?: (pct: number) => void
   onMinutesExhausted?: () => void
   onConnected?: () => void
@@ -35,7 +36,7 @@ export interface VoiceSessionEvents {
 export interface VoiceSession {
   connect(): Promise<void>
   disconnect(): Promise<void>
-  /** push-to-talk: begin/end capturing the user's turn. */
+  /** orb-state hints only — the mic is always on, the server's VAD detects speech. */
   startTalking(): void
   stopTalking(): void
   /** keyboard fallback path (still metered server-side). */
@@ -44,54 +45,29 @@ export interface VoiceSession {
 }
 
 export interface VoiceConfig {
-  /** BFF-minted per-session scoped connect URL (carries the userId↔sessionId ACL). */
-  connectUrl: string
+  /** LiveKit server URL (ws/wss) — the BFF returns it from POST /v1/voice/session. */
+  url: string
+  /** LiveKit JWT — the BFF-minted per-session token (carries the userId↔threadId↔connectId capability). */
+  token: string
   threadId: string
-  /** push-to-talk (default) vs continuous barge-in (paid). */
+  /** push-to-talk (orb hint) vs continuous barge-in. Mic is always on either way. */
   mode?: 'pushToTalk' | 'barge'
   events?: VoiceSessionEvents
 }
 
-/** Factory seam — swapped for the real SmallWebRTC transport when react-native-webrtc is available. */
+/** Factory seam — the real impl is the LiveKit Room; the stub is the default (web/E2E). */
 export type VoiceSessionFactory = (config: VoiceConfig) => VoiceSession
 
 /**
- * ICE servers for the voice peer connection (B1 root cause: STUN-only can't traverse a UDP-blocked network —
- * the device's gathered candidates were all `tcp tcptype passive`, so ICE went `failed` and the RTVI data
- * channel never opened). STUN is always present; env-driven TURN relays are added when creds are set so a relay
- * path exists on restrictive NAT. `EXPO_PUBLIC_TURN_URL` is comma-separated (≥2 relays for redundancy); static
- * creds for v1. Default-off (unset → STUN-only = the prior behavior, no regression). Pure + dep-injected so it
- * unit-tests without touching process.env globally. Mirrored server-side in voice_server.py.
- */
-export function voxiIceServers(env: {
-  TURN_URL?: string
-  TURN_USER?: string
-  TURN_PASS?: string
-}): ReadonlyArray<{ urls: string } | { urls: string; username: string; credential: string }> {
-  const servers: Array<{ urls: string } | { urls: string; username: string; credential: string }> = [
-    { urls: 'stun:stun.l.google.com:19302' },
-  ]
-  const turnUrls = (env.TURN_URL ?? '').split(',').map((u) => u.trim()).filter(Boolean)
-  const user = env.TURN_USER ?? ''
-  const pwd = env.TURN_PASS ?? ''
-  if (turnUrls.length && user && pwd) {
-    for (const u of turnUrls) servers.push({ urls: u, username: user, credential: pwd })
-  }
-  return servers
-}
-
-/**
- * Deterministic stub session. Renders the full conversation UX (orb states, transcript turns, mic indicator)
- * without a media stack — used in the E2E web harness and as the default until the native build wires Pipecat.
+ * Deterministic stub session. Renders the full conversation UX (orb states, transcript turns) without a media
+ * stack — used in the E2E web harness + as the default until the native build wires LiveKit. Test seam
+ * `__voxiHangVoiceConnect`: connect() never fires onConnected (simulates a hung media plane) so the F3 watchdog →
+ * keyboard fallback + its override guard are provable in the web harness.
  */
 export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
   const ev = config.events ?? {}
   let connected = false
   let talking = false
-  // Test seam: simulate Bug B (real WebRTC peer comes up but the RTVI data channel / audio track never delivers,
-  // so onConnected never fires). When set, connect() hangs (no onConnected) and disconnect() fires
-  // 'transport_closed' (the REAL transport's reason, pipecat.ts:185) so the F3 watchdog→keyboard fallback + its
-  // override guard are provable in the web harness. Production default: off (the stub fires onConnected immediately).
   const hang = (globalThis as { __voxiHangVoiceConnect?: boolean }).__voxiHangVoiceConnect === true
 
   return {
@@ -99,7 +75,7 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
       return connected
     },
     async connect() {
-      if (hang) return // Bug B: never fires onConnected → the 20s watchdog arms + falls back to keyboard (F3)
+      if (hang) return // simulate a hung media plane → the 20s watchdog arms + falls back to keyboard (F3)
       connected = true
       ev.onConnected?.()
       ev.onOrbState?.('idle')
@@ -108,10 +84,8 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
       connected = false
       ev.onOrbState?.('idle')
       if (hang) {
-        // Bug B: the REAL transport fires onDisconnected ASYNC (after the WebRTC peer tears down), in a later tick —
-        // AFTER the watchdog's synchronous setConn('connected'). Without the override guard that late callback would
-        // re-error the screen in a SEPARATE React batch. Fire it in a microtask so the guard is actually exercised
-        // (a synchronous fire would batch with + be overwritten by the watchdog's setConn, hiding a guard regression).
+        // The watchdog's disconnect fires onDisconnected ASYNC (a later tick); a microtask fire exercises the
+        // override guard in a SEPARATE React batch (a sync fire would batch with + be hidden by the watchdog).
         queueMicrotask(() => ev.onDisconnected?.('transport_closed'))
       } else {
         ev.onDisconnected?.('client_closed')
@@ -126,7 +100,6 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
       if (!connected || !talking) return
       talking = false
       ev.onOrbState?.('thinking')
-      // simulate a finalized user turn → Voxi reply (deterministic, in-persona register)
       const uid = `u_${Date.now().toString(36)}`
       ev.onTranscript?.({ id: uid, role: 'user', text: '(spoken)', final: true })
       ev.onOrbState?.('speaking')
@@ -154,150 +127,183 @@ export function createStubVoiceSession(config: VoiceConfig): VoiceSession {
   }
 }
 
-/**
- * A MediaManager factory (mic capture / native WebRTC media). The RN SmallWebRTC transport needs a concrete
- * MediaManager (e.g. DailyMediaManager or a react-native-webrtc-backed one) — a native-only peer that cannot
- * load in the web/E2E bundle. The native build injects it via `setVoiceMediaManagerFactory`; on web it stays
- * null and `createVoiceSession` returns the stub.
- */
-type MediaManagerFactory = () => unknown
-let mediaManagerFactory: MediaManagerFactory | null = null
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports */
 
-/** Native entrypoint calls this once at startup to enable the REAL transport (e.g. from a native init file). */
-export function setVoiceMediaManagerFactory(factory: MediaManagerFactory | null): void {
-  mediaManagerFactory = factory
-}
+// LiveKit's registerGlobals() must run once before any Room. Idempotent — calling per session is safe.
+let livekitGlobalsRegistered = false
 
 /**
- * The REAL Pipecat SmallWebRTC session: a PipecatClient over RNSmallWebRTCTransport, pointed at the
- * BFF-minted per-session connect URL (config.connectUrl, from EXPO_PUBLIC_PIPECAT_CONNECT_URL /v1/voice).
- * Maps the RTVI event stream to our VoiceSession callbacks (orb state, transcript turns, mic control).
+ * The REAL LiveKit voice session: a @livekit/react-native Room connected to the BFF-minted url+token. LiveKit
+ * owns the WebRTC media plane + ICE/TURN; the bot's TTS audio plays automatically (subscribed track); the user's
+ * mic is always on (VAD detects speech server-side). Transcript segments arrive via RoomEvent.TranscriptionReceived.
  *
- * Requires: a configured connectUrl AND a native MediaManager (mic + react-native-webrtc). Returns null when
- * either is missing so the caller can fall back to the stub — the web/E2E path never needs the media stack.
+ * Requires: url + token AND @livekit/react-native (native-only — absent on web/E2E). Returns null otherwise so
+ * the caller falls back to the deterministic stub (the web/E2E path never needs the media stack).
  */
 export function createRealVoiceSession(config: VoiceConfig): VoiceSession | null {
-  if (!config.connectUrl || !mediaManagerFactory) return null
-  let PipecatClient: new (opts: Record<string, unknown>) => RealClient
-  let RNSmallWebRTCTransport: new (opts: Record<string, unknown>) => unknown
-  let RTVIEventLike: { UserTranscript: string; BotTranscript: string } | null = null
+  if (!config.url || !config.token) return null
+  // The LiveKit native module must be LINKED into the running binary — true only on a dev/prod build made
+  // AFTER the @livekit/react-native deps were added (pods installed), NOT on web/E2E and NOT on an un-rebuilt
+  // dev client whose hot-reloaded JS has this code but whose native binary predates the dep. Probe the SAME
+  // native module @livekit/react-native guards on (NativeModules.LivekitReactNativeModule), but NON-throwingly:
+  // touching the library when it's absent hits its Proxy that throws a LINKING_ERROR the RN dev loader LOGS on
+  // every call (the "lots of errors" when opening Ask on a stale build). A falsy probe → degrade to the
+  // deterministic stub (→ watchdog → keyboard /ask), silently. Rebuild the app (expo run:ios) to enable voice.
+  let RN: any
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const clientMod = require('@pipecat-ai/client-js')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const transportMod = require('@pipecat-ai/react-native-small-webrtc-transport')
-    PipecatClient = clientMod.PipecatClient
-    RNSmallWebRTCTransport = transportMod.RNSmallWebRTCTransport
-    RTVIEventLike = clientMod.RTVIEvent ?? null
+    RN = require('react-native')
   } catch {
-    return null // native modules absent (web/E2E bundle) — caller uses the stub
+    return null // 'react-native' unavailable (shouldn't happen on device) — be safe, use the stub
   }
-  if (!PipecatClient || !RNSmallWebRTCTransport) return null
+  // New Architecture (newArchEnabled: true / bridgeless): a legacy RCT_EXTERN_MODULE like LivekitReactNativeModule
+  // may resolve via TurboModuleRegistry rather than the legacy NativeModules map. Probe BOTH so a New-Arch build
+  // isn't misclassified as "native absent" and silently downgraded to the stub.
+  const nmLK = RN?.NativeModules?.LivekitReactNativeModule
+  let tmLK: unknown = null
+  try {
+    tmLK = RN?.TurboModuleRegistry?.get?.('LivekitReactNativeModule')
+  } catch {
+    /* not a turbo module — fall back to the NativeModules result */
+  }
+  const bridgeless = (globalThis as any).__turboModuleProxy != null || (globalThis as any).RN$Bridgeless === true
+  console.log('[voice] LiveKit native probe → NativeModules:', !!nmLK, '· TurboModule:', !!tmLK, '· bridgeless:', bridgeless)
+  if (!nmLK && !tmLK) {
+    console.log('[voice] LiveKit native module ABSENT → using deterministic stub (voice will NOT connect on this build)')
+    return null
+  }
+  let Room: any, RoomEvent: any, registerGlobals: any, AudioSession: any
+  try {
+    const lk = require('@livekit/react-native')
+    Room = lk.Room
+    RoomEvent = lk.RoomEvent
+    registerGlobals = lk.registerGlobals
+    AudioSession = lk.AudioSession // iOS/Android AVAudioSession mgmt — REQUIRED or voice connects with no audio
+  } catch {
+    return null // @livekit/react-native absent (web/E2E bundle) — caller uses the stub
+  }
+  if (!Room || !RoomEvent || !registerGlobals) return null
 
   const ev = config.events ?? {}
-  const barge = config.mode === 'barge'
   let connected = false
-  let idCounter = 0
-  const nextId = (p: string) => `${p}_${(idCounter++).toString(36)}_${Date.now().toString(36)}`
+  const room: any = new Room()
 
-  // B1: STUN + env-driven TURN. The EXPO_PUBLIC_* reads MUST appear literally here so Expo's babel inlines them
-  // into the bundle (a generic process.env index wouldn't). Default-off (unset → STUN-only). Logged so the
-  // device-side config is OBSERVABLE in the Metro pane — `hasTurn:false` means the bundle didn't pick up the env
-  // (reload Metro after editing app/.env.local) and ICE will fail on UDP-blocked networks.
-  const iceServers = voxiIceServers({
-    TURN_URL: process.env.EXPO_PUBLIC_TURN_URL,
-    TURN_USER: process.env.EXPO_PUBLIC_TURN_USER,
-    TURN_PASS: process.env.EXPO_PUBLIC_TURN_PASS,
-  })
-  const hasTurn = iceServers.some((s): s is { urls: string; username: string; credential: string } => 'username' in s)
-  console.log(`[voice] iceServers: ${iceServers.length} (${hasTurn ? 'STUN+TURN' : 'STUN-only'})`)
-  const transport = new RNSmallWebRTCTransport({
-    // BFF-minted per-session SmallWebRTC /offer signalling endpoint (see voice-routes.ts).
-    connectionUrl: config.connectUrl,
-    waitForICEGathering: true,
-    mediaManager: mediaManagerFactory(),
-    iceServers: iceServers as unknown,
-  })
+  if (!livekitGlobalsRegistered) {
+    try {
+      registerGlobals()
+      livekitGlobalsRegistered = true
+    } catch {
+      /* idempotent guard: a second call can throw; swallow + the prior registration holds */
+    }
+  }
 
-  const client: RealClient = new PipecatClient({
-    transport,
-    enableMic: barge, // push-to-talk keeps the mic gated until startTalking; barge mode opens it continuously
-    enableCam: false,
-    callbacks: {
-      onConnected: () => {
-        console.log('[voice] connected: data channel open')
-        connected = true
-        ev.onConnected?.()
-        ev.onOrbState?.('idle')
-      },
-      onDisconnected: () => {
-        console.log('[voice] disconnected (transport_closed)')
-        connected = false
-        ev.onOrbState?.('idle')
-        ev.onDisconnected?.('transport_closed')
-      },
-      onUserStartedSpeaking: () => ev.onOrbState?.('listening'),
-      onBotStartedSpeaking: () => ev.onOrbState?.('speaking'),
-      onBotStoppedSpeaking: () => ev.onOrbState?.('idle'),
-      onUserTranscript: (data: { text: string; final?: boolean }) => {
-        ev.onTranscript?.({ id: nextId('u'), role: 'user', text: data.text, final: data.final ?? true })
-        if (data.final ?? true) ev.onOrbState?.('thinking')
-      },
-      onBotTranscript: (data: { text: string }) => {
-        ev.onTranscript?.({ id: nextId('v'), role: 'voxi', text: data.text, final: true })
-      },
-      onError: (msg: unknown) => ev.onError?.(new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))),
+  // Map LiveKit room events → VoiceSession callbacks.
+  room.on(RoomEvent.Connected, () => {
+    connected = true
+    console.log('[voice] connected: LiveKit room joined')
+    ev.onConnected?.()
+    ev.onOrbState?.('idle')
+  })
+  room.on(RoomEvent.Disconnected, (reason: unknown) => {
+    connected = false
+    console.log('[voice] disconnected', String(reason ?? ''))
+    ev.onOrbState?.('idle')
+    ev.onDisconnected?.('transport_closed')
+  })
+  // The agent (voice-bot) joining = the bot is live in the room. LiveKit fires this for the remote participant.
+  room.on(RoomEvent.ParticipantConnected, (p: any) => {
+    if (p?.identity === room.localParticipant?.identity) return
+    console.log('[voice] bot joined:', p?.identity ?? 'agent')
+    // The bot's presence means the cascade is up; mark connected if the room-level Connected already did.
+    if (!connected) {
+      connected = true
+      ev.onConnected?.()
+    }
+  })
+  // Transcript: LiveKit Agents publishes conversation transcript via the transcription protocol. Map final
+  // segments to our TranscriptTurn (user segments = local; everything else = the Guide).
+  room.on(
+    RoomEvent.TranscriptionReceived,
+    (segments: any[], participant: any) => {
+      const isLocal = participant?.identity === room.localParticipant?.identity
+      for (const seg of segments ?? []) {
+        const text = (seg?.text ?? '').trim()
+        if (!text) continue
+        ev.onTranscript?.({
+          id: seg.id ?? `${isLocal ? 'u' : 'v'}_${Date.now().toString(36)}`,
+          role: isLocal ? 'user' : 'voxi',
+          text,
+          final: seg.final ?? true,
+        })
+        if (seg.final !== false) ev.onOrbState?.(isLocal ? 'thinking' : 'speaking')
+      }
     },
-  })
-  void RTVIEventLike // event names available for finer-grained wiring if needed
+  )
 
   return {
     get connected() {
       return connected
     },
     async connect() {
-      console.log('[voice] connect() — posting /offer to', config.connectUrl)
-      await client.connect({ connectionUrl: config.connectUrl })
+      console.log('[voice] connect() — joining LiveKit room for', config.threadId)
+      // iOS/Android: configure the native audio session (AVAudioSession playAndRecord) BEFORE connecting, or the
+      // mic won't capture + the bot's TTS won't play. Best-effort — never block the join on an audio-session hiccup.
+      try {
+        await AudioSession?.startAudioSession?.()
+      } catch {
+        /* audio-session config failed — proceed; the join can still succeed (audio may be degraded) */
+      }
+      // LiveKit handles ICE/TURN server-side. AdaptiveStreaming + the default audio publish options are fine.
+      await room.connect(config.url, config.token, {
+        // The caller publishes mic + subscribes to the bot's audio. LiveKit negotiates the rest.
+        autoSubscribe: true,
+      })
+      // ALWAYS-ON mic (the #2755 lesson): VAD on the bot detects speech. setMicrophoneEnabled(true) publishes
+      // the mic track; the bot's AgentSession subscribes to it.
+      await room.localParticipant.setMicrophoneEnabled(true)
+      // After the mic is up, the bot (dispatched by the token's agent grant) joins + the cascade runs.
     },
     async disconnect() {
-      await client.disconnect()
+      await room.disconnect(true)
+      // Release the native audio session so the AVAudioSession category reverts (else reveal/podcast playback
+      // can inherit the playAndRecord category → quieter/earpiece routing). Best-effort.
+      try {
+        await AudioSession?.stopAudioSession?.()
+      } catch {
+        /* ignore — the room is already disconnected */
+      }
     },
     startTalking() {
       if (!connected) return
-      client.enableMic(true)
+      // Orb hint only — the mic is always on. (No enableMic toggle: LiveKit's mic stays published.)
       ev.onOrbState?.('listening')
     },
     stopTalking() {
       if (!connected) return
-      if (!barge) client.enableMic(false) // push-to-hold: close the mic to end the turn
       ev.onOrbState?.('thinking')
     },
     async sendText(text: string) {
       if (!connected) return
-      ev.onTranscript?.({ id: nextId('u'), role: 'user', text, final: true })
+      // Publish the text as a data message (the bot can be extended to accept text turns; the keyboard path is
+      // primarily the BFF /ask route, which is independent). Optimistic local echo:
+      ev.onTranscript?.({ id: `u_${Date.now().toString(36)}`, role: 'user', text, final: true })
       ev.onOrbState?.('thinking')
-      await client.sendText(text)
+      try {
+        await room.localParticipant.publishData(new TextEncoder().encode(text), { reliable: true })
+      } catch {
+        /* best-effort: the keyboard path (/ask) is the primary text route */
+      }
     },
   }
 }
 
-/** Minimal shape of the PipecatClient we rely on (typed loosely to avoid a hard dep in the web bundle). */
-interface RealClient {
-  connect(params?: unknown): Promise<unknown>
-  disconnect(): Promise<void>
-  enableMic(enable: boolean): void
-  sendText(content: string, options?: unknown): Promise<void>
-}
-
 /**
- * Returns the REAL Pipecat SmallWebRTC session when a connect URL + native MediaManager are configured, else
- * the deterministic stub. The stub is load-bearing for the web/E2E harness (no react-native-webrtc there).
+ * Returns the REAL LiveKit session when url+token + @livekit/react-native are available, else the deterministic
+ * stub. The stub is load-bearing for the web/E2E harness (no native WebRTC there).
  */
 export const createVoiceSession: VoiceSessionFactory = (config) => {
-  // Fail-safe: the real transport touches native media (MediaManager construction, react-native-webrtc,
-  // SmallWebRTC peer setup) which can throw for reasons we can't fully anticipate on device (a bad injected
-  // MediaManager, a transport internal, a mic-permission path). Voice must NEVER crash the conversation
-  // screen — any throw degrades to the deterministic stub so the UX (orb, transcript, push-to-talk) still runs.
+  // Fail-safe: the real transport touches native media (LiveKit Room, react-native-webrtc) which can throw for
+  // reasons we can't fully anticipate on device. Voice must NEVER crash the conversation screen — any throw
+  // degrades to the deterministic stub so the UX (orb, transcript) still renders.
   try {
     const real = createRealVoiceSession(config)
     if (real) return real

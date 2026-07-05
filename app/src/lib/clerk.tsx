@@ -58,6 +58,12 @@ export interface AuthState {
   isLoaded: boolean
   isSignedIn: boolean
   userId: string | null
+  /** The user's first name for the "Welcome, {firstName}" greeting (Clerk `user.firstName`). `null` while
+   *  loading, signed-out, or when the account has none set — callers fall back to `email`, then a neutral word. */
+  firstName: string | null
+  /** The user's primary email address (Clerk `user.primaryEmailAddress.emailAddress`). `null` while loading or
+   *  signed-out. In the FakeAuth fallback this is the tracked sign-in email. */
+  email: string | null
   /** Bearer for the ApiClient. Clerk's session JWT in prod; `test:<user>` in the fallback. */
   getToken: () => Promise<string | null>
   /**
@@ -121,6 +127,9 @@ function FakeAuthProvider({ children }: { children: React.ReactNode }): React.Re
       isLoaded: true,
       isSignedIn: email !== null,
       userId: email ? `test:${email.split('@')[0]}` : null,
+      // FakeAuth has no name on file; the greeting falls back to `email`, then a neutral word.
+      firstName: null,
+      email,
       async getToken() {
         return email ? `test:${email.split('@')[0]}` : null
       },
@@ -174,10 +183,13 @@ function ClerkAuthAdapter({
   clerk: typeof import('@clerk/clerk-expo')
   children: React.ReactNode
 }): React.ReactElement {
-  const { useAuth: useClerkAuth, useSignIn, useSignUp } = clerk
+  const { useAuth: useClerkAuth, useSignIn, useSignUp, useUser } = clerk
   const auth = useClerkAuth()
   const signIn = useSignIn()
   const signUp = useSignUp()
+  // `useUser()` returns `{ user: null, isLoaded: false }` both while loading AND when signed-out — the optional
+  // chaining + `?? null` covers every state so the greeting never renders `undefined`.
+  const user = useUser()
   // Which flow the pending email-OTP belongs to, so verifyCode attempts the right verification.
   const flow = React.useRef<'signIn' | 'signUp'>('signIn')
 
@@ -208,6 +220,9 @@ function ClerkAuthAdapter({
       isLoaded: auth.isLoaded,
       isSignedIn: !!auth.isSignedIn,
       userId: auth.userId ?? null,
+      // `primaryEmailAddress` is the primary email (verified-or-not) — fine for a greeting.
+      firstName: user.user?.firstName ?? null,
+      email: user.user?.primaryEmailAddress?.emailAddress ?? null,
       getToken: () => auth.getToken(),
       async startSignUp(email: string) {
         if (!signUp.isLoaded) return
@@ -257,7 +272,7 @@ function ClerkAuthAdapter({
         await auth.signOut()
       },
     }
-  }, [auth, signIn, signUp])
+  }, [auth, signIn, signUp, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

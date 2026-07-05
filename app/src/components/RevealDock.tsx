@@ -114,6 +114,7 @@ function BucketIcon({
   reduceMotion,
   surface,
   onPress,
+  iconRef,
 }: {
   dkey: DockKey
   status: BucketStatus
@@ -123,6 +124,8 @@ function BucketIcon({
   ready?: boolean
   /** Deep Dive only: a compose is in flight → show the spinning "generating" ring (reuses the bucket-loading cue). */
   generating?: boolean
+  /** Optional ref to the icon's Pressable — the Details icon exposes this so the LearningsBar fly can measure it. */
+  iconRef?: React.RefObject<View | null>
   pulse: Animated.Value
   reduceMotion: boolean
   surface: Surface
@@ -147,6 +150,7 @@ function BucketIcon({
 
   return (
     <Pressable
+      ref={iconRef}
       {...tidWith(TEST_ID[dkey], { state: iconState, unread: unread ? 'yes' : 'no' }, a11yLabel(dkey, status, ready, generating, unread))}
       accessibilityRole="button"
       accessibilityState={{ busy: status === 'loading' || !!generating, disabled: false }}
@@ -195,6 +199,7 @@ export function BucketDock({
   statuses,
   read,
   deepDiveState = 'active',
+  detailsIconRef,
   reduceMotion,
   surface,
   onOpen,
@@ -205,6 +210,8 @@ export function BucketDock({
   /** The Deep Dive icon's state: `generating` (a compose is in flight → spinning ring), `ready` (a durable episode
    *  exists → green dot), or `active` (tap to generate). Derived from the deepDiveStore (cost transparency). */
   deepDiveState?: 'active' | 'generating' | 'ready'
+  /** ref to the Details icon — exposed so the LearningsBar's fly-out can measure it (INITIAL-LEARNINGS-PLAN F3). */
+  detailsIconRef?: React.RefObject<View | null>
   reduceMotion: boolean
   surface: Surface
   onOpen: (k: DockKey) => void
@@ -239,7 +246,7 @@ export function BucketDock({
   return (
     <View {...tid(ids.reveal.buckets)} style={styles.dockRow}>
       <BucketIcon dkey="deepdive" status="active" ready={deepDiveState === 'ready'} generating={deepDiveState === 'generating'} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('deepdive')} />
-      <BucketIcon dkey="details" status={detailsStatus} unread={detailsUnread} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('details')} />
+      <BucketIcon dkey="details" status={detailsStatus} unread={detailsUnread} pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('details')} iconRef={detailsIconRef} />
       <BucketIcon dkey="conversation" status="active" pulse={pulse} reduceMotion={reduceMotion} surface={surface} onPress={() => onOpen('conversation')} />
     </View>
   )

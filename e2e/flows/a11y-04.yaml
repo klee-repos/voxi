@@ -71,6 +71,12 @@ env:
       voxiTestSeed: "a11y-04"
       uiContentSizeCategory: "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
 - tapOn:
+    id: "nav.menuButton"
+- extendedWaitUntil:
+    visible:
+      id: "nav.settingsTab"
+    timeout: 15000
+- tapOn:
     id: "nav.settingsTab"
 - assertVisible:
     id: "settings.screen"

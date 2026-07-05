@@ -80,14 +80,14 @@ if (!speech) logger.warn('no ELEVENLABS_API_KEY — POST /v1/threads/:id/speech 
 const verifier = clerkVerifier(verifyToken as never)
 
 // "Ask Voxi" realtime voice: POST /v1/voice/session gates a voiceMin minute + mints a per-session connect URL
-// pointing the app's Pipecat SmallWebRTC client at the voice media server (services/voice-bot/voice_server.py).
+// pointing the app's @livekit/react-native client at the LiveKit server (the voice-bot is a livekit-agents
+// Worker). LiveKit URL/key/secret come from env (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET).
 const voice = createVoiceRoutes({
   verifier,
   store: local.store,
   sessionOwner: local.sessionOwner,
   threads: durable.threads, // durable owner backstop: without it a legit owner's voice session 404s after a restart
   reveals: durable.reveals, // the voice-bot fetches the grounded item context (F5) per minted session
-  voiceServerBaseUrl: process.env.VOICE_SERVER_BASE_URL ?? 'http://192.168.1.193:7071',
 })
 
 const app = createApp({

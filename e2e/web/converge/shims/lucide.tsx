@@ -25,6 +25,7 @@ export const Library = Stub
 export const History = Stub
 export const X = Stub
 export const ChevronLeft = Stub
+export const ChevronRight = Stub // drawer greeting → settings affordance
 export const ArrowLeft = Stub
 export const Play = Stub
 export const Pause = Stub

@@ -33,8 +33,9 @@ if [[ "${1:-}" == "down" || "${1:-}" == "stop" ]]; then
   echo "✓ freed ports ${PORTS[*]}"
   if command -v docker >/dev/null 2>&1; then
     "${OBS_COMPOSE[@]}" down >/dev/null 2>&1 && echo "✓ stopped observability stack" || echo "  (observability stack was not running)"
-    docker rm -f voxi-coturn >/dev/null 2>&1 && echo "✓ stopped coturn TURN relay" || true
+    docker rm -f voxi-livekit >/dev/null 2>&1 && echo "✓ stopped LiveKit dev server" || true
   fi
+  pkill -f "livekit_bot.py" 2>/dev/null && echo "✓ stopped the voice bot" || true
   echo "✓ all down."
   exit 0
 fi
@@ -76,37 +77,52 @@ else
   echo
 fi
 
-# ---- coturn TURN relay (B1: voice CANNOT traverse a UDP-blocked device network without a relay; the
-# device's ICE gathers TCP-only candidates that aiortc can't pair with, so a TURN relay is mandatory for
-# voice off a permissive LAN). LAN-local coturn on the dev machine — both peers reach it outbound, so the
-# relayed media stays on-LAN (low latency). Static dev creds voxi/voxi; prod uses a real TURN provider.
-TURN_URLS="turn:$LAN_IP:3478?transport=tcp,turn:$LAN_IP:3478?transport=udp"
-write_turn_env() {  # <file> <prefix>  — idempotently write the managed TURN block (prefix "" = server, "EXPO_PUBLIC_" = client)
+# ---- LiveKit dev server (the voice media plane — replaces coturn + the pipecat SmallWebRTC voice_server).
+# LiveKit owns the WebRTC media + ICE/TURN; the voice-bot is a livekit-agents Worker (livekit_bot.py). Docker dev
+# server with a config that binds 0.0.0.0 (so the device reaches it on the LAN IP) + a ≥32-char dev secret.
+LIVEKIT_URL="ws://$LAN_IP:7880"
+LIVEKIT_API_KEY="devkey"
+LIVEKIT_API_SECRET="voxi-livekit-dev-secret-32chars-ok"  # ≥32 chars (LiveKit enforces); dev-only, not for prod
+write_livekit_env() {  # <file> <prefix> — idempotently write the managed LIVEKIT block
   local file="$1" prefix="$2" tmp; tmp="$(mktemp)"
   {
-    sed '/^# voxi-dev-turn-managed-start$/,/^# voxi-dev-turn-managed-end$/d' "$file" 2>/dev/null
-    printf '\n# voxi-dev-turn-managed-start (scripts/dev.sh — coturn on the dev LAN IP; B1 fix)\n%sTURN_URL=%s\n%sTURN_USER=voxi\n%sTURN_PASS=voxi\n# voxi-dev-turn-managed-end\n' "$prefix" "$TURN_URLS" "$prefix" "$prefix"
+    sed '/^# voxi-dev-livekit-managed-start$/,/^# voxi-dev-livekit-managed-end$/d' "$file" 2>/dev/null
+    printf '\n# voxi-dev-livekit-managed-start (scripts/dev.sh — LiveKit dev server on the LAN IP)\n%sLIVEKIT_URL=%s\n%sLIVEKIT_API_KEY=%s\n%sLIVEKIT_API_SECRET=%s\n# voxi-dev-livekit-managed-end\n' "$prefix" "$LIVEKIT_URL" "$prefix" "$LIVEKIT_API_KEY" "$prefix" "$LIVEKIT_API_SECRET"
   } > "$tmp" && mv "$tmp" "$file"
 }
-if command -v docker >/dev/null 2>&1; then
-  echo "── coturn TURN relay (LAN-local; dev creds voxi:voxi) ──"
-  docker rm -f voxi-coturn >/dev/null 2>&1
-  if docker run -d --name voxi-coturn --restart unless-stopped \
-      -p 3478:3478/udp -p 3478:3478/tcp -p 5349:5349/tcp -p 49160-49192:49160-49192/udp \
-      coturn/coturn:latest \
-      -n --listening-ip=0.0.0.0 --external-ip="$LAN_IP" --realm=voxi.dev \
-      --user=voxi:voxi --lt-cred-mech --no-cli --no-tls --no-dtls \
-      --min-port=49160 --max-port=49192 --fingerprint --log-file=stdout >/dev/null 2>&1; then
-    echo "   ✓ coturn up → $TURN_URLS"
-  else
-    echo "   ⚠ coturn didn't start (docker pull ok?) — voice will fail on UDP-blocked networks (B1)"
-  fi
-  # Keep the server + client TURN env in sync with THIS LAN IP (idempotent managed block).
-  write_turn_env "$REPO/.env.local" ""
-  write_turn_env "$REPO/app/.env.local" "EXPO_PUBLIC_"
-  echo "   ✓ TURN env written → .env.local (server TURN_*) + app/.env.local (client EXPO_PUBLIC_TURN_*)"
-  echo
+echo "── LiveKit dev server (Docker; dev creds devkey) ──"
+mkdir -p "$REPO/.voxi-data"
+cat > "$REPO/.voxi-data/livekit-dev.yaml" <<YAML
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  port_range_start: 7882
+  port_range_end: 7892
+  use_external_ip: true
+keys:
+  $LIVEKIT_API_KEY: $LIVEKIT_API_SECRET
+logging:
+  level: info
+YAML
+docker rm -f voxi-livekit >/dev/null 2>&1
+if docker run -d --name voxi-livekit --restart unless-stopped \
+    -p 7880:7880 -p 7881:7881 -p 7882-7892:7882-7892/udp \
+    -v "$REPO/.voxi-data/livekit-dev.yaml:/config.yaml" \
+    livekit/livekit-server --config /config.yaml --node-ip=127.0.0.1 >/dev/null 2>&1; then
+  sleep 2
+  echo "   ✓ LiveKit dev server up → $LIVEKIT_URL"
+else
+  echo "   ⚠ LiveKit dev server didn't start (Docker running?) — voice will 503 at the BFF mint"
 fi
+# The BFF mints LiveKit tokens with these (server-side env); the client gets url+token from the BFF response.
+write_livekit_env "$REPO/.env.local" ""
+echo "   ✓ LIVEKIT_URL/API_KEY/API_SECRET written → .env.local (BFF mints tokens with these)"
+# stop the old TURN relay (no longer used — LiveKit owns ICE/TURN).
+pkill -f "turnserver.*voxi.dev" 2>/dev/null || true
+docker rm -f voxi-coturn >/dev/null 2>&1 || true
+echo
 
 # ---- clean slate ----
 tmux kill-session -t "$SESSION" 2>/dev/null || true
@@ -114,9 +130,9 @@ free_ports
 sleep 1
 
 # ---- per-pane commands (each cd's to the right place + sets the env that service needs) ----
-BFF_CMD="cd '$REPO' && PATH=\"$BREW_BIN:\$PATH\" $OTEL_ENV VOICE_SERVER_BASE_URL=http://$LAN_IP:7071 bun services/voxi-api/src/server.ts"
+BFF_CMD="cd '$REPO' && set -a; source .env.local 2>/dev/null; set +a; PATH=\"$BREW_BIN:\$PATH\" $OTEL_ENV bun services/voxi-api/src/server.ts"
 WORKER_CMD="cd '$REPO' && PATH=\"$BREW_BIN:\$PATH\" $OTEL_ENV PODCAST_PUBLIC_BASE=http://$LAN_IP:8788 GCS_AUDIO_BUCKET=voxi-podcast-audio-eighth-duality-354701 GCS_STATE_BUCKET=voxi-podcast-state-eighth-duality-354701 bun services/voxi-podcast-worker/src/server.ts"
-VOICE_CMD="cd '$REPO' && set -a; source .env.local 2>/dev/null; set +a; $OTEL_ENV BFF_BASE_URL=http://$LAN_IP:8787 '$VENV_PY' services/voice-bot/voice_server.py --port 7071"
+VOICE_CMD="cd '$REPO' && set -a; source .env.local 2>/dev/null; set +a; $OTEL_ENV BFF_BASE_URL=http://$LAN_IP:8787 LIVEKIT_URL=ws://$LAN_IP:7880 LIVEKIT_AGENT_PORT=8089 '$VENV_PY' services/voice-bot/livekit_bot.py start"
 METRO_CMD="cd '$REPO/app' && PATH=\"$NODE_BIN:$BREW_BIN:\$PATH\" REACT_NATIVE_PACKAGER_HOSTNAME=$LAN_IP EXPO_NO_TELEMETRY=1 npx expo start --host lan --port 8081"
 
 # ---- build the 2×2 grid ----

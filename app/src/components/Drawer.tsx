@@ -19,12 +19,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, Animated, StyleSheet, PanResponder, Platform, useWindowDimensions } from 'react-native'
 import { useRouter } from 'expo-router'
-import { useQuery } from '@tanstack/react-query'
-import { Button, Wordmark } from './ui'
+import { ChevronRight } from 'lucide-react-native'
+import { Wordmark } from './ui'
 import { ids, tid } from '../lib/testid'
 import { radius, space, hit, scrim as scrimColor, shadow, motion, typeStyles } from '../lib/theme'
 import { useTheme } from '../lib/themeProvider'
-import { useApi } from '../lib/api'
 import { useAuth } from '../lib/clerk'
 import { haptics } from '../lib/haptics'
 import { DrawerCtx } from '../lib/drawerContext'
@@ -152,47 +151,43 @@ function NavRow({ id, label, onPress, color }: { id: string; label: string; onPr
 
 export function DrawerMenu({ onNavigate, width }: { onNavigate: () => void; width: number }): React.ReactElement {
   const router = useRouter()
-  const api = useApi()
-  const { userId, signOut } = useAuth()
+  const { firstName, email, signOut } = useAuth()
   const { surface } = useTheme()
-  const { data: me, isLoading: meLoading } = useQuery({ queryKey: ['me'], queryFn: () => api.me() })
 
   const go = (path: string) => {
     onNavigate()
     // navigate (not push) so the back stack never deepens and no surface becomes a dead-end.
     router.navigate(path as never)
   }
-  const raw = userId ?? ''
-  const monogram = (raw.split(':').pop() || raw || '?').trim().charAt(0).toUpperCase() || '?'
+  // The greeting falls back gracefully — Clerk firstName if set, else the email, else a neutral word. NEVER a
+  // fabricated name (preserves the original no-fake-name invariant; the monogram avatar was removed for this).
+  const who = firstName ?? email ?? 'back'
 
   return (
     <View {...tid(ids.drawer.screen)} accessibilityViewIsModal style={[styles.menu, { width, backgroundColor: surface.bg }]}>
       <Wordmark style={{ marginBottom: space.xl }} />
 
-      {/* profile — no display name / email exists UI-only; a monogram + neutral "Signed in" (never a fake name) */}
-      <View {...tid(ids.drawer.profile)} style={styles.profile}>
-        <View style={[styles.monogram, { backgroundColor: surface.sunken }]}>
-          <Text style={[typeStyles.name, { color: surface.text }]}>{monogram}</Text>
+      {/* profile — the "Welcome, {name}" greeting IS the Settings entry (a row, not an avatar). The plan is the
+          single static "Unlimited" label (the metering/upgrade concept no longer surfaces in UI). */}
+      <Pressable
+        {...tid(ids.nav.settingsTab, 'Open settings')}
+        accessibilityRole="button"
+        onPress={() => go('/(tabs)/settings')}
+        style={({ pressed }) => [styles.profile, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[typeStyles.name, { color: surface.text }]} numberOfLines={1}>Welcome, {who}</Text>
+          <Text style={[typeStyles.caption, { color: surface.textMuted }]}>Unlimited</Text>
         </View>
-        <View>
-          <Text style={[typeStyles.name, { color: surface.text }]}>Signed in</Text>
-          <Text style={[typeStyles.caption, { color: surface.textMuted }]}>{meLoading ? 'Loading…' : me ? `${me.plan} plan` : 'Voxi'}</Text>
-        </View>
-      </View>
+        <ChevronRight size={22} color={surface.textMuted} strokeWidth={2.25} />
+      </Pressable>
 
       <View style={styles.rows}>
         <NavRow id={ids.drawer.home} label="Capture" onPress={() => go('/(tabs)/camera')} color={surface.text} />
         <NavRow id={ids.nav.threadsTab} label="Collection" onPress={() => go('/(tabs)/threads')} color={surface.text} />
-        <NavRow id={ids.nav.settingsTab} label="Settings" onPress={() => go('/(tabs)/settings')} color={surface.text} />
       </View>
 
       <View style={styles.spacer} />
-
-      {meLoading ? (
-        <View style={[styles.upgradeSkeleton, { backgroundColor: surface.sunken }]} />
-      ) : me?.plan === 'free' ? (
-        <Button id={ids.drawer.upgrade} label="Upgrade" onPress={() => go('/paywall')} style={{ marginBottom: space.sm }} />
-      ) : null}
 
       <Pressable
         {...tid(ids.drawer.signOut, 'Sign out')}
@@ -216,11 +211,9 @@ const styles = StyleSheet.create({
   scrimWrap: { zIndex: 2 },
   edge: { position: 'absolute', top: 0, bottom: 0, left: 0, width: 24, zIndex: 4 },
   menu: { flex: 1, paddingTop: space.xxl + space.lg, paddingHorizontal: space.lg, paddingBottom: space.xl },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.xl },
-  monogram: { width: 44, height: 44, borderRadius: 9999, alignItems: 'center', justifyContent: 'center' },
+  profile: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.xl, minHeight: hit.min },
   rows: { gap: space.xs },
   navRow: { minHeight: 48, justifyContent: 'center' },
   spacer: { flex: 1 },
-  upgradeSkeleton: { height: hit.min + 8, borderRadius: radius.pill, marginBottom: space.sm, opacity: 0.6 },
   signOut: { minHeight: 48, justifyContent: 'center' },
 })

@@ -35,7 +35,14 @@ env:
 - assertVisible:
     id: "camera.screen"
     timeout: 10000
-# Enable reduce-motion via the in-app mirror of the OS setting.
+# Enable reduce-motion via the in-app mirror of the OS setting. Settings is reached via the drawer greeting
+# (nav.settingsTab lives in the drawer now), so open the drawer first.
+- tapOn:
+    id: "nav.menuButton"
+- extendedWaitUntil:
+    visible:
+      id: "nav.settingsTab"
+    timeout: 15000
 - tapOn:
     id: "nav.settingsTab"
 - assertVisible:

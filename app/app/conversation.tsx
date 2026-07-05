@@ -2,7 +2,7 @@
  * Conversation (PLAN §10.2 screen 8 / §6.3) — default full-screen ORB voice mode with PUSH-TO-TALK (mic model
  * = push-to-hold/tap-to-toggle by default, protects minute caps + clear privacy indicator) and a ⌨️ toggle
  * that collapses to a text thread. A PERSISTENT live-mic indicator shows the recording state. Turns stream from
- * the Pipecat session seam (createVoiceSession → stub by default, real SmallWebRTC on device).
+ * the voice session seam (createVoiceSession → deterministic stub by default, real @livekit/react-native Room on device).
  *
  * State matrix (PLAN §10.2): loading = connecting to the bot; empty = connected, no turns yet (voice-discovery
  * nudge); error = connect/session failure with retry; offline = global.offlineBanner + the bot can't reach us;
@@ -55,9 +55,9 @@ export default function Conversation(): React.ReactElement {
   const [text, setText] = useState('')
   const [exhausted, setExhausted] = useState(false)
   const [conn, setConn] = useState<ConnState>('connecting')
-  // The BFF-minted voice session: connectUrl feeds createVoiceSession; connectId scopes the refund latch so a
+  // The BFF-minted voice session: { url, token } feed createVoiceSession; connectId scopes the refund latch so a
   // session that never reaches the media plane credits its minute back (F5-LIFECYCLE).
-  const [voiceUrl, setVoiceUrl] = useState<string | null>(null)
+  const [voice, setVoice] = useState<{ url: string; token: string } | null>(null)
   const [paused, setPaused] = useState(false)
   const scrollRef = useRef<ScrollView>(null)
   const connectIdRef = useRef<string | null>(null)
@@ -101,11 +101,13 @@ export default function Conversation(): React.ReactElement {
 
   const session = useMemo(
     () =>
-      voiceUrl
+      voice
         ? createVoiceSession({
-            // The BFF-minted per-session connectUrl (POST /v1/voice/session) — points at the voice-bot's
-            // /offer?session=…&thread=…, carrying the session scope (NOT the identity). Empty/null → stub.
-            connectUrl: voiceUrl,
+            // The BFF-minted per-session LiveKit { url, token } (POST /v1/voice/session). LiveKit dispatches the
+            // voice-bot into the room; the bot never sees the identity directly (the token's metadata carries the
+            // connectId capability for the grounded-context fetch). Absent url/token → stub.
+            url: voice.url,
+            token: voice.token,
             threadId,
             mode: 'pushToTalk',
             events: {
@@ -148,7 +150,7 @@ export default function Conversation(): React.ReactElement {
             },
           })
         : null,
-    [voiceUrl, threadId, api],
+    [voice, threadId, api],
   )
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -161,13 +163,13 @@ export default function Conversation(): React.ReactElement {
     if (!VOICE_AVAILABLE || threadId === 'unknown') return
     let cancelled = false
     connectedRef.current = false
-    setVoiceUrl(null)
+    setVoice(null)
     void api
       .createVoiceSession(threadId)
-      .then(({ connectUrl, connectId }) => {
+      .then(({ url, token, connectId }) => {
         if (cancelled) { void api.refundVoiceSession(connectId).catch(() => {}) ; return } // unmounted during mint
         connectIdRef.current = connectId
-        setVoiceUrl(connectUrl)
+        setVoice({ url, token })
       })
       .catch((e) => {
         if (cancelled) return
@@ -250,7 +252,7 @@ export default function Conversation(): React.ReactElement {
     disconnectingRef.current = s.disconnect().catch(() => {}).then(() => { pausingRef.current = false })
   }
   function resume(): void {
-    if (!voiceUrl || !paused) return
+    if (!voice || !paused) return
     setPaused(false)
     void connect()
   }

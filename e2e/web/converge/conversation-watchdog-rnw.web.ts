@@ -38,7 +38,7 @@ const rig = await standUp(
     // Mount the voice sub-app so /v1/voice/session mint SUCCEEDS (returns a connectUrl). The stub transport is
     // used on web; the stub never fetches this URL, so any non-empty base is fine — what matters is the screen
     // reaches connect() with a non-null session so the watchdog arms.
-    voiceServerBaseUrl: 'http://localhost:7071',
+    livekit: true,
   },
 )
 const { driver: d, page, errors } = rig

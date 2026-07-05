@@ -35,7 +35,7 @@ const rig = await standUp(
     // Seed an owner-scoped thread + reveal so the /ask ACL + grounded-context checks pass for `converge`.
     chatFixture: { threadId: 'thr_converge', userId: 'converge', title: 'Converge Object', fact: 'Made in Pennsylvania.' },
     // Mount the voice sub-app so the mint SUCCEEDS — voice is genuinely attempted (then hangs via the seam).
-    voiceServerBaseUrl: 'http://localhost:7071',
+    livekit: true,
   },
 )
 const { driver: d, page, errors } = rig

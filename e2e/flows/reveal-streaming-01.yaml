@@ -1,0 +1,66 @@
+# Maestro flow (iOS native, deterministic) — reveal-streaming-01: the "Initial learnings" arc on the real binary.
+# Uses the openLink+streaming-seed capture path (e2e/web/server.ts eveStreamFor 'streaming': band instantly, then
+# facts/section with ~1.5s gaps, done ~5.7s).
+#
+# Proves the arc deterministically (every value pinned by testID / accessibility label — Maestro never decides):
+#   F1 — the LearningsBar mounts during research: `learnings.bar` is visible with data-phase=researching, + its
+#        accessibilityLabel carries a fact once one streams (the slot cycles).
+#   F2/F3 — at researchComplete the dock REAPPEARS (`reveal.detailsIcon` becomes visible — the bar faded into it;
+#        the bar is gone by then), AND the Deep Dive AUTO-STARTED (the dock icon's label reaches "ready to play"
+#        with NO Generate tap). The cycle-up + the fly are native-only motion (frame-rate not Maestro-provable);
+#        the BEFORE/AFTER states are.
+#
+# Run:  bun e2e/native/test-bff.ts &   then   maestro test e2e/flows/reveal-streaming-01.yaml
+appId: com.kvnlee.voxi
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      microphone: allow
+- runFlow:
+    when:
+      visible:
+        text: "Allow"
+    commands:
+      - tapOn:
+          text: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 90000
+- openLink: "voxi://e2e?seed=streaming"
+- runFlow:
+    when:
+      visible:
+        text: "Open"
+    commands:
+      - tapOn:
+          text: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "camera.shutter"
+    timeout: 30000
+- tapOn:
+    id: "camera.shutter"
+- extendedWaitUntil:
+    visible:
+      id: "reveal.card"
+    timeout: 90000
+# F1 — the LearningsBar mounted above the (hidden) dock during research.
+- extendedWaitUntil:
+    visible:
+      id: "learnings.bar"
+    timeout: 20000
+# F2/F3 — at researchComplete (~5.7s) the dock REAPPEARS: the Details icon (hidden during research) becomes visible,
+# proving the bar→dock transition (the bar's fly-into-Details + fade are the native-only motion).
+- extendedWaitUntil:
+    visible:
+      id: "reveal.detailsIcon"
+    timeout: 25000
+# F2 — the Deep Dive AUTO-STARTED at the first fact (mode=min) with NO Generate tap: the dock icon's accessibility
+# label reaches "ready to play" on its own (the Explore icon was hidden during research; it reappeared generating).
+- extendedWaitUntil:
+    visible:
+      text: "Deep Dive — ready to play its story"
+    timeout: 50000

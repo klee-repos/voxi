@@ -74,6 +74,13 @@ export async function buildConvergeBundle(clientEntry: string): Promise<string> 
       'expo-secure-store': cdir('shims/absent-native.tsx'),
       'expo-linking': cdir('shims/absent-native.tsx'),
       'react-native-vision-camera': cdir('shims/absent-native.tsx'),
+      // Voice transport (native-only). LiveKit replaced pipecat SmallWebRTC; pipecat.ts lazily require()s
+      // @livekit/react-native inside a try/catch and falls back to the stub session when it throws — so aliasing
+      // these to the throwing shim reproduces the real web/E2E path (require throws → null → deterministic stub).
+      // @livekit/react-native pulls @livekit/react-native-webrtc, whose RN EventEmitter import esbuild can't resolve
+      // against react-native-web; alias both so the browser bundle builds. (Legacy pipecat aliases kept below.)
+      '@livekit/react-native': cdir('shims/absent-native.tsx'),
+      '@livekit/react-native-webrtc': cdir('shims/absent-native.tsx'),
       '@pipecat-ai/client-js': cdir('shims/absent-native.tsx'),
       '@pipecat-ai/react-native-small-webrtc-transport': cdir('shims/absent-native.tsx'),
       // Native-only motion/haptics polish (UI redesign). A `Platform.OS !== 'web'` guard is a BUILD-TIME no-op

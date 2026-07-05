@@ -34,9 +34,9 @@ await check('tapping the hamburger opens the drawer — menu + scrim + every row
   }
 })
 
-await check('the real profile header shows a monogram + neutral "Signed in" (no name/email UI-only)', async () => {
-  const profile = await page.locator(`[data-testid="${ids.drawer.profile}"]`).innerText()
-  if (!/signed in/i.test(profile)) throw new Error('profile did not read "Signed in": ' + JSON.stringify(profile))
+await check('the real drawer greeting shows "Welcome" (the avatar became a greeting; no fake name)', async () => {
+  const greeting = await page.locator(`[data-testid="${ids.nav.settingsTab}"]`).innerText()
+  if (!/welcome/i.test(greeting)) throw new Error('greeting did not read "Welcome": ' + JSON.stringify(greeting))
 })
 
 await check('Collection row fires the real router.navigate to /(tabs)/threads (expo-router seam)', async () => {

@@ -324,18 +324,11 @@ log('web E2E coverage sweep (real BFF + framework PlaywrightDriver):')
 }
 
 // ============================================================================
-// SETTINGS — subscription status (real /me), privacy line, reduce-motion, delete, sign-out.
+// SETTINGS — reduce-motion, sign-out. (The plan/subscription row + the privacy line were removed; the plan is
+// the static "Unlimited" label in the drawer greeting, and metering/counts live on /api/v1/me, not the UI.)
 // ============================================================================
 {
   const { page, d } = await authedPage('trusted', 'probable', 'settings')
-  await check('settings: subscriptionStatus from the real /me (plan=voyager)', async () => {
-    await d.waitFor(ids.settings.subscriptionStatus)
-    const s = await d.state(ids.settings.subscriptionStatus)
-    if (s.attrs.plan !== 'voyager') throw new Error('plan=' + JSON.stringify(s.attrs))
-  })
-  await check('settings: privacy "no face recognition" line present', async () => {
-    if (!(await d.state(ids.settings.privacyNoFaceRecognition)).visible) throw new Error('no privacy line')
-  })
   await check('settings: reduce-motion toggles a real flag on the document', async () => {
     await d.tap(ids.settings.reduceMotion)
     const flag = await page.evaluate(() => document.body.getAttribute('data-reduce-motion'))

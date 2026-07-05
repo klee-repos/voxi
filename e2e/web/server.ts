@@ -40,13 +40,13 @@ import { registerFor, type ConfidenceBand } from '../../packages/shared/src/conf
 // ---------------------------------------------------------------------------
 // Deterministic eve stream — terminal outcome chosen by the seeded object.
 // ---------------------------------------------------------------------------
-type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill' | 'logobrand' | 'bggen'
+type Scan = 'probable' | 'confident' | 'unknown' | 'slow' | 'fail' | 'pill' | 'logobrand' | 'bggen' | 'streaming'
 
 /** Parse the seeded object out of the photoUrl the client sent (e.g. "obj:unknown"); default = probable. */
 function scanOf(photoUrl: string): Scan {
   const m = /obj:([a-z]+)/.exec(photoUrl)
   const v = m?.[1]
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(v as Scan)
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen', 'streaming'] as Scan[]).includes(v as Scan)
     ? (v as Scan)
     : 'probable'
 }
@@ -66,7 +66,7 @@ function scanFromReferer(referer: string | null): Scan | null {
   } catch {
     return null
   }
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen', 'streaming'] as Scan[]).includes(v as Scan) ? (v as Scan) : null
 }
 
 /**
@@ -77,7 +77,7 @@ function scanFromReferer(referer: string | null): Scan | null {
  */
 function scanFromHeader(seed: string | null): Scan | null {
   if (!seed) return null
-  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen'] as Scan[]).includes(seed as Scan) ? (seed as Scan) : null
+  return (['probable', 'confident', 'unknown', 'slow', 'fail', 'pill', 'logobrand', 'bggen', 'streaming'] as Scan[]).includes(seed as Scan) ? (seed as Scan) : null
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -128,6 +128,27 @@ async function* eveStreamFor(scan: Scan, sessionId: string): AsyncIterable<strin
     yield JSON.stringify({ type: 'section', index: 4, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm.', sourceUrl: src, sourceTitle: '', quote: 'the SuperSix EVO is Cannondale’s flagship' })
     yield JSON.stringify({ type: 'description_upgrade', index: 5, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer." })
     yield JSON.stringify({ type: 'done', index: 6, sessionId })
+    return
+  }
+  if (scan === 'streaming') {
+    // REVEAL-STREAMING fixture (F1 + F2 end-to-end): band settles INSTANTLY, then facts/section stream in WITH
+    // VISIBLE ~1.5s gaps so the Research Ribbon's livestream chip-pop + the FIRST-FACT Deep Dive auto-start are
+    // observable by Maestro (not bunched into one tick). The researching phase (band set, !researchComplete) shows
+    // the ribbon; fact #1 fires the decoupled dd auto-start (mode=min); done settles the dock to ready. The dd
+    // render itself is the harness's fast-fake (a ready episode on poll), so the dock icon reaches 'ready' without
+    // the user ever tapping Generate — the deterministic F2 proof.
+    yield JSON.stringify({ type: 'token', index: 0, text: 'A 2008 Cannondale SuperSix EVO.' })
+    yield JSON.stringify({ type: 'confidence_band', index: 1, band: 'CONFIDENT', title: '2008 Cannondale SuperSix EVO', candidates: [] })
+    await sleep(3000) // researching phase: the ribbon is mounted (data-phase=researching) long enough for Maestro to assert it before fact #1
+    const src = 'https://en.wikipedia.org/wiki/Cannondale_SuperSix_EVO'
+    yield JSON.stringify({ type: 'fact', index: 2, text: "The SuperSix EVO is Cannondale's flagship lightweight road racing frame.", sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    await sleep(1500) // fact #1 → ribbon shows the chip + the dd auto-start fires (F2, mode=min)
+    yield JSON.stringify({ type: 'fact', index: 3, text: 'Its frame is built from carbon fibre composite.', sourceUrl: src, sourceTitle: 'Cannondale SuperSix EVO', quote: 'the frame is built from carbon fibre composite' })
+    await sleep(1200)
+    yield JSON.stringify({ type: 'section', index: 4, bucket: 'purpose', text: 'The EVO was engineered as Cannondale’s lightest climbing frame — stiff enough to sprint, tuned to smooth rough tarmac.', sourceUrl: src, sourceTitle: '', quote: "the SuperSix EVO is Cannondale's flagship lightweight road racing frame" })
+    yield JSON.stringify({ type: 'section', index: 5, bucket: 'maker', text: 'Built by Cannondale, the Connecticut firm that went all-in on this carbon platform.', sourceUrl: src, sourceTitle: '', quote: 'the SuperSix EVO is Cannondale’s flagship' })
+    yield JSON.stringify({ type: 'description_upgrade', index: 6, text: "A 2008 Cannondale SuperSix EVO — the marque's flagship carbon road racer." })
+    yield JSON.stringify({ type: 'done', index: 7, sessionId })
     return
   }
   if (scan === 'slow') {
@@ -488,8 +509,6 @@ label{display:block;margin:6px 0}
 <!-- ===================== SETTINGS ===================== -->
 <div id="settings" class="screen" data-testid="settings.screen">
   <h3>Settings</h3>
-  <p data-testid="settings.subscriptionStatus" class="muted"></p>
-  <p data-testid="settings.privacyNoFaceRecognition" class="muted">Voxi never runs face recognition. Faces and plates are redacted before anything is stored.</p>
   <label><input type="checkbox" data-testid="settings.reduceMotion"/> Reduce motion</label>
   <button data-testid="settings.signOut">Sign out</button>
   <button data-testid="settings.deleteAccount">Delete account</button>
@@ -700,9 +719,6 @@ $('[data-testid="contribute.reportBtn"]').onclick=async()=>{await fetch('/api/v1
 
 // ---- settings ----
 async function openSettings(){
-  const r=await fetch('/api/v1/me',{headers:authHdr()});const me=await r.json();
-  $('[data-testid="settings.subscriptionStatus"]').textContent='Plan: '+me.plan+' · scans left: '+me.remaining.scan+' · voice min: '+me.remaining.voiceMin;
-  $('[data-testid="settings.subscriptionStatus"]').setAttribute('data-plan',me.plan);
   show('settings');
 }
 $('[data-testid="nav.settingsTab"]').onclick=openSettings;
@@ -750,10 +766,11 @@ export interface HarnessOpts {
   chatFixture?: { threadId: string; userId: string; title?: string; fact?: string }
   /** opt in to the Sentry envelope sink + same-origin DSN injection (standUp). Off for every other runner. */
   sentry?: boolean
-  /** set VOICE_SERVER_BASE_URL so /v1/voice/session mint SUCCEEDS (returns a connectUrl) instead of 503. Used by
-   *  the F3 watchdog proof: the stub transport (enabled via __voxiHangVoiceConnect) hangs → the 20s watchdog fires
-   *  → keyboard fallback. Default empty → mint 503s → keyboard-only (the WS1 path). */
-  voiceServerBaseUrl?: string
+  /** mount the LiveKit voice routes with FAKE livekit config so /v1/voice/session mint SUCCEEDS (returns a
+   *  token) instead of 503. Used by the F3 watchdog proof: the stub transport (enabled via __voxiHangVoiceConnect)
+   *  hangs → the 20s watchdog fires → keyboard fallback. Default off → mint 503s → keyboard-only (the WS1 path).
+   *  (The stub never validates the token — the config is a presence flag so the BFF mint returns a token.) */
+  livekit?: boolean
 }
 
 /**
@@ -966,15 +983,22 @@ export function createWebHarness(
     podcastEnqueue: async ({ token, userId }: { token: string; userId: string }) => podcast.markComposing(token, userId, true),
     speech, // spoken reveal: FakeTts + content-hash cache (undefined when opts.speech === false → route 503s)
     chat, // grounded Ask chat: FakeChat sentinel (undefined when opts.chat === false → /ask 503s guide_unavailable)
-    voiceServerBaseUrl: opts.voiceServerBaseUrl, // set → /v1/voice/session mint succeeds (F3 watchdog proof)
   }
 
   // Wrap /v1/podcast so a freshly gated token is registered with the worker-status service for the owner.
   const app = createApp(deps)
-  // Mount the voice sub-app (mirroring server.ts) ONLY when a voiceServerBaseUrl is configured, so the F3
-  // watchdog proof can mint a real connectUrl (otherwise /v1/voice/session 404s — the WS1 keyboard-only path).
-  const voice = opts.voiceServerBaseUrl
-    ? createVoiceRoutes({ verifier: deps.verifier, store: deps.store, sessionOwner, voiceServerBaseUrl: opts.voiceServerBaseUrl })
+  // Mount the voice sub-app (mirroring server.ts) ONLY when the `livekit` opt is set, so the F3 watchdog proof
+  // can mint a real LiveKit token (otherwise /v1/voice/session 404s — the WS1 keyboard-only path). Fake config:
+  // the stub transport never validates the token — it just needs the mint to return one.
+  const voice = opts.livekit
+    ? createVoiceRoutes({
+        verifier: deps.verifier,
+        store: deps.store,
+        sessionOwner,
+        livekitUrl: 'ws://test:7880',
+        livekitApiKey: 'testkey',
+        livekitApiSecret: 'testsecret-thirtytwo-chars-ok',
+      })
     : null
 
   return {

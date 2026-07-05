@@ -86,7 +86,7 @@ export const ids = {
     playNarration: 'reveal.playNarration', // subordinate icon-only narration play/pause orb (NOT the primary pill)
     narrationAudio: 'reveal.narrationAudio', // the <audio> that speaks the reveal in Voxi's British voice
     facts: 'reveal.facts', // "Curious facts" container — grows as async research verifies each fact
-    fact: 'reveal.fact', // one verified fact row (fact text + its own source link; multiple, progressive)
+    fact: 'reveal.fact', // one verified fact row (fact text + its own source link; multiple; progressive)
     factSource: 'reveal.factSource', // the per-fact source link under a fact (shows the page title; tap → opens it)
     // Reveal DOCK — THREE icons: Explore (Deep Dive, featured first) · Details (the research lane —
     // what/purpose/maker/facts — collapsed to one icon; carries the aggregate state loading|active|empty) · Ask
@@ -124,6 +124,13 @@ export const ids = {
     deleteConfirm: 'reveal.deleteConfirm', // delete confirmation dialog container (step 2 of the two-step delete)
     deleteConfirmCancel: 'reveal.deleteConfirmCancel',
     deleteConfirmAccept: 'reveal.deleteConfirmAccept', // destructive "Delete" — the deliberate second tap
+  },
+  learnings: {
+    // "Initial learnings" bar (INITIAL-LEARNINGS-PLAN) — the fixed-height slot above the dock during research.
+    // `bar` carries {phase: researching|flying} via tidWith + the current fact in its accessibilityLabel; the slot's
+    // a11y label CHANGES as facts cycle (the deterministic cycle proof). `fact` is the slot's current fact text.
+    bar: 'learnings.bar',
+    fact: 'learnings.fact',
   },
   podcast: {
     player: 'podcast.player',
@@ -208,8 +215,6 @@ export const ids = {
   },
   settings: {
     screen: 'settings.screen',
-    subscriptionStatus: 'settings.subscriptionStatus',
-    privacyNoFaceRecognition: 'settings.privacyNoFaceRecognition',
     deleteAccount: 'settings.deleteAccount',
     reduceMotion: 'settings.reduceMotion',
     speakAloud: 'settings.speakAloud', // "Speak results aloud" — gates the reveal's auto-narration (audio pref)
@@ -223,7 +228,7 @@ export const ids = {
   // instead of coordinate taps; the iOS shell exposes the SAME ids on its TabView/router.
   nav: {
     threadsTab: 'nav.threadsTab',
-    settingsTab: 'nav.settingsTab',
+    settingsTab: 'nav.settingsTab', // the tappable drawer greeting → /settings (was a NavRow; the avatar became the greeting)
     openConversation: 'nav.openConversation', // "Ask Voxi" entry into the full-screen conversation
     openPodcast: 'nav.openPodcast', // "Generate story" → podcast player
     openContribute: 'nav.openContribute', // "Add a tip" → contribute sheet
@@ -238,8 +243,6 @@ export const ids = {
     screen: 'drawer.screen',
     scrim: 'drawer.scrim',
     home: 'drawer.home', // Capture/Home row → router.navigate('/(tabs)/camera')
-    profile: 'drawer.profile',
-    upgrade: 'drawer.upgrade',
     signOut: 'drawer.signOut',
   },
   // E2E-only diagnostic affordances — rendered ONLY when the harness injects a Sentry DSN (never in prod bundles).

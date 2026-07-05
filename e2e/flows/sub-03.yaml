@@ -59,11 +59,8 @@ env:
     timeout: 15000
 - assertNotVisible:
     id: "paywall.screen"
-# Confirm the restored entitlement is reflected in settings (active subscription status), not just hidden UI.
-- tapOn:
-    id: "nav.settingsTab"
-- assertVisible:
-    id: "settings.screen"
-- assertVisible:
-    id: "settings.subscriptionStatus"
+# Restore re-granted the entitlement — under VOXI_TEST_MODE the sandbox paywall dismisses only on a successful
+# restoreTransactions, so landing on camera.screen IS the proof. (The prior settings.subscriptionStatus assertion
+# is gone: that row was removed — the plan is the static "Unlimited" label in the drawer greeting, and live
+# entitlement counts are no longer UI-assertable on iOS-native.)
 # No brittle coordinate taps anywhere — every step locates by a registered testId.

@@ -20,6 +20,7 @@ import { AppHeader } from '../src/components/AppHeader'
 import { Orb } from '../src/components/Orb'
 import { OfflineBanner, SafetyRefusal } from '../src/components/Banners'
 import { BucketDock, BucketCard, type DockKey, type AudioState } from '../src/components/RevealDock'
+import { LearningsBar } from '../src/components/LearningsBar'
 import { RevealMoreMenu } from '../src/components/RevealMoreMenu'
 import { RevealTopBar } from '../src/components/RevealTopBar'
 import { ConfirmDialog } from '../src/components/ConfirmDialog'
@@ -40,6 +41,8 @@ import { threadsKey } from '../src/lib/queryKeys'
 import { pageableThreads } from '../src/lib/collectionOrder'
 import { beginThreadStream, consumeThreadStream, type StreamActions } from '../src/lib/threadStream'
 import { useThreadStreamRun } from '../src/lib/useThreadStreamRun'
+import { deriveDockPhase } from '../src/lib/dockPhase'
+import { canAutoStartDeepDive, envDeepDiveAutoStartThreshold } from '../src/lib/deepDiveAutoStart'
 import { cacheReveal, getCachedReveal, evictReveal } from '../src/lib/revealCache'
 import { createCameraPermission, type CameraPermissionStatus } from '../src/lib/cameraPermission'
 import { toDataUri } from '../src/lib/photo'
@@ -103,6 +106,24 @@ function RevealBody(): React.ReactElement {
     const s = deepDiveIconState(deepDiveGen)
     return s === 'active' && deepDiveReady ? 'ready' : s
   })()
+  // The dock's state-machine phase (REVEAL-STREAMING F3): drives the animated bar + the Research Ribbon mount.
+  // Composes the durable-ready probe into the raw state so a durable episode reads 'ready' even when the session
+  // store is idle. 'generating'/'ready' take precedence over 'researching' (a first-fact dd auto-start leads).
+  const dockPhase = deriveDockPhase({
+    band,
+    researchComplete,
+    isRevisit,
+    deepDiveState: deepDiveReady && deepDiveGen.state === 'idle' ? 'ready' : deepDiveGen.state,
+  })
+
+  // ---- Initial learnings (INITIAL-LEARNINGS-PLAN): the bar mounts at band-settle + stays through the fly-out; the
+  //      dock (floatCard) is HIDDEN until researchComplete (it reappears so the fly can land on the Details icon).
+  //      `detailsIconRef` is the fly target (threaded through BucketDock to the Details Pressable). `barDone` is the
+  //      sole bar-unmount trigger (set by the bar's onDone after the fly) + resets per thread (key={threadId}).
+  const detailsIconRef = useRef<View | null>(null)
+  const [barDone, setBarDone] = useState(false)
+  useEffect(() => { setBarDone(false) }, [threadId])
+  const showLearnings = !!band && !isRevisit && !barDone
 
   // ---- VIEWFINDER (page 0): the live camera + capture, merged in so camera⇄item is ONE pager (no navigation). ----
   const queryClient = useQueryClient()
@@ -276,21 +297,38 @@ function RevealBody(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, band])
 
-  // Auto-start the Deep Dive AFTER the reveal's research completes (researchComplete) — the on-demand story generates
-  // automatically, like the rest of the reveal. The trigger is researchComplete, NOT band-settle: firing at band-settle
-  // raced the podcast worker's OWN Firecrawl+GLM research (groundedFacts) against the reveal's research phase for the
-  // same APIs, starving purpose/maker/facts (the reveal read as "no details"). researchComplete = the full reveal is
-  // done, matching "after the item's generated". `researchError` is also gated (defensive — a network drop sets
-  // researchError WITHOUT researchComplete, so `!researchComplete` already covers today's error path; the explicit
-  // OR keeps the gate honest if that invariant ever changes). Skipped on revisits, offline, UNKNOWN bands; fires ONCE
-  // per thread (the store's `idle` gate + startDeepDive's idempotency are the double-charge backstop). The idle Generate
-  // CTA in podcast.tsx stays as the fallback (a durable-ready miss / a tap before research completes).
+  // Auto-start the Deep Dive once a MINIMUM of data has streamed — the FIRST grounded fact (REVEAL-STREAMING F2).
+  // TODAY this fired only at researchComplete (the full dossier); the user asked to decouple so the story generates in
+  // parallel with the remaining streaming research. The first-FACT threshold is race-safe: facts only come from the
+  // dossier (cascade.ts:478), which runs SEQUENTIALLY AFTER stage-4 first-pass fully completes — so by fact #1 the core
+  // reveal (what + first-pass purpose/maker) is already rendered and cannot be starved by the parallel Deep Dive render
+  // (the documented band-settle race at the old trigger starved BOTH stages; this threshold races only the remaining
+  // dossier). Falls back to researchComplete when the dossier yields zero facts. `=done` mode (today's behavior) is the
+  // EXPO_PUBLIC_VOXI_DEEPDIVE_AUTOSTART_THRESHOLD opt-out (a build-time knob; a server-driven kill-switch is a fast-follow).
+  // Skipped on revisits/offline/UNKNOWN/researchError; fires ONCE per thread (the idle gate + startDeepDive idempotency
+  // + the BFF gate are the double-charge backstop). The idle Generate CTA in podcast.tsx stays as the fallback.
   useEffect(() => {
-    if (offline || isRevisit || !threadId || !band || band === 'UNKNOWN' || !researchComplete || researchError) return
+    const mode = envDeepDiveAutoStartThreshold()
+    if (
+      !canAutoStartDeepDive({
+        mode,
+        offline,
+        isRevisit,
+        hasThreadId: !!threadId,
+        band,
+        bandIsUnknown: band === 'UNKNOWN',
+        researchComplete,
+        researchError,
+        hasFirstFact: facts.length >= 1,
+      })
+    ) return
+    if (!threadId) return // narrowed by canAutoStartDeepDive's hasThreadId (TS guard)
     if (getDeepDiveStatus(threadId).state !== 'idle') return
     startDeepDive(api, { threadId, subject: title })
+    // `facts.length` is load-bearing (R1 fold D): facts is a fresh array each append, so the boolean
+    // `hasFirstFact` flips once false→true and re-fires this effect at fact #1.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, band, isRevisit, researchComplete, researchError])
+  }, [threadId, band, isRevisit, researchComplete, researchError, facts.length])
 
   // ---- Swipe paging across catalogued items (Feature A): a horizontal paging FlatList (the standard RN pager). ----
   // `pages` is the newest-first REVEALABLE subset from the same `['threads']` cache the collection uses (skips
@@ -692,17 +730,37 @@ function RevealBody(): React.ReactElement {
         />
       ) : null}
 
-      {/* The floating dock CARD — shown on an item page once the band settles (never on the viewfinder). During
-          loading it's the Orb pill overlay above. STATIC glass card; only the content fades in on settle. */}
+      {/* The floating bottom zone: the Initial Learnings bar (researching) sits ABOVE the dock card (post-research).
+          During research the dock card is HIDDEN so the bar owns the phase; at researchComplete the card reappears
+          (so the bar's fly can land on the Details icon) + the bar fades out. Never on the viewfinder. */}
       {band && !onViewfinder ? (
         <View style={[styles.floatWrap, { paddingBottom: space.md }, chromeHidden ? styles.dockHidden : null]} pointerEvents={chromeHidden ? 'none' : 'box-none'}>
-          <View style={[styles.floatCard, floatShadow]}>
-            <GlassFill radiusStyle={{ borderRadius: DOCK_CARD_RADIUS }} />
-            <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
-              <SurfaceProvider surface="dark">
-                {/* The object NAME now rides the top bar (see mediaBackHeader) — the card holds only the dock + the
-                    tap-to-reveal how-sure details, so it stays short. */}
-                <BucketDock statuses={statuses} read={read} deepDiveState={deepDiveState} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
+          {/* The LearningsBar — its own dark surface, above the dock. Mounts at band-settle; cycles through grounded
+              learnings during research, then flies the current one into the Details icon on researchComplete. */}
+          {showLearnings ? (
+            <SurfaceProvider surface="dark">
+              <LearningsBar
+                key={threadId ?? 'no-thread'}
+                facts={facts}
+                sections={sections}
+                researchComplete={researchComplete}
+                reduceMotion={reduceMotion}
+                detailsIconRef={detailsIconRef}
+                onFlyLand={() => { /* the Details unread dot lights via deriveDetailsUnread when research lands */ }}
+                onDone={() => setBarDone(true)}
+              />
+            </SurfaceProvider>
+          ) : null}
+          {/* The dock CARD — hidden during research; reappears at researchComplete (the fly target + user interaction). */}
+          {researchComplete ? (
+            <View style={[styles.floatCard, floatShadow]}>
+              <GlassFill radiusStyle={{ borderRadius: DOCK_CARD_RADIUS }} />
+              <Animated.View style={{ opacity: contentFade, transform: [{ translateY: contentFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
+                <SurfaceProvider surface="dark">
+                  {/* The object NAME now rides the top bar (see mediaBackHeader) — the card holds only the dock + the
+                      tap-to-reveal how-sure details, so it stays short. `detailsIconRef` exposes the Details icon to
+                      the LearningsBar fly (INITIAL-LEARNINGS-PLAN F3). */}
+                  <BucketDock statuses={statuses} read={read} deepDiveState={deepDiveState} detailsIconRef={detailsIconRef} reduceMotion={reduceMotion} surface={dark} onOpen={openDock} />
 
                 {showDetails ? (
                   <View style={styles.details}>
@@ -740,6 +798,7 @@ function RevealBody(): React.ReactElement {
               </SurfaceProvider>
             </Animated.View>
           </View>
+          ) : null}
         </View>
       ) : null}
 

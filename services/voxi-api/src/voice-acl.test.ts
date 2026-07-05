@@ -28,7 +28,11 @@ function build() {
     { threadId: 't1', ownerUserId: 'A', title: 'cap', createdAt: 1, continuationToken: 'ct' }, // durable row survives a restart
   ])
   const store = memoryStore({ A: { scan: 0, podcast: 0, voiceMin: 10 }, B: { scan: 0, podcast: 0, voiceMin: 10 } })
-  const app = createVoiceRoutes({ verifier: testVerifier, store, sessionOwner, threads, voiceServerBaseUrl: 'http://voice.test' })
+  // LiveKit config so the ACL-passing owner reaches the mint (this suite asserts the ACL, not the media plane).
+  const app = createVoiceRoutes({
+    verifier: testVerifier, store, sessionOwner, threads,
+    livekitUrl: 'ws://localhost:7880', livekitApiKey: 'devkey', livekitApiSecret: 'voxi-livekit-dev-secret-32chars-ok',
+  })
   const open = (u: string, threadId: string) =>
     app.request('/v1/voice/session', { method: 'POST', headers: auth(u), body: JSON.stringify({ threadId }) })
   const restart = () => sessionOwner.clear() // in-memory map gone; durable threads remain
@@ -52,8 +56,11 @@ describe('POST /v1/voice/session owner ACL (fail-closed across a restart)', () =
     const { open, restart } = build()
     restart()
     const res = await open('B', 't1')
-    expect(res.status).toBe(404) // was fail-OPEN (would mint a URL + charge) before the fix
+    expect(res.status).toBe(404) // was fail-OPEN (would mint a token + charge) before the fix
     const body = await res.json()
+    // No media-plane capability leaks to a denied stranger (the LiveKit token + url, and the legacy connectUrl).
+    expect(body.token).toBeUndefined()
+    expect(body.url).toBeUndefined()
     expect(body.connectUrl).toBeUndefined()
   })
 })

@@ -1,51 +1,20 @@
 /**
- * Guard test for the "Ask Voxi" voice fix (Bug A). The real SmallWebRTC transport is native-only and can only be
- * validated on device, so this locks in the two things that ARE checkable off-device:
- *   1. the CONFIG that caused the silent-stub regression never comes back (the cross-fork Metro alias is gone,
- *      the app depends on the Daily fork the transport actually requires, community fork is gone, ATS is kept), and
- *   2. the fail-safe seam still degrades to the deterministic stub (voice must NEVER crash the conversation screen).
- * On-device validation (mic acquire + real connect, no LogBox "undefined is not a function") is the user's step.
+ * Guard test for the "Ask Voxi" voice seam (LiveKit edition). The real LiveKit Room is native-only + validated
+ * end-to-end (the livekit-agents audio-plane test in services/voice-bot/tests/ + the converge harness); this locks
+ * in the off-device-checkable invariants:
+ *   1. the fail-safe seam degrades to the deterministic stub when @livekit/react-native is absent (the web/E2E
+ *      path — the stub is load-bearing for the harness), and
+ *   2. the stub produces a finalized two-turn exchange on push-to-talk (the caption path is load-bearing).
  */
 import { test, expect, describe } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { createVoiceSession, createStubVoiceSession, setVoiceMediaManagerFactory, voxiIceServers, type OrbState } from './pipecat'
-
-const appRoot = resolve(import.meta.dir, '../..') // app/
-const read = (p: string) => readFileSync(resolve(appRoot, p), 'utf8')
-
-describe('voice fork config (Bug A regression guard)', () => {
-  test('metro.config.js no longer aliases @daily-co/react-native-webrtc to the community fork', () => {
-    const metro = read('metro.config.js')
-    // The alias was the load-bearing hack: it pointed the transport at a DIFFERENT webrtc fork. It must stay gone.
-    expect(metro).not.toMatch(/extraNodeModules[\s\S]*@daily-co\/react-native-webrtc/)
-  })
-
-  test('the app depends on the Daily fork the transport requires — not the community fork', () => {
-    const pkg = JSON.parse(read('package.json')) as { dependencies?: Record<string, string> }
-    const deps = pkg.dependencies ?? {}
-    expect(deps['@daily-co/react-native-webrtc']).toBeDefined() // the fork @pipecat-ai transport peer-depends on
-    expect(deps['react-native-webrtc']).toBeUndefined() // the community fork must not be shipped alongside it
-  })
-
-  test('the native MediaManager imports from the SAME @daily-co fork as the transport', () => {
-    const mm = read('src/lib/voiceMediaManager.native.ts')
-    expect(mm).toMatch(/from ['"]@daily-co\/react-native-webrtc['"]/)
-    expect(mm).not.toMatch(/from ['"]react-native-webrtc['"]/) // never the community fork
-  })
-
-  test('app.json keeps NSAllowsLocalNetworking so a --clean prebuild does not break the LAN dev loop', () => {
-    const appJson = JSON.parse(read('app.json')) as { expo: { ios: { infoPlist: Record<string, unknown> } } }
-    expect(appJson.expo.ios.infoPlist.NSAllowsLocalNetworking).toBe(true)
-  })
-})
+import { createVoiceSession, createStubVoiceSession, type OrbState } from './pipecat'
 
 describe('voice session fail-safe seam (never crash the conversation screen)', () => {
-  test('with no native MediaManager wired (web/off-device), createVoiceSession returns the deterministic stub', async () => {
-    setVoiceMediaManagerFactory(null) // simulate the web/E2E bundle — real transport unavailable
+  test('with no native LiveKit transport (web/off-device bun), createVoiceSession returns the deterministic stub', async () => {
     const states: OrbState[] = []
     const session = createVoiceSession({
-      connectUrl: 'https://example.test/voice',
+      url: 'ws://example.test:7880',
+      token: 'fake.jwt',
       threadId: 't1',
       mode: 'pushToTalk',
       events: { onOrbState: (s) => states.push(s) },
@@ -59,56 +28,11 @@ describe('voice session fail-safe seam (never crash the conversation screen)', (
 
   test('the stub produces a finalized two-turn exchange on push-to-talk (caption path is load-bearing)', async () => {
     const turns: { role: string; final: boolean }[] = []
-    const stub = createStubVoiceSession({ connectUrl: '', threadId: 't2', events: { onTranscript: (t) => turns.push(t) } })
+    const stub = createStubVoiceSession({ url: '', token: '', threadId: 't2', events: { onTranscript: (t) => turns.push(t) } })
     await stub.connect()
     stub.startTalking()
     stub.stopTalking()
     expect(turns.filter((t) => t.final).length).toBeGreaterThanOrEqual(2) // a user turn + a Voxi reply, both final
     expect(turns.some((t) => t.role === 'voxi')).toBe(true)
-  })
-})
-
-describe('voxiIceServers (B1: TURN config so ICE can traverse UDP-blocked networks)', () => {
-  // Value-bound assertions (NOT a "shape" tautology) — pin the exact entries so a regression that drops the
-  // TURN branch or omits STUN is caught. Mirror of voice_server._ice_server_config (server side).
-  test('TURN env unset → STUN-only, the exact prior behavior (no regression)', () => {
-    expect(voxiIceServers({})).toEqual([{ urls: 'stun:stun.l.google.com:19302' }])
-  })
-
-  test('partial TURN creds (URL but no user/pass) → STUN-only (never emit a credential-less TURN entry)', () => {
-    expect(voxiIceServers({ TURN_URL: 'turn:turn.example.com:3478' })).toEqual([
-      { urls: 'stun:stun.l.google.com:19302' },
-    ])
-  })
-
-  test('TURN set → STUN first, then a TURN entry with the exact urls/username/credential', () => {
-    const servers = voxiIceServers({
-      TURN_URL: 'turn:turn.example.com:3478',
-      TURN_USER: 'voxi',
-      TURN_PASS: 's3cret',
-    })
-    expect(servers).toHaveLength(2)
-    expect(servers[0]).toEqual({ urls: 'stun:stun.l.google.com:19302' })
-    expect(servers[1]).toEqual({
-      urls: 'turn:turn.example.com:3478',
-      username: 'voxi',
-      credential: 's3cret',
-    })
-  })
-
-  test('comma-separated TURN_URL → one TURN entry per URL (redundant relays), shared creds', () => {
-    const servers = voxiIceServers({
-      TURN_URL: 'turn:turn-a.example.com:3478, turn:turn-b.example.com:5349 ,', // trailing empty + whitespace
-      TURN_USER: 'voxi',
-      TURN_PASS: 's3cret',
-    })
-    const turnEntries = servers.filter((s): s is { urls: string; username: string; credential: string } => 'username' in s)
-    expect(turnEntries.map((s) => s.urls)).toEqual([
-      'turn:turn-a.example.com:3478',
-      'turn:turn-b.example.com:5349',
-    ])
-    expect(turnEntries.every((s) => s.username === 'voxi' && s.credential === 's3cret')).toBe(true)
-    // STUN stays first.
-    expect(servers[0]).toEqual({ urls: 'stun:stun.l.google.com:19302' })
   })
 })

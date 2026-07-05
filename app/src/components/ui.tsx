@@ -294,11 +294,15 @@ export function Toggle({
   value,
   onValueChange,
   label,
+  style,
 }: {
   id: string
   value: boolean
   onValueChange: (v: boolean) => void
   label: string
+  /** Merged AFTER `toggleRow` so callers can override the baked-in vertical margin when grouping toggles in a
+   *  card (e.g. the Settings "Preferences" card wants flush rows, not the standalone per-toggle gap). */
+  style?: StyleProp<ViewStyle>
 }): React.ReactElement {
   const { surface } = useTheme()
   return (
@@ -307,7 +311,7 @@ export function Toggle({
       accessibilityRole="switch"
       accessibilityState={{ checked: value }}
       onPress={() => onValueChange(!value)}
-      style={styles.toggleRow}
+      style={[styles.toggleRow, style]}
     >
       <View style={[styles.checkbox, { borderColor: surface.border, backgroundColor: value ? surface.accentSoft : 'transparent' }]}>
         {value ? <Text style={{ color: surface.onAccent }}>✓</Text> : null}

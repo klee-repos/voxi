@@ -87,14 +87,14 @@ await check('E · a fresh account sees the real collection empty state', async (
   if (!(await d.state(ids.threads.emptyState)).visible) throw new Error('threads.emptyState not visible')
 })
 
-// ── round F: settings exposes the no-face-recognition privacy guarantee (real drawer nav) ──
+// ── round F: the drawer greeting is the Settings entry point (the avatar became a "Welcome, {name}" greeting;
+//    an agent perceives the drawer, taps the greeting, and lands on Settings — the privacy row is gone, so the
+//    greeting→settings navigation is this round's ownable surface) ──
 await page.goto(`${base}/?scan=probable`)
 await signIn('swf@voxi.dev')
-await new Agent(d, makeDrawerNavPlanner(ids.nav.settingsTab, ids.settings.screen)).achieve('open settings', { maxSteps: 6, settleMs: 250 })
-await check('F · settings exposes the no-face-recognition privacy guarantee', async () => {
-  await d.waitFor(ids.settings.privacyNoFaceRecognition, { timeoutMs: 5000 })
-  const t = (await d.state(ids.settings.privacyNoFaceRecognition)).text ?? ''
-  if (!/face recognition|redact/i.test(t)) throw new Error(`privacy copy unexpected: ${t}`)
+await new Agent(d, makeDrawerNavPlanner(ids.nav.settingsTab, ids.settings.screen)).achieve('open settings via the greeting', { maxSteps: 6, settleMs: 250 })
+await check('F · tapping the drawer greeting navigates to settings (the avatar→greeting entry works)', async () => {
+  if (!(await d.state(ids.settings.screen)).visible) throw new Error('settings.screen not visible after tapping the greeting')
 })
 
 await check('no uncaught errors across the whole sweep', async () => {
@@ -104,7 +104,7 @@ await check('no uncaught errors across the whole sweep', async () => {
 await rig.stop()
 console.log(
   fails() === 0
-    ? '\nAGENTIC SWEEP GREEN — an agent walked the real app by perception across auth, both confidence bands, the empty collection, and the settings privacy guarantee'
+    ? '\nAGENTIC SWEEP GREEN — an agent walked the real app by perception across auth, both confidence bands, the empty collection, and the drawer-greeting settings entry'
     : `\nAGENTIC SWEEP FAILURES: ${fails()}`,
 )
 process.exit(fails() === 0 ? 0 : 1)

@@ -277,11 +277,10 @@ export class ApiClient {
   }
 
   // POST /v1/voice/session — mint a realtime voice session. The BFF verifies ownership, charges a voice minute
-  // (fail-closed), and returns a per-session connectUrl pointing the Pipecat SmallWebRTC client at the voice-bot's
-  // /offer. The connectUrl carries the session scope (NOT the identity); refund via refundVoiceSession if the
-  // client never reaches the media plane.
-  createVoiceSession(threadId: string): Promise<{ connectId: string; connectUrl: string; minutesCharged: number }> {
-    return this.json<{ connectId: string; connectUrl: string; minutesCharged: number }>('/v1/voice/session', {
+  // (fail-closed), and returns a LiveKit { url, token } the @livekit/react-native Room connects with (LiveKit
+  // dispatches the voice-bot into the room). Refund via refundVoiceSession if the client never reaches the media plane.
+  createVoiceSession(threadId: string): Promise<{ connectId: string; url: string; token: string; minutesCharged: number }> {
+    return this.json<{ connectId: string; url: string; token: string; minutesCharged: number }>('/v1/voice/session', {
       method: 'POST',
       body: JSON.stringify({ threadId }),
     })

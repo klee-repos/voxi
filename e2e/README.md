@@ -6,6 +6,11 @@ a deliberate **balance between deterministic and agentic** so the suite is trust
 never reach into app internals to fake a pass. Vendor calls are either **recorded/replayed** (deterministic
 runs) or **live** (cred-gated integration runs) — never stubbed to silently force green.
 
+> **The rule: Maestro first.** Any test that drives the app or asserts UI/UX behavior is authored as a Maestro
+> flow (`e2e/flows/*.yaml`, run via `bun e2e:ios`) unless Maestro genuinely cannot do it — no Mac/Xcode (→ web
+> Playwright in CI), agentic a11y-tree exploration (→ web converge), pure-logic units (→ `bun test`/`pytest`),
+> or hardware-only native flows that need a real device / Maestro Cloud. "Inconvenient" is not "impossible."
+
 ## The runnable surfaces (same scenarios, the right driver per job)
 
 The same `Scenario` (user `Steps` + `Assertions`) compiles to whichever driver fits the surface. Deterministic

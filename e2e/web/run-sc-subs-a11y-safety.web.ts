@@ -9,8 +9,9 @@
  *               (a) cap reached → the next scan surfaces the in-persona paywall (real /api/v1/threads → 402 →
  *                   paywall.limitMessage). No internal forcing — the BFF's atomic decrement is the gate.
  *               (b) refusals don't count: a safety-refused scan must NOT consume a free scan, so after it the
- *                   live entitlement count (settings.subscriptionStatus, sourced from real /api/v1/me) is
- *                   unchanged and a subsequent real scan still REVEALS (does not hit the paywall).
+ *                   live entitlement count (sourced from real /api/v1/me — Settings no longer surfaces counts;
+ *                   the plan is the static "Unlimited" label) is unchanged and a subsequent real scan still
+ *                   REVEALS (does not hit the paywall).
  *  - a11y-01  reduce-motion preference is honored: toggling settings.reduceMotion sets the document-root
  *             reduce-motion flag the orb/particle animation keys off (the iOS shell swaps particle sequences for
  *             a cross-fade and stills the orb behind this same preference). Asserted via the real, observable
@@ -83,14 +84,19 @@ async function authedPage(user: string, scan: string, route = ''): Promise<{ pag
   return { page, d }
 }
 
-/** Read the live "scans left" count straight off the real /api/v1/me-backed settings surface (UI-observable). */
-async function scansLeftFromSettings(d: PlaywrightDriver): Promise<number> {
-  await d.tap(ids.nav.settingsTab)
-  await d.waitFor(ids.settings.subscriptionStatus)
-  const text = (await d.state(ids.settings.subscriptionStatus)).text ?? ''
-  const m = /scans left:\s*(\d+)/.exec(text)
-  if (!m) throw new Error('could not read scans-left from settings: "' + text + '"')
-  return Number(m[1])
+/** Read the live "scans left" count straight off the REAL BFF metering via /api/v1/me. The Settings UI no longer
+ *  surfaces plan/counts (the plan is the static "Unlimited" label in the drawer), so the sub-01 "refusals don't
+ *  count" invariant is observed at its source — the same real metering store the old settings row rendered. */
+async function scansLeftFromApi(page: Page): Promise<number> {
+  const scan = await page.evaluate(async () => {
+    // `token` is the mock shell's post-OTP bearer (test:<user>); the BFF's testVerifier honors it.
+    const r = await fetch('/api/v1/me', { headers: { authorization: 'Bearer ' + (globalThis as { token?: string }).token } })
+    if (!r.ok) throw new Error('/api/v1/me ' + r.status)
+    const me = await r.json()
+    return me.remaining.scan
+  })
+  if (typeof scan !== 'number') throw new Error('could not read scans-left from /api/v1/me: ' + JSON.stringify(scan))
+  return scan
 }
 
 log('web E2E — subscriptions/metering + a11y + safety (real BFF + framework PlaywrightDriver):')
@@ -107,10 +113,10 @@ try {
     const { page, d } = await authedPage('subcap', 'pill', 'camera')
     await d.waitFor(ids.camera.screen)
 
-    // Baseline: the settings surface (real /api/v1/me) reports the seeded single free scan.
-    await check('sub-01: baseline — 1 free scan reported by the real /api/v1/me settings surface', async () => {
-      const left = await scansLeftFromSettings(d)
-      if (left !== 1) throw new Error('expected 1 scan at baseline, settings says ' + left)
+    // Baseline: the real /api/v1/me metering reports the seeded single free scan.
+    await check('sub-01: baseline — 1 free scan reported by the real /api/v1/me metering', async () => {
+      const left = await scansLeftFromApi(page)
+      if (left !== 1) throw new Error('expected 1 scan at baseline, /me says ' + left)
     })
 
     // Drive the refused scan through the real UI/BFF (the pill object yields a safety_refusal in the eve stream).
@@ -121,12 +127,12 @@ try {
       await d.waitFor(ids.global.safetyRefusal)
     })
 
-    // The load-bearing sub-01 invariant: the refusal did NOT consume the free scan. We assert against the REAL,
-    // observable /api/v1/me-backed count — no internals. (If the BFF charges before the refusal is known, this
-    // FAILS, and we report it honestly rather than weaken the assertion.)
+    // The load-bearing sub-01 invariant: the refusal did NOT consume the free scan. We assert against the REAL
+    // /api/v1/me metering — no internals. (If the BFF charges before the refusal is known, this FAILS, and we
+    // report it honestly rather than weaken the assertion.)
     await check('sub-01: refusals do NOT count — 1 free scan still remains after the refused scan', async () => {
-      const left = await scansLeftFromSettings(d)
-      if (left !== 1) throw new Error('refusal consumed the free scan: settings reports scans left=' + left + ' (spec: refusals do not count)')
+      const left = await scansLeftFromApi(page)
+      if (left !== 1) throw new Error('refusal consumed the free scan: /me reports scans left=' + left + ' (spec: refusals do not count)')
     })
 
     // With the (still-available, per spec) free scan, a REAL scan must reveal — not hit the paywall.

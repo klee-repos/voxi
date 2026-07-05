@@ -1,10 +1,14 @@
 # Maestro flow (iOS native, deterministic) — deepdive-01: the Deep Dive PLAYER transport on the real binary.
-# Capture (fixture shutter, EXPO_PUBLIC_TEST_MODE=1) → reveal → open the Deep Dive icon → Generate → the composing
-# hero → the dark player. Then the TRANSPORT REGRESSION: tapping Play flips the control to "Pause" and it STICKS,
-# real playback advances the elapsed clock off 0:00, and tapping Pause flips back to "Play" and STICKS — i.e. the
-# reported native bug (play didn't work / "stop just restarts play") is fixed. `playing` is user INTENT now; it is
-# no longer mirrored from TrackPlayer's async PlaybackState (that mirror was the feedback loop that fought the tap).
-# The test-BFF returns a ready episode with a real (silent) audio the native player actually loads + plays.
+# Capture (fixture shutter, EXPO_PUBLIC_TEST_MODE=1) → reveal. Since REVEAL-STREAMING F2 the Deep Dive AUTO-STARTS
+# at the first grounded fact (mode=min) — so by the time we open the player the episode is already composing/ready,
+# NOT sitting behind an idle Generate CTA. We wait for the dock icon's "ready to play" label (the auto-start done),
+# open the player → the scrubber (the ready episode), then the TRANSPORT REGRESSION: tapping Play flips the control
+# to "Pause" and it STICKS, real playback advances the elapsed clock off 0:00, and tapping Pause flips back to "Play"
+# and STICKS — i.e. the reported native bug (play didn't work / "stop just restarts play") is fixed. `playing` is user
+# INTENT now; it is no longer mirrored from TrackPlayer's async PlaybackState (that mirror was the feedback loop that
+# fought the tap). The test-BFF returns a ready episode with a real (silent) audio the native player loads + plays.
+# (The previous flow tapped a manual `podcast.generate` CTA — removed: the auto-start means the player lands on the
+#  composing/ready episode directly, so the manual CTA is no longer the path this flow exercises.)
 # Run:  bun e2e/native/test-bff.ts &   then   maestro test e2e/flows/deepdive-01.yaml
 appId: com.kvnlee.voxi
 ---
@@ -30,17 +34,16 @@ appId: com.kvnlee.voxi
     visible:
       id: "reveal.card"
     timeout: 90000
-# Open the Deep Dive player from the reveal dock.
-- tapOn:
-    id: "reveal.deepDiveIcon"
+# F2 (auto-start): the Deep Dive AUTO-STARTED at the first fact with NO Generate tap — the dock icon's accessibility
+# label reaches "ready to play" on its own. Wait for that, then open the player.
 - extendedWaitUntil:
     visible:
-      id: "podcast.generate"
-    timeout: 20000
-# Generate → (a brief composing hero, proven on the web tier C0 — too fast to catch on the deterministic BFF) →
-# the ready player.
+      text: "Deep Dive — ready to play its story"
+    timeout: 60000
+# Open the Deep Dive player from the reveal dock (now ready, not idle).
 - tapOn:
-    id: "podcast.generate"
+    id: "reveal.deepDiveIcon"
+# The ready player (the auto-started episode) — the scrubber, NOT the old idle Generate CTA.
 - extendedWaitUntil:
     visible:
       id: "podcast.scrubber"

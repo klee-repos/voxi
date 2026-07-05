@@ -155,16 +155,16 @@ const app = createApp({
 })
 
 // "Ask Voxi" realtime voice: the mountable voice sub-app re-applies the same auth + ownership ACL as the main
-// BFF (voice-routes.ts). VOICE_SERVER_BASE_URL points at the deployed voice-bot's SmallWebRTC signalling; while
-// the voice-bot is not yet deployed (F7) the route fails LOUD (503 voice_server_unconfigured) BEFORE charging a
-// voice minute (the ASK-SEC-4 ordering) — never a fake success. Mounted on /v1/voice/* exactly as the dev entry.
+// BFF (voice-routes.ts). LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET configure the LiveKit server; while
+// any is unset the route fails LOUD (503 voice_server_unconfigured) BEFORE charging a voice minute — never a fake
+// success. Mounted on /v1/voice/* exactly as the dev entry. The voice-bot is a livekit-agents Worker (the
+// pipecat SmallWebRTC transport was retired — its audio path was unsalvageable).
 const voice = createVoiceRoutes({
   verifier: clerkVerifier(verifyToken as never),
   store: durable.store,
   sessionOwner: sessionOwnerRef,
   threads: durable.threads, // durable owner backstop (the in-memory map is per-instance)
   reveals: durable.reveals, // the voice-bot fetches the grounded item context (F5) per minted session
-  voiceServerBaseUrl: process.env.VOICE_SERVER_BASE_URL ?? '',
 })
 
 // Health probe bypasses telemetry entirely (Cloud Run probes are frequent — a span per probe floods Trace).

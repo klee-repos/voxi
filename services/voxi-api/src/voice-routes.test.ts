@@ -1,7 +1,11 @@
 /**
  * In-process test for the mountable voice routes (no network). Drives the real Hono sub-app via .request().
  * Covers: auth gate (401), thread-ownership ACL (403), fail-closed voiceMin metering (402), unconfigured
- * media plane (503, loud not fake), and the happy path (a per-session connect URL + one minute charged).
+ * media plane (503, loud not fake), and the happy path (a real per-session LiveKit token + one minute charged).
+ *
+ * LiveKit edition: the happy path DECODES the minted JWT and asserts the grant binds room=threadId,
+ * identity=userId, the agent-dispatch flag, and the connectId capability in metadata — a real-token
+ * assertion, not a fabricated string. (Was: the pipecat SmallWebRTC `connectUrl`/`/offer?session=` shape.)
  */
 import { test, expect, describe, beforeEach } from 'bun:test'
 import { createVoiceRoutes } from './voice-routes'
@@ -22,7 +26,10 @@ function memReveals(seed: RevealRecord[]): RevealStore {
   }
 }
 
-function build(opts?: { base?: string; voiceMinA?: number }) {
+// Dev-parity LiveKit config (matches scripts/dev.sh); the secret is ≥32 chars as LiveKit enforces.
+const LK = { livekitUrl: 'ws://localhost:7880', livekitApiKey: 'devkey', livekitApiSecret: 'voxi-livekit-dev-secret-32chars-ok' }
+
+function build(opts?: { livekit?: boolean; voiceMinA?: number }) {
   const sessionOwner = new Map<string, string>([['thread_A', 'A'], ['thread_B', 'A']])
   const store = memoryStore({
     A: { scan: 5, podcast: 0, voiceMin: opts?.voiceMinA ?? 3 },
@@ -32,12 +39,14 @@ function build(opts?: { base?: string; voiceMinA?: number }) {
     { threadId: 'thread_A', ownerUserId: 'A', band: 'CONFIDENT', title: 'Cannondale', candidates: [], narration: 'A 2008 Cannondale.', createdAt: 1, events: [{ type: 'fact', text: 'Made in Pennsylvania.', sourceUrl: 'https://example.com/a', index: 0 } as unknown as StreamEvent] },
     { threadId: 'thread_B', ownerUserId: 'A', band: 'CONFIDENT', title: 'Trek', candidates: [], narration: 'A Trek bike.', createdAt: 1, events: [{ type: 'fact', text: 'Made in Wisconsin.', sourceUrl: 'https://example.com/b', index: 0 } as unknown as StreamEvent] },
   ])
+  // `livekit: false` omits the media-plane config → the route must fail loud (503) BEFORE charging.
+  const lk = opts?.livekit === false ? { livekitUrl: '', livekitApiKey: '', livekitApiSecret: '' } : LK
   const app = createVoiceRoutes({
     verifier: testVerifier,
     store,
     sessionOwner,
     reveals,
-    voiceServerBaseUrl: opts?.base ?? 'http://192.168.1.193:7071',
+    ...lk,
     mintConnectId: () => 'vc_fixed',
     now: () => 1000,
   })
@@ -72,7 +81,7 @@ describe('POST /v1/voice/session', () => {
     expect(res.status).toBe(403)
   })
 
-  test('happy path: charges one voice minute and returns a per-session connect URL', async () => {
+  test('happy path: charges one voice minute and returns a real per-session LiveKit token', async () => {
     const { app, store } = build()
     const res = await app.request('/v1/voice/session', {
       method: 'POST',
@@ -80,11 +89,26 @@ describe('POST /v1/voice/session', () => {
       body: JSON.stringify({ threadId: 'thread_A' }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { connectUrl: string; minutesCharged: number; connectId: string }
+    const body = (await res.json()) as { connectId: string; url: string; token: string; minutesCharged: number }
     expect(body.connectId).toBe('vc_fixed')
     expect(body.minutesCharged).toBe(1)
-    expect(body.connectUrl).toContain('/offer?session=vc_fixed')
-    expect(body.connectUrl).toContain('thread=thread_A')
+    expect(body.url).toBe(LK.livekitUrl) // the client's @livekit/react-native Room connects to this URL
+
+    // The token is a REAL LiveKit JWT (3 segments); decode its grant and prove the capability binding — a
+    // fabricated string can't satisfy this. room=threadId, identity=userId, agent-dispatch on, connectId in metadata.
+    const parts = body.token.split('.')
+    expect(parts.length).toBe(3)
+    const claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as {
+      sub: string
+      metadata: string
+      video: { room: string; roomJoin: boolean; agent: boolean }
+    }
+    expect(claims.sub).toBe('A') // identity = the verified userId
+    expect(claims.video.room).toBe('thread_A') // room = the owned threadId
+    expect(claims.video.roomJoin).toBe(true)
+    expect(claims.video.agent).toBe(true) // triggers LiveKit to dispatch the voice-bot Worker into the room
+    expect(JSON.parse(claims.metadata).connectId).toBe('vc_fixed') // the F5 capability the voice-bot reads
+
     // The voice minute was actually decremented (fail-closed metering, not fabricated).
     expect(await store.remaining('A', 'voiceMin')).toBe(2)
   })
@@ -102,7 +126,7 @@ describe('POST /v1/voice/session', () => {
   })
 
   test('503 loud (not a fake success) when the media plane is unconfigured', async () => {
-    const { app, store } = build({ base: '' })
+    const { app, store } = build({ livekit: false })
     const res = await app.request('/v1/voice/session', {
       method: 'POST',
       headers: auth('A'),
